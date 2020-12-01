@@ -51,6 +51,7 @@ executable bh-find-ip-exe
     , bytestring
     , monad-loops
     , text
+    , mtl
     , transformers
     , containers
   default-language: Haskell2010

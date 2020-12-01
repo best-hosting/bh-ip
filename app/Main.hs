@@ -12,13 +12,15 @@ import Data.Char
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import Control.Monad.Trans.RWS.CPS
 import Control.Monad.IO.Class
 import Data.IORef
 import qualified Data.Map as M
 import System.IO.Unsafe
 import System.Environment
 import Control.Monad.Trans.Cont
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad.Trans.Maybe
 import Control.Monad
 import Data.Maybe
 
@@ -82,7 +84,7 @@ t   = do
 telnetLogin :: TL.HasTelnetPtr t => t -> T.Text -> ContT () IO (t, T.Text)
 telnetLogin con ts = shiftT $ \k -> liftIO $ do
     r@TelnetRef {switchAuth = ai, telnetState = s0} <- readIORef telnetRef
-    ms' <- go s0 ai
+    ms' <- runMaybeT . runReaderT (go s0) $ ai
     case ms' of
       Just s'
         | s' == Enabled -> atomicWriteIORef telnetRef r{telnetState = s'} >> k (con, ts)
@@ -91,73 +93,80 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
   where
     -- | Return 'Nothing' if i don't understand state. And 'Just state'
     -- otherwise.
-    go :: TelnetState -> AuthInfo -> IO (Maybe TelnetState)
-    go Unauth ai = go AuthUsername ai
-    go s@AuthUsername ai@AuthInfo{userName = user}
+    go :: TelnetState -> ReaderT AuthInfo (MaybeT IO) TelnetState
+    go Unauth = go AuthUsername
+    go s@AuthUsername
         | "Username" `T.isInfixOf` ts = do
-            TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            return (Just s)
-        | "Password" `T.isInfixOf` ts = go Password ai
-        | otherwise                 = return (Just s)
-    go s@Password ai@AuthInfo{password = pw}
+            AuthInfo{userName = user} <- ask
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            return s
+        | "Password" `T.isInfixOf` ts = go Password
+        | otherwise                 = return s
+    go s@Password
         | "Password" `T.isInfixOf` ts = do
-            TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
-            return (Just s)
-        | ">" `T.isSuffixOf` ts       = go Logged ai
-        | otherwise                 = return (Just s)
-    go s@Logged ai
+            AuthInfo{password = pw} <- ask
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
+            return s
+        | ">" `T.isSuffixOf` ts       = go Logged
+        | otherwise                 = return s
+    go s@Logged
         | ">" `T.isSuffixOf` ts       = do
-            TL.telnetSend con . B8.pack $ "enable\n"
-            return (Just s)
-        | "Password" `T.isInfixOf` ts = go EnablePassword ai
-        | otherwise                 = return (Just s)
-    go s@EnablePassword AuthInfo{enablePasword = enpw}
+            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
+            return s
+        | "Password" `T.isInfixOf` ts = go EnablePassword
+        | otherwise                 = return s
+    go s@EnablePassword
         | "Password" `T.isInfixOf` ts = do
-            TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-            return (Just s)
-        | "#" `T.isSuffixOf` ts       = return (Just Enabled)
-        | otherwise                 = return (Just s)
-    go _ _ = return Nothing
+            AuthInfo{enablePasword = enpw} <- ask
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+            return s
+        | "#" `T.isSuffixOf` ts       = return Enabled
+        | otherwise                 = return s
+    go _ = fail "Unknown state"
 
 getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> ContT () IO ()
 getMacs (con, ts) = liftIO $ do
-    r0 <- readIORef telnetRef
-    r' <- if "Invalid input detected" `T.isInfixOf` ts
-            then go r0{telnetState = Exit}
-            else go r0
-    atomicWriteIORef telnetRef r'
+    r0@TelnetRef{switch = curSw, telnetState = s0, macMap = mm0} <- readIORef telnetRef
+    (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
+            then flip runStateT mm0 . flip runReaderT curSw $ go Exit
+            else flip runStateT mm0 . flip runReaderT curSw $ go s0
+    atomicWriteIORef telnetRef r0{telnetState = s', macMap = mm'}
   where
-    go :: TelnetRef -> IO TelnetRef
-    go r@TelnetRef {switch = curSw, telnetState = Enabled, macMap =  mm}
-        | "#" `T.isSuffixOf` ts =
+    go :: TelnetState -> ReaderT SwName (StateT MacMap IO) TelnetState
+    go s@Enabled
+        | "#" `T.isSuffixOf` ts = do
+            curSw <- ask
+            mm    <- get
             let isPortUndef pid ms = swName pid == curSw && isNothing ms
-            in  case (M.toList . M.filterWithKey isPortUndef $ mm) of
-                  ((pid, _) : _) -> do
-                    -- I need this, because response to previous 'show' command
-                    -- may contain both command result ("Mac Address Table") and
-                    -- cmd line prompt (with '#'). Thus, calling 'getMacs2' now
-                    -- with 'ShowMacAddressTable p' state will result in parsing
-                    -- previous port info as info for new (just selected) port
-                    -- 'p'.
-                    TL.telnetSend con . B8.pack $ "\n"
-                    return r{telnetState = ShowMacAddressTable pid}
-                  [] -> go r{telnetState = Exit}
-        | otherwise = return r
-    go r@TelnetRef {telnetState = ShowMacAddressTable pid, macMap = mm}
+            case (M.toList . M.filterWithKey isPortUndef $ mm) of
+              ((pid, _) : _) -> do
+                -- I need this, because response to previous 'show' command
+                -- may contain both command result ("Mac Address Table") and
+                -- cmd line prompt (with '#'). Thus, calling 'getMacs2' now
+                -- with 'ShowMacAddressTable p' state will result in parsing
+                -- previous port info as info for new (just selected) port
+                -- 'p'.
+                liftIO $ TL.telnetSend con . B8.pack $ "\n"
+                return (ShowMacAddressTable pid)
+              [] -> go Exit
+        | otherwise = return s
+    go s@(ShowMacAddressTable pid)
         | "Mac Address Table" `T.isInfixOf` ts = do
-            putStrLn $ "save port " ++ show pid
-            go r{telnetState = Enabled, macMap = M.insert pid (Just (parseMacs ts)) mm}
+            liftIO $ putStrLn $ "save port " ++ show pid
+            modify (M.insert pid (Just (parseMacs ts)))
+            go Enabled
         | "#" `T.isSuffixOf` ts = do
             let SwPort pn = swPort pid
-            putStrLn $ "show port " ++ show pn
-            TL.telnetSend con . B8.pack $ "show mac address-table interface FastEthernet 0/" ++ show pn ++ "\n"
-            return r
-        | otherwise = return r
-    go r@TelnetRef {telnetState = Exit}
+            liftIO $ do
+              putStrLn $ "show port " ++ show pn
+              TL.telnetSend con . B8.pack $ "show mac address-table interface FastEthernet 0/" ++ show pn ++ "\n"
+            return s
+        | otherwise = return s
+    go s@Exit
         | "#" `T.isSuffixOf` ts   = do
-            TL.telnetSend con . B8.pack $ "exit\n"
-            return r
-        | otherwise             = return r
+            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+            return s
+        | otherwise             = return s
     go _ = undefined
 
 telnetH :: Socket -> TL.EventHandler
