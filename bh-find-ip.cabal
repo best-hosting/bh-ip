@@ -54,6 +54,7 @@ executable bh-find-ip-exe
     , mtl
     , transformers
     , containers
+    , shelly
   default-language: Haskell2010
 
 test-suite bh-find-ip-test

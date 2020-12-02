@@ -23,6 +23,8 @@ import Control.Monad.State
 import Control.Monad.Trans.Maybe
 import Control.Monad
 import Data.Maybe
+import Data.Foldable
+import qualified Shelly as Sh
 
 data SwPort         = SwPort Int
   deriving (Eq, Ord, Show)
@@ -44,13 +46,39 @@ data TelnetState    = Unauth
   deriving (Eq, Show)
 
 newtype MacAddr     = MacAddr T.Text
-  deriving (Show)
-type MacMap         = M.Map PortId (Maybe [MacAddr])
+  deriving (Eq, Ord)
+
+instance Show MacAddr where
+    showsPrec d (MacAddr t) = showMac (T.unpack t)
+      where
+        showMac :: String -> ShowS
+        showMac t r = foldr (\(n, x) zs ->
+                                if n > 1 && n `mod` 2 == 1 then ':' : x : zs else x : zs)
+                            r
+                        . zip [1..12]
+                        $ t
+
+parseMacAddr :: T.Text -> Either String MacAddr
+parseMacAddr t = MacAddr <$> T.foldr go end t 1
+  where
+    go :: Char -> (Int -> Either String T.Text) -> Int -> Either String T.Text
+    go c zf n
+      | n > 12              = Left "Too many chars for mac address."
+      | isHexDigit c        = let mz = zf (n + 1) in (T.cons . toLower $ c) <$> mz
+      | c `elem` [':', '.'] = zf n
+      | otherwise           = Left "Not a mac address."
+    end :: Int -> Either String T.Text
+    end n
+      | n /= 13             = Left "Too few chars for mac address."
+      | otherwise           = Right T.empty
+
+
+type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 data TelnetRef      = TelnetRef
                         { switch :: SwName
                         , switchAuth :: AuthInfo
                         , telnetState :: TelnetState
-                        , macMap :: MacMap
+                        , macMap :: PortMacMap
                         }
   deriving (Show)
 
@@ -61,6 +89,22 @@ data AuthInfo       = AuthInfo
                         , enablePasword :: T.Text
                         }
   deriving (Show)
+
+newtype IP          = IP T.Text
+  deriving (Show)
+
+parseIp :: T.Text -> Either String IP
+parseIp t = IP <$> T.foldr go (Right T.empty) t
+  where
+    go :: Char -> Either String T.Text -> Either String T.Text
+    go c mz
+      | isDigit c   = T.cons c <$> mz
+      | c == '.'    = T.cons '.' <$> mz
+      | otherwise   = Left "Not an IP address."
+
+type MacIpMap       = M.Map MacAddr [IP]
+
+type PortMap        = M.Map PortId [(MacAddr, [IP])]
 
 telnetRef :: IORef TelnetRef
 {-# NOINLINE telnetRef #-}
@@ -132,7 +176,7 @@ getMacs (con, ts) = liftIO $ do
             else flip runStateT mm0 . flip runReaderT curSw $ go s0
     atomicWriteIORef telnetRef r0{telnetState = s', macMap = mm'}
   where
-    go :: TelnetState -> ReaderT SwName (StateT MacMap IO) TelnetState
+    go :: TelnetState -> ReaderT SwName (StateT PortMacMap IO) TelnetState
     go s@Enabled
         | "#" `T.isSuffixOf` ts = do
             curSw <- ask
@@ -153,7 +197,7 @@ getMacs (con, ts) = liftIO $ do
     go s@(ShowMacAddressTable pid)
         | "Mac Address Table" `T.isInfixOf` ts = do
             liftIO $ putStrLn $ "save port " ++ show pid
-            modify (M.insert pid (Just (parseMacs ts)))
+            modify (M.insert pid (Just (parseShowMacAddrTable ts)))
             go Enabled
         | "#" `T.isSuffixOf` ts = do
             let SwPort pn = swPort pid
@@ -168,6 +212,13 @@ getMacs (con, ts) = liftIO $ do
             return s
         | otherwise             = return s
     go _ = undefined
+    parseShowMacAddrTable :: T.Text -> [MacAddr]
+    parseShowMacAddrTable = foldr go [] . T.lines
+      where
+        go :: T.Text -> [MacAddr] -> [MacAddr]
+        go t zs = case (T.words t) of
+            (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
+            _            -> zs
 
 telnetH :: Socket -> TL.EventHandler
 telnetH _ t (TL.Received b)
@@ -188,6 +239,18 @@ telnetH _ _ (TL.Wont o)
 telnetH _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH _ _ _ = pure ()
+
+queryArp :: T.Text -> IO MacIpMap
+queryArp host   = Sh.shelly . Sh.silently $
+    Sh.runFoldLines M.empty go "ssh" [host, "/ip", "arp", "print"]
+  where
+    go :: MacIpMap -> T.Text -> MacIpMap
+    go zs t = case T.words t of
+      (_ : _ : x : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith (++)) (w, y) zs) $ do
+        ip <- parseIp x
+        ma <- parseMacAddr y
+        return (ma, [ip])
+      _                   -> zs
 
 main :: IO ()
 main    = do
@@ -212,6 +275,10 @@ main    = do
     TelnetRef {macMap = mm} <- readIORef telnetRef
     print $ "Gathered ac map:"
     print mm
+    arp1 <- queryArp "r1"
+    print arp1
+    print "Finally, ipss..."
+    print (getIPs mm arp1)
   where
     handle :: Socket -> IO ()
     handle sock = do
@@ -240,26 +307,22 @@ parseAuthInfo   = M.fromList . map go .  T.lines
                             }
                 )
 
-parseArgs :: [String] -> MacMap
+parseArgs :: [String] -> PortMacMap
 parseArgs = foldr go M.empty
   where
-    go :: String -> MacMap -> MacMap
+    go :: String -> PortMacMap -> PortMacMap
     go xs z = let (sn, '/' : sp) = span (/= '/') xs
               in  M.insert
                     (PortId {swName = SwName (T.pack sn), swPort = SwPort (read sp)})
                     Nothing
                     z
 
-parseMacs :: T.Text -> [MacAddr]
-parseMacs   = foldr go [] . T.lines
+getIPs :: PortMacMap -> MacIpMap -> [IP]
+getIPs portMac macIp = foldr go [] portMac
   where
-    go :: T.Text -> [MacAddr] -> [MacAddr]
-    go t zs = case (T.words t) of
-        (_ : ma : _)
-          | isNothing $ T.find (not . isMacChar) ma
-                        -> MacAddr ma : zs
-          | otherwise   -> zs
-        _               -> zs
-    isMacChar :: Char -> Bool
-    isMacChar x = any ($ x) [isHexDigit, (== '.')]
+    go :: Maybe [MacAddr] -> [IP] -> [IP]
+    go Nothing zs   = zs
+    go (Just ms) zs = foldr goMacs zs ms
+    goMacs :: MacAddr -> [IP] -> [IP]
+    goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
 
