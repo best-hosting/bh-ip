@@ -21,6 +21,7 @@ import Control.Monad.Trans.Cont
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
+import Control.Monad.Trans.Except
 import Control.Monad
 import Data.Maybe
 import Data.Foldable
@@ -252,16 +253,13 @@ queryArp host   = Sh.shelly . Sh.silently $
         return (ma, [ip])
       _                   -> zs
 
-main :: IO ()
-main    = do
-    authinfo <- parseAuthInfo <$> T.readFile "authinfo.txt"
-    print authinfo
-    swports <- parseArgs <$> getArgs
-    print swports
-    atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
+run :: ReaderT (M.Map SwName AuthInfo) (ExceptT String IO) PortMacMap
+run = do
+    authinfo <- ask
+    swports  <- macMap <$> liftIO (readIORef telnetRef)
     forM_ (M.keys swports) $ \(PortId {swName = sw}) ->
         case M.lookup sw authinfo of
-          Just ai@AuthInfo{hostName = h} -> do
+          Just ai@AuthInfo{hostName = h} -> liftIO $ do
             print $ "Connect to " ++ show h
             atomicModifyIORef telnetRef $ \r ->
                 ( r { switch = sw
@@ -271,14 +269,8 @@ main    = do
                 , ()
                 )
             connect h "23" (\(s, _) -> handle s)
-          Nothing -> return ()
-    TelnetRef {macMap = mm} <- readIORef telnetRef
-    print $ "Gathered ac map:"
-    print mm
-    arp1 <- queryArp "r1"
-    print arp1
-    print "Finally, ipss..."
-    print (getIPs mm arp1)
+          Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
+    macMap <$> liftIO (readIORef telnetRef)
   where
     handle :: Socket -> IO ()
     handle sock = do
@@ -293,6 +285,25 @@ main    = do
     telnetOpts  = [ TL.OptionSpec TL.optEcho True True
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
+
+
+main :: IO ()
+main    = do
+    authinfo <- parseAuthInfo <$> T.readFile "authinfo.txt"
+    print authinfo
+    swports <- parseArgs <$> getArgs
+    print swports
+    atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
+    emm <- runExceptT . flip runReaderT authinfo $ run
+    case emm of
+      Right mm -> do
+        print $ "Gathered ac map:"
+        print mm
+        arp1 <- queryArp "r1"
+        print arp1
+        print "Finally, ipss..."
+        print (getIPs mm arp1)
+      Left err -> print err
 
 parseAuthInfo :: T.Text -> M.Map SwName AuthInfo
 parseAuthInfo   = M.fromList . map go .  T.lines
