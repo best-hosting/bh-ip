@@ -1,3 +1,3 @@
-# Changelog for bh-find-ip
+# Changelog for bh-ip
 
 ## Unreleased changes
