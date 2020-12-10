@@ -95,7 +95,7 @@ data SwInfo       = SwInfo
   deriving (Show)
 
 newtype IP          = IP T.Text
-  deriving (Show)
+  deriving (Eq, Show)
 
 parseIp :: T.Text -> Either String IP
 parseIp t = IP <$> T.foldr go (Right T.empty) t
@@ -252,11 +252,13 @@ queryArp host   = Sh.shelly . Sh.silently $
   where
     go :: MacIpMap -> T.Text -> MacIpMap
     go zs t = case T.words t of
-      (_ : _ : x : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith (++)) (w, y) zs) $ do
+      (_ : _ : x : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
         ip <- parseIp x
         ma <- parseMacAddr y
         return (ma, [ip])
       _                   -> zs
+    addIp :: [IP] -> [IP] -> [IP]
+    addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
 
 run :: ReaderT (M.Map SwName SwInfo) (ExceptT String IO) PortMacMap
 run = do
