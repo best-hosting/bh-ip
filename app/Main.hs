@@ -82,15 +82,13 @@ data TelnetRef      = TelnetRef
                         }
   deriving (Show)
 
-data PortSpeed      = FastEthernet | GigabitEthernet
-  deriving (Show, Read)
 data SwInfo       = SwInfo
                         { swName   :: SwName
                         , hostName :: HostName
                         , userName :: T.Text
                         , password :: T.Text
                         , enablePasword :: T.Text
-                        , defaultPortSpeed :: PortSpeed
+                        , defaultPortSpec :: T.Text
                         }
   deriving (Show)
 
@@ -143,7 +141,7 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
     go :: TelnetState -> ReaderT SwInfo (MaybeT IO) TelnetState
     go Unauth = go AuthUsername
     go s@AuthUsername
-        | "Username" `T.isInfixOf` ts = do
+        | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts = do
             SwInfo{userName = user} <- ask
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
             return s
@@ -155,6 +153,7 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
             return s
         | ">" `T.isSuffixOf` ts       = go Logged
+        | "#" `T.isSuffixOf` ts       = return Enabled
         | otherwise                 = return s
     go s@Logged
         | ">" `T.isSuffixOf` ts       = do
@@ -198,18 +197,18 @@ getMacs (con, ts) = liftIO $ do
               [] -> go Exit
         | otherwise = return s
     go s@(ShowMacAddressTable pid)
-        | "Mac Address Table" `T.isInfixOf` ts = do
+        | "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts = do
             liftIO $ putStrLn $ "save port " ++ show pid
             modify (M.insert pid (Just (parseShowMacAddrTable ts)))
             go Enabled
         | "#" `T.isSuffixOf` ts = do
-            portSpeed <- asks defaultPortSpeed
+            portSpec <- asks defaultPortSpec
             let SwPort pn = port pid
             liftIO $ do
               putStrLn $ "show port " ++ show pn
               TL.telnetSend con . B8.pack $
                     "show mac address-table interface "
-                    ++ show portSpeed ++ " 0/" ++ show pn ++ "\n"
+                    ++ T.unpack portSpec ++ show pn ++ "\n"
             return s
         | otherwise = return s
     go s@Exit
@@ -322,7 +321,7 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             , userName = un
                             , password = pw
                             , enablePasword = enpw
-                            , defaultPortSpeed = read (T.unpack ds)
+                            , defaultPortSpec = ds
                             }
                 )
 
