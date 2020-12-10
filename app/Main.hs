@@ -32,7 +32,7 @@ data SwPort         = SwPort Int
 newtype SwName      = SwName T.Text
  deriving (Eq, Ord, Show)
 
-data PortId         = PortId {swName :: SwName, swPort :: SwPort}
+data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
 data TelnetState    = Unauth
@@ -76,18 +76,21 @@ parseMacAddr t = MacAddr <$> T.foldr go end t 1
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 data TelnetRef      = TelnetRef
-                        { switch :: SwName
-                        , switchAuth :: AuthInfo
+                        { switchInfo :: SwInfo
                         , telnetState :: TelnetState
                         , macMap :: PortMacMap
                         }
   deriving (Show)
 
-data AuthInfo       = AuthInfo
-                        { hostName :: HostName
+data PortSpeed      = FastEthernet | GigabitEthernet
+  deriving (Show, Read)
+data SwInfo       = SwInfo
+                        { swName   :: SwName
+                        , hostName :: HostName
                         , userName :: T.Text
                         , password :: T.Text
                         , enablePasword :: T.Text
+                        , defaultPortSpeed :: PortSpeed
                         }
   deriving (Show)
 
@@ -110,8 +113,7 @@ type PortMap        = M.Map PortId [(MacAddr, [IP])]
 telnetRef :: IORef TelnetRef
 {-# NOINLINE telnetRef #-}
 telnetRef   = unsafePerformIO . newIORef
-                $ TelnetRef { switch = undefined
-                            , switchAuth = undefined
+                $ TelnetRef { switchInfo = undefined
                             , telnetState = Unauth
                             , macMap = M.empty
                             }
@@ -128,8 +130,8 @@ t   = do
 
 telnetLogin :: TL.HasTelnetPtr t => t -> T.Text -> ContT () IO (t, T.Text)
 telnetLogin con ts = shiftT $ \k -> liftIO $ do
-    r@TelnetRef {switchAuth = ai, telnetState = s0} <- readIORef telnetRef
-    ms' <- runMaybeT . runReaderT (go s0) $ ai
+    r@TelnetRef {switchInfo = swInfo, telnetState = s0} <- readIORef telnetRef
+    ms' <- runMaybeT . runReaderT (go s0) $ swInfo
     case ms' of
       Just s'
         | s' == Enabled -> atomicWriteIORef telnetRef r{telnetState = s'} >> k (con, ts)
@@ -138,18 +140,18 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
   where
     -- | Return 'Nothing' if i don't understand state. And 'Just state'
     -- otherwise.
-    go :: TelnetState -> ReaderT AuthInfo (MaybeT IO) TelnetState
+    go :: TelnetState -> ReaderT SwInfo (MaybeT IO) TelnetState
     go Unauth = go AuthUsername
     go s@AuthUsername
         | "Username" `T.isInfixOf` ts = do
-            AuthInfo{userName = user} <- ask
+            SwInfo{userName = user} <- ask
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
             return s
         | "Password" `T.isInfixOf` ts = go Password
         | otherwise                 = return s
     go s@Password
         | "Password" `T.isInfixOf` ts = do
-            AuthInfo{password = pw} <- ask
+            SwInfo{password = pw} <- ask
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
             return s
         | ">" `T.isSuffixOf` ts       = go Logged
@@ -162,7 +164,7 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
         | otherwise                 = return s
     go s@EnablePassword
         | "Password" `T.isInfixOf` ts = do
-            AuthInfo{enablePasword = enpw} <- ask
+            SwInfo{enablePasword = enpw} <- ask
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
             return s
         | "#" `T.isSuffixOf` ts       = return Enabled
@@ -171,18 +173,18 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
 
 getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> ContT () IO ()
 getMacs (con, ts) = liftIO $ do
-    r0@TelnetRef{switch = curSw, telnetState = s0, macMap = mm0} <- readIORef telnetRef
+    r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef telnetRef
     (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
-            then flip runStateT mm0 . flip runReaderT curSw $ go Exit
-            else flip runStateT mm0 . flip runReaderT curSw $ go s0
+            then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
+            else flip runStateT mm0 . flip runReaderT swInfo $ go s0
     atomicWriteIORef telnetRef r0{telnetState = s', macMap = mm'}
   where
-    go :: TelnetState -> ReaderT SwName (StateT PortMacMap IO) TelnetState
+    go :: TelnetState -> ReaderT SwInfo (StateT PortMacMap IO) TelnetState
     go s@Enabled
         | "#" `T.isSuffixOf` ts = do
-            curSw <- ask
+            curSw <- asks swName
             mm    <- get
-            let isPortUndef pid ms = swName pid == curSw && isNothing ms
+            let isPortUndef pid ms = portSw pid == curSw && isNothing ms
             case (M.toList . M.filterWithKey isPortUndef $ mm) of
               ((pid, _) : _) -> do
                 -- I need this, because response to previous 'show' command
@@ -201,10 +203,13 @@ getMacs (con, ts) = liftIO $ do
             modify (M.insert pid (Just (parseShowMacAddrTable ts)))
             go Enabled
         | "#" `T.isSuffixOf` ts = do
-            let SwPort pn = swPort pid
+            portSpeed <- asks defaultPortSpeed
+            let SwPort pn = port pid
             liftIO $ do
               putStrLn $ "show port " ++ show pn
-              TL.telnetSend con . B8.pack $ "show mac address-table interface FastEthernet 0/" ++ show pn ++ "\n"
+              TL.telnetSend con . B8.pack $
+                    "show mac address-table interface "
+                    ++ show portSpeed ++ " 0/" ++ show pn ++ "\n"
             return s
         | otherwise = return s
     go s@Exit
@@ -253,17 +258,16 @@ queryArp host   = Sh.shelly . Sh.silently $
         return (ma, [ip])
       _                   -> zs
 
-run :: ReaderT (M.Map SwName AuthInfo) (ExceptT String IO) PortMacMap
+run :: ReaderT (M.Map SwName SwInfo) (ExceptT String IO) PortMacMap
 run = do
-    authinfo <- ask
-    swports  <- macMap <$> liftIO (readIORef telnetRef)
-    forM_ (M.keys swports) $ \(PortId {swName = sw}) ->
-        case M.lookup sw authinfo of
-          Just ai@AuthInfo{hostName = h} -> liftIO $ do
+    swports <- macMap <$> liftIO (readIORef telnetRef)
+    forM_ (M.keys swports) $ \(PortId {portSw = sw}) -> do
+        mSwInfo <- asks (M.lookup sw)
+        case mSwInfo of
+          Just swInfo@SwInfo{hostName = h} -> liftIO $ do
             print $ "Connect to " ++ show h
             atomicModifyIORef telnetRef $ \r ->
-                ( r { switch = sw
-                    , switchAuth = ai
+                ( r { switchInfo = swInfo
                     , telnetState = Unauth
                     }
                 , ()
@@ -289,12 +293,12 @@ run = do
 
 main :: IO ()
 main    = do
-    authinfo <- parseAuthInfo <$> T.readFile "authinfo.txt"
-    print authinfo
+    swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
+    print swInfo
     swports <- parseArgs <$> getArgs
     print swports
     atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
-    emm <- runExceptT . flip runReaderT authinfo $ run
+    emm <- runExceptT . flip runReaderT swInfo $ run
     case emm of
       Right mm -> do
         print $ "Gathered ac map:"
@@ -305,16 +309,18 @@ main    = do
         print (getIPs mm arp1)
       Left err -> print err
 
-parseAuthInfo :: T.Text -> M.Map SwName AuthInfo
-parseAuthInfo   = M.fromList . map go .  T.lines
+parseSwInfo :: T.Text -> M.Map SwName SwInfo
+parseSwInfo   = M.fromList . map go .  T.lines
   where
-    go :: T.Text -> (SwName, AuthInfo)
-    go t =  let [sn, hn, un, pw, enpw] = T.splitOn ", " t
+    go :: T.Text -> (SwName, SwInfo)
+    go t =  let [sn, hn, un, pw, enpw, ds] = T.splitOn ", " t
             in  ( SwName sn
-                , AuthInfo  { hostName = T.unpack hn
+                , SwInfo    { swName   = SwName sn
+                            , hostName = T.unpack hn
                             , userName = un
                             , password = pw
                             , enablePasword = enpw
+                            , defaultPortSpeed = read (T.unpack ds)
                             }
                 )
 
@@ -324,7 +330,7 @@ parseArgs = foldr go M.empty
     go :: String -> PortMacMap -> PortMacMap
     go xs z = let (sn, '/' : sp) = span (/= '/') xs
               in  M.insert
-                    (PortId {swName = SwName (T.pack sn), swPort = SwPort (read sp)})
+                    (PortId {portSw = SwName (T.pack sn), port = SwPort (read sp)})
                     Nothing
                     z
 
