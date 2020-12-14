@@ -318,8 +318,8 @@ main    = do
         print mm
         arp1 <- queryArp "r1"
         print arp1
-        print "Finally, ipss..."
-        print (getIPs mm arp1)
+        print "Finally, ips..."
+        mapM_ (putStrLn . show) (getIPs mm arp1)
       Left err -> print err
 
 parseSwInfo :: T.Text -> M.Map SwName SwInfo
