@@ -257,19 +257,29 @@ telnetH _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH _ _ _ = pure ()
 
-queryArp :: T.Text -> IO MacIpMap
-queryArp host   = Sh.shelly . Sh.silently $
+queryArp :: Sh.FoldCallback MacIpMap -> T.Text -> IO MacIpMap
+queryArp go host   = Sh.shelly . Sh.silently $
     Sh.runFoldLines M.empty go "ssh" [host, "/ip", "arp", "print"]
-  where
-    go :: MacIpMap -> T.Text -> MacIpMap
-    go zs t = case T.words t of
-      (_ : _ : x : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
+
+parseMikrotikArp :: MacIpMap -> T.Text -> MacIpMap
+parseMikrotikArp zs t = case T.words t of
+    (_ : _ : x : y : _) ->
+      either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
         ip <- parseIP x
         ma <- parseMacAddr y
         return (ma, [ip])
-      _                   -> zs
-    addIp :: [IP] -> [IP] -> [IP]
-    addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
+    _                   -> zs
+
+parseLinuxArp :: MacIpMap -> T.Text -> MacIpMap
+parseLinuxArp zs t = case T.words t of
+    (_ : x : _ : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
+      ip <- parseIP x
+      ma <- parseMacAddr y
+      return (ma, [ip])
+    _                   -> zs
+
+addIp :: [IP] -> [IP] -> [IP]
+addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
 
 run :: ReaderT (M.Map SwName SwInfo) (ExceptT String IO) PortMacMap
 run = do
@@ -316,7 +326,7 @@ main    = do
       Right mm -> do
         print $ "Gathered ac map:"
         print mm
-        arp1 <- queryArp "r1"
+        arp1 <- queryArp parseMikrotikArp "r1"
         print arp1
         print "Finally, ips..."
         mapM_ (putStrLn . show) (getIPs mm arp1)
