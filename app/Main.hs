@@ -82,7 +82,7 @@ data TelnetRef      = TelnetRef
                         }
   deriving (Show)
 
-data SwInfo       = SwInfo
+data SwInfo         = SwInfo
                         { swName   :: SwName
                         , hostName :: HostName
                         , userName :: T.Text
@@ -92,17 +92,29 @@ data SwInfo       = SwInfo
                         }
   deriving (Show)
 
-newtype IP          = IP T.Text
-  deriving (Eq, Show)
+newtype IP          = IP (Int, Int, Int, Int)
+  deriving (Eq)
 
-parseIp :: T.Text -> Either String IP
-parseIp t = IP <$> T.foldr go (Right T.empty) t
+instance Show IP where
+    showsPrec d ip = (showIP ip ++)
+      where
+        showIP :: IP -> String
+        showIP (IP (o1, o2, o3, o4)) =
+            show o1 ++ "." ++ show o2 ++ "." ++ show o3 ++ "." ++ show o4
+
+parseIP :: T.Text -> Either String IP
+parseIP t = do
+    os <- mapM parseOctet . T.split (== '.') $ t
+    case os of
+      [o1, o2, o3, o4]  -> Right (IP (o1, o2, o3, o4))
+      _                 -> Left "Too few or too many octets."
   where
-    go :: Char -> Either String T.Text -> Either String T.Text
-    go c mz
-      | isDigit c   = T.cons c <$> mz
-      | c == '.'    = T.cons '.' <$> mz
-      | otherwise   = Left "Not an IP address."
+    parseOctet :: T.Text -> Either String Int
+    parseOctet ds = case reads (T.unpack ds) of
+        [(d, "")]
+          | 0 <= d && d <= 255  -> Right d
+          | otherwise           -> Left $ "Incorrect IP octet '" ++ show d ++ "'"
+        []                      -> Left "Can't read IP octet."
 
 type MacIpMap       = M.Map MacAddr [IP]
 
@@ -252,7 +264,7 @@ queryArp host   = Sh.shelly . Sh.silently $
     go :: MacIpMap -> T.Text -> MacIpMap
     go zs t = case T.words t of
       (_ : _ : x : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
-        ip <- parseIp x
+        ip <- parseIP x
         ma <- parseMacAddr y
         return (ma, [ip])
       _                   -> zs
