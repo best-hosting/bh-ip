@@ -257,26 +257,83 @@ telnetH _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH _ _ _ = pure ()
 
-queryArp :: Sh.FoldCallback MacIpMap -> T.Text -> IO MacIpMap
-queryArp go host   = Sh.shelly . Sh.silently $
-    Sh.runFoldLines M.empty go "ssh" [host, "/ip", "arp", "print"]
+queryMikrotikArp :: T.Text -> IO MacIpMap
+queryMikrotikArp host   = Sh.shelly . Sh.silently $
+    Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh" [host, "/ip", "arp", "print"]
+  where
+    go :: MacIpMap -> [T.Text] -> MacIpMap
+    go zs (_ : _ : x : y : _) =
+        either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
+          ip <- parseIP x
+          ma <- parseMacAddr y
+          return (ma, [ip])
+    go zs _                   = zs
 
-parseMikrotikArp :: MacIpMap -> T.Text -> MacIpMap
+-- Use 'ip neigh'.
+queryLinuxArp :: T.Text -> IO MacIpMap
+queryLinuxArp host   = Sh.shelly . Sh.silently $
+    Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
+        [ host, "ip", "neighbour", "show"
+        , "nud", "reachable"
+        , "nud", "stale"
+        ]
+  where
+    go :: MacIpMap -> [T.Text] -> MacIpMap
+    go zs (x : _ : _ : _ : y : s : _)
+      | s == "REACHABLE" || s == "STALE" =
+        either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
+          ip <- parseIP x
+          ma <- parseMacAddr y
+          return (ma, [ip])
+      | otherwise   = zs
+    go zs _         = zs
+
+{-
+
+{-parseMikrotikArp :: [T.Text -> MacIpMap
 parseMikrotikArp zs t = case T.words t of
     (_ : _ : x : y : _) ->
       either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
         ip <- parseIP x
         ma <- parseMacAddr y
         return (ma, [ip])
-    _                   -> zs
+    _                   -> zs-}
 
-parseLinuxArp :: MacIpMap -> T.Text -> MacIpMap
+parseMikrotikArp :: T.Text -> Either String (MacAddr, [IP])
+parseMikrotikArp    = go . T.words
+  where
+    go :: [T.Text] -> Either String (MacAddr, [IP])
+    go (_ : _ : x : y : _) = do
+      ip <- parseIP x
+      ma <- parseMacAddr y
+      return (ma, [ip])
+    go _ = Left "Huy"
+
+parseLinuxArp :: T.Text -> Either String (MacAddr, [IP])
+parseLinuxArp   = go . T.words
+  where
+    go :: [T.Text] -> Either String (MacAddr, [IP])
+    go (_ : x : _ : y : _) = do
+      ip <- parseIP x
+      ma <- parseMacAddr y
+      return (ma, [ip])
+    go _ = Left "Huy"
+
+
+parseLinuxArp :: [T.Text] -> Either String (MacAddr, [IP])
+parseLinuxArp (_ : x : _ : y : _) = do
+      ip <- parseIP x
+      ma <- parseMacAddr y
+      return (ma, [ip])
+parseLinuxArp _ = Left "Huy"
+
+{-parseLinuxArp :: MacIpMap -> T.Text -> MacIpMap
 parseLinuxArp zs t = case T.words t of
     (_ : x : _ : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
       ip <- parseIP x
       ma <- parseMacAddr y
       return (ma, [ip])
-    _                   -> zs
+    _                   -> zs-}-}
 
 addIp :: [IP] -> [IP] -> [IP]
 addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
@@ -326,7 +383,7 @@ main    = do
       Right mm -> do
         print $ "Gathered ac map:"
         print mm
-        arp1 <- queryArp parseMikrotikArp "r1"
+        arp1 <- queryMikrotikArp "r1"
         print arp1
         print "Finally, ips..."
         mapM_ (putStrLn . show) (getIPs mm arp1)
