@@ -26,6 +26,7 @@ import Control.Monad
 import Data.Maybe
 import Data.Foldable
 import qualified Shelly as Sh
+import Control.Concurrent
 
 data SwPort         = SwPort Int
   deriving (Eq, Ord, Show)
@@ -271,12 +272,20 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
 
 -- Use 'ip neigh'.
 queryLinuxArp :: T.Text -> IO MacIpMap
-queryLinuxArp host   = Sh.shelly . Sh.silently $
-    Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
+queryLinuxArp host   = Sh.shelly . Sh.silently $ do
+    Sh.run_ "ssh"
+        [ host, "nping"
+        , "--quiet", "-N", "--rate=100", "-c1"
+        , "213.108.248.0/21"
+        ]
+    liftIO $ threadDelay 5000000
+    mi <- Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
         [ host, "ip", "neighbour", "show"
         , "nud", "reachable"
         , "nud", "stale"
         ]
+    Sh.run_ "ssh" [host, "ip", "neighbour", "flush", "all"]
+    return mi
   where
     go :: MacIpMap -> [T.Text] -> MacIpMap
     go zs (x : _ : _ : _ : y : s : _)
@@ -383,7 +392,8 @@ main    = do
       Right mm -> do
         print $ "Gathered ac map:"
         print mm
-        arp1 <- queryMikrotikArp "r1"
+        --arp1 <- queryMikrotikArp "r1"
+        arp1 <- queryLinuxArp "certbot"
         print arp1
         print "Finally, ips..."
         mapM_ (putStrLn . show) (getIPs mm arp1)
