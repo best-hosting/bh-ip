@@ -297,11 +297,8 @@ queryLinuxArp :: T.Text -> IO MacIpMap
 queryLinuxArp host   = do
     b <- doesFileExist macIpMapFile
     if b
-      then A.eitherDecodeFileStrict' macIpMapFile >>= either (\e -> print e >> updateArpCache) return
-      {-then do
-        x <- decodeFileEither macIpMapFile
-        case x of
-          Right mi -> return mi-}
+      --then A.eitherDecodeFileStrict' macIpMapFile >>= either (\e -> print e >> updateArpCache) return
+      then Y.decodeFileEither macIpMapFile >>= either (\e -> print e >> updateArpCache) return
       else updateArpCache
   where
     go :: MacIpMap -> [T.Text] -> MacIpMap
@@ -320,7 +317,7 @@ queryLinuxArp host   = do
         liftIO $ threadDelay 5000000
         mi <- Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
                 (host : T.words "ip neighbour show nud reachable nud stale")
-        liftIO $ A.encodeFile macIpMapFile mi
+        liftIO $ Y.encodeFile macIpMapFile mi
         Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
         return mi
 
@@ -422,7 +419,6 @@ main    = do
         print mm
         --arp1 <- queryMikrotikArp "r1"
         arp1 <- queryLinuxArp "certbot"
-        print arp1
         print "Finally, ips..."
         mapM_ (putStrLn . show) (getIPs mm arp1)
       Left err -> print err
