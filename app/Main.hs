@@ -86,7 +86,7 @@ instance A.ToJSONKey MacAddr where
 instance A.FromJSON MacAddr where
     parseJSON (A.String t) = either fail return (parseMacAddr t)
 instance A.FromJSONKey MacAddr where
-
+    fromJSONKey = A.FromJSONKeyTextParser (either fail return . parseMacAddr)
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 data TelnetRef      = TelnetRef
