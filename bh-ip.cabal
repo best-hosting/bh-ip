@@ -55,6 +55,9 @@ executable bh-ip-exe
     , transformers
     , containers
     , shelly
+    , yaml
+    , aeson
+    , directory
   default-language: Haskell2010
 
 test-suite bh-ip-test

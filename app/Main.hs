@@ -27,6 +27,10 @@ import Data.Maybe
 import Data.Foldable
 import qualified Shelly as Sh
 import Control.Concurrent
+import qualified Data.Yaml as Y
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Encoding as A
+import System.Directory
 
 data SwPort         = SwPort Int
   deriving (Eq, Ord, Show)
@@ -50,16 +54,6 @@ data TelnetState    = Unauth
 newtype MacAddr     = MacAddr T.Text
   deriving (Eq, Ord)
 
-instance Show MacAddr where
-    showsPrec d (MacAddr t) = showMac (T.unpack t)
-      where
-        showMac :: String -> ShowS
-        showMac t r = foldr (\(n, x) zs ->
-                                if n > 1 && n `mod` 2 == 1 then ':' : x : zs else x : zs)
-                            r
-                        . zip [1..12]
-                        $ t
-
 parseMacAddr :: T.Text -> Either String MacAddr
 parseMacAddr t = MacAddr <$> T.foldr go end t 1
   where
@@ -73,6 +67,25 @@ parseMacAddr t = MacAddr <$> T.foldr go end t 1
     end n
       | n /= 13             = Left "Too few chars for mac address."
       | otherwise           = Right T.empty
+
+instance Show MacAddr where
+    showsPrec d (MacAddr t) = showMac (T.unpack t)
+      where
+        showMac :: String -> ShowS
+        showMac t r = foldr (\(n, x) zs ->
+                                if n > 1 && n `mod` 2 == 1 then ':' : x : zs else x : zs)
+                            r
+                        . zip [1..12]
+                        $ t
+
+instance A.ToJSON MacAddr where
+    toJSON mac = A.toJSON (show mac)
+instance A.ToJSONKey MacAddr where
+    toJSONKey = A.ToJSONKeyText (T.pack . show) (A.string . show)
+
+instance A.FromJSON MacAddr where
+    parseJSON (A.String t) = either fail return (parseMacAddr t)
+instance A.FromJSONKey MacAddr where
 
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
@@ -102,6 +115,12 @@ instance Show IP where
         showIP :: IP -> String
         showIP (IP (o1, o2, o3, o4)) =
             show o1 ++ "." ++ show o2 ++ "." ++ show o3 ++ "." ++ show o4
+
+instance A.ToJSON IP where
+    toJSON ip   = A.toJSON (show ip)
+
+instance A.FromJSON IP where
+    parseJSON (A.String t) = either fail return (parseIP t)
 
 parseIP :: T.Text -> Either String IP
 parseIP t = do
@@ -270,22 +289,20 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
           return (ma, [ip])
     go zs _                   = zs
 
+macIpMapFile :: FilePath
+macIpMapFile    = "mac-ip-cache.txt"
+
 -- Use 'ip neigh'.
 queryLinuxArp :: T.Text -> IO MacIpMap
-queryLinuxArp host   = Sh.shelly . Sh.silently $ do
-    Sh.run_ "ssh"
-        [ host, "nping"
-        , "--quiet", "-N", "--rate=100", "-c1"
-        , "213.108.248.0/21"
-        ]
-    liftIO $ threadDelay 5000000
-    mi <- Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
-        [ host, "ip", "neighbour", "show"
-        , "nud", "reachable"
-        , "nud", "stale"
-        ]
-    Sh.run_ "ssh" [host, "ip", "neighbour", "flush", "all"]
-    return mi
+queryLinuxArp host   = do
+    b <- doesFileExist macIpMapFile
+    if b
+      then A.eitherDecodeFileStrict' macIpMapFile >>= either (\e -> print e >> updateArpCache) return
+      {-then do
+        x <- decodeFileEither macIpMapFile
+        case x of
+          Right mi -> return mi-}
+      else updateArpCache
   where
     go :: MacIpMap -> [T.Text] -> MacIpMap
     go zs (x : _ : _ : _ : y : s : _)
@@ -296,6 +313,17 @@ queryLinuxArp host   = Sh.shelly . Sh.silently $ do
           return (ma, [ip])
       | otherwise   = zs
     go zs _         = zs
+    updateArpCache :: IO MacIpMap
+    updateArpCache = Sh.shelly . Sh.silently $ do
+        Sh.run_ "ssh"
+                (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
+        liftIO $ threadDelay 5000000
+        mi <- Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
+                (host : T.words "ip neighbour show nud reachable nud stale")
+        liftIO $ A.encodeFile macIpMapFile mi
+        Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
+        return mi
+
 
 {-
 
