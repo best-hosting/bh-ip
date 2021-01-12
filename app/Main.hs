@@ -305,8 +305,8 @@ queryLinuxArp host   = do
   where
     updateArpCache :: ExceptT String IO MacIpMap
     updateArpCache  = do
-        mi <- nmapCache
-        --mi <- ipNeighCache
+        --mi <- nmapCache
+        mi <- ipNeighCache
         liftIO $ Y.encodeFile macIpMapFile mi
         return mi
     ipNeighCache :: ExceptT String IO MacIpMap
@@ -315,39 +315,41 @@ queryLinuxArp host   = do
         Sh.run_ "ssh"
                 (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
         liftIO $ threadDelay 5000000
-        mi <- Sh.runFoldLines (return M.empty) (\zs -> ipNeighGo zs . T.words) "ssh"
+        mi <- Sh.runFoldLines (return M.empty) (\zs -> go zs . T.words) "ssh"
                 (host : T.words "ip neighbour show nud reachable nud stale")
         Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
         return mi
-    ipNeighGo :: Either String MacIpMap -> [T.Text] -> Either String MacIpMap
-    ipNeighGo mzs (x : _ : _ : _ : y : s : _)
-      | s == "REACHABLE" || s == "STALE" = do
-        zs <- mzs
-        ip <- parseIP x
-        ma <- parseMacAddr y
-        return (M.insertWith addIp ma [ip] zs)
-      | otherwise   = mzs
-    ipNeighGo mzs _        = mzs
+      where
+        go :: Either String MacIpMap -> [T.Text] -> Either String MacIpMap
+        go mzs (x : _ : _ : _ : y : s : _)
+          | s == "REACHABLE" || s == "STALE" = do
+            zs <- mzs
+            ip <- parseIP x
+            ma <- parseMacAddr y
+            return (M.insertWith addIp ma [ip] zs)
+          | otherwise   = mzs
+        go mzs _        = Left "Unrecognized `ip neigh` output line."
     nmapCache :: ExceptT String IO MacIpMap
     nmapCache = do
         liftIO $ print "Updating arp cache using `nmap`..."
         nxml <- liftIO . Sh.shelly . Sh.silently $ do
           Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
           Sh.run  "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
-        let emi = mapM nmapGo
+        let emi = mapM go
                     . sections (~== ("<status state=\"up\" reason=\"arp-response\">" :: String))
                     . parseTags
                     $ nxml
         M.fromListWith addIp <$> ExceptT (return emi)
-    nmapGo :: [Tag T.Text] -> Either String (MacAddr, [IP])
-    nmapGo xs =
-        let oneHost = filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String))
-        in  case oneHost xs of
-              [x, y]  -> do
-                          ip  <- parseIP (fromAttrib "addr" x)
-                          mac <- parseMacAddr (fromAttrib "addr" y)
-                          return (mac, [ip])
-              _       -> Left "Incorrect ip, mac pair from nmap."
+      where
+        go :: [Tag T.Text] -> Either String (MacAddr, [IP])
+        go xs =
+            let oneHost = filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String))
+            in  case oneHost xs of
+                  [x, y]  -> do
+                              ip  <- parseIP (fromAttrib "addr" x)
+                              mac <- parseMacAddr (fromAttrib "addr" y)
+                              return (mac, [ip])
+                  _       -> Left "Unrecognized ip, mac pair in nmap output."
 
 
 
