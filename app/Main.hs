@@ -31,6 +31,7 @@ import qualified Data.Yaml as Y
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Encoding as A
 import System.Directory
+import Text.HTML.TagSoup
 
 data SwPort         = SwPort Int
   deriving (Eq, Ord, Show)
@@ -290,7 +291,7 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
     go zs _                   = zs
 
 macIpMapFile :: FilePath
-macIpMapFile    = "mac-ip-cache.txt"
+macIpMapFile    = "mac-ip-cache.yml"
 
 -- Use 'ip neigh'.
 queryLinuxArp :: T.Text -> IO MacIpMap
@@ -298,18 +299,9 @@ queryLinuxArp host   = do
     b <- doesFileExist macIpMapFile
     if b
       --then A.eitherDecodeFileStrict' macIpMapFile >>= either (\e -> print e >> updateArpCache) return
-      then Y.decodeFileEither macIpMapFile >>= either (\e -> print e >> updateArpCache) return
-      else updateArpCache
+      then Y.decodeFileEither macIpMapFile >>= either (\e -> print e >> updateArpCache2) return
+      else updateArpCache2
   where
-    go :: MacIpMap -> [T.Text] -> MacIpMap
-    go zs (x : _ : _ : _ : y : s : _)
-      | s == "REACHABLE" || s == "STALE" =
-        either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
-          ip <- parseIP x
-          ma <- parseMacAddr y
-          return (ma, [ip])
-      | otherwise   = zs
-    go zs _         = zs
     updateArpCache :: IO MacIpMap
     updateArpCache = Sh.shelly . Sh.silently $ do
         Sh.run_ "ssh"
@@ -320,6 +312,36 @@ queryLinuxArp host   = do
         liftIO $ Y.encodeFile macIpMapFile mi
         Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
         return mi
+    go :: MacIpMap -> [T.Text] -> MacIpMap
+    go zs (x : _ : _ : _ : y : s : _)
+      | s == "REACHABLE" || s == "STALE" =
+        either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
+          ip <- parseIP x
+          ma <- parseMacAddr y
+          return (ma, [ip])
+      | otherwise   = zs
+    go zs _         = zs
+    updateArpCache2 :: IO MacIpMap
+    updateArpCache2 = Sh.shelly . Sh.silently $ do
+        Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
+        nxml <- Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
+        let emi = mapM go2
+                    . sections (~== ("<status state=\"up\" reason=\"arp-response\">" :: String))
+                    . parseTags
+                    $ nxml
+        mi <- case emi of
+          Right xs -> return (M.fromListWith addIp xs)
+          Left _ -> undefined
+        liftIO $ Y.encodeFile macIpMapFile mi
+        return mi
+    go2 :: [Tag T.Text] -> Either String (MacAddr, [IP])
+    go2 xs = case filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String)) $ xs of
+        [x, y]  -> do
+                    ip  <- parseIP (fromAttrib "addr" x)
+                    mac <- parseMacAddr (fromAttrib "addr" y)
+                    return (mac, [ip])
+        _       -> Left "Incorrect ip, mac pair from nmap."
+
 
 
 {-
