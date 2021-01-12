@@ -294,22 +294,28 @@ macIpMapFile :: FilePath
 macIpMapFile    = "mac-ip-cache.yml"
 
 -- Use 'ip neigh'.
-queryLinuxArp :: T.Text -> IO MacIpMap
+queryLinuxArp :: T.Text -> ExceptT String IO MacIpMap
 queryLinuxArp host   = do
-    b <- doesFileExist macIpMapFile
+    b <- liftIO $ doesFileExist macIpMapFile
     if b
-      --then A.eitherDecodeFileStrict' macIpMapFile >>= either (\e -> print e >> updateArpCache) return
-      then Y.decodeFileEither macIpMapFile >>= either (\e -> print e >> updateArpCache2) return
-      else updateArpCache2
+      then catchE (ExceptT $ Y.decodeFileEither macIpMapFile) $ \e -> do
+        liftIO (print e)
+        updateArpCache
+      else updateArpCache
   where
-    updateArpCache :: IO MacIpMap
-    updateArpCache = Sh.shelly . Sh.silently $ do
+    updateArpCache :: ExceptT String IO MacIpMap
+    updateArpCache  = do
+        mi <- nmapCache
+        --mi <- ipNeighCache
+        liftIO $ Y.encodeFile macIpMapFile mi
+        return mi
+    ipNeighCache :: IO MacIpMap
+    ipNeighCache = Sh.shelly . Sh.silently $ do
         Sh.run_ "ssh"
                 (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
         liftIO $ threadDelay 5000000
         mi <- Sh.runFoldLines M.empty (\zs -> go zs . T.words) "ssh"
                 (host : T.words "ip neighbour show nud reachable nud stale")
-        liftIO $ Y.encodeFile macIpMapFile mi
         Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
         return mi
     go :: MacIpMap -> [T.Text] -> MacIpMap
@@ -321,26 +327,25 @@ queryLinuxArp host   = do
           return (ma, [ip])
       | otherwise   = zs
     go zs _         = zs
-    updateArpCache2 :: IO MacIpMap
-    updateArpCache2 = Sh.shelly . Sh.silently $ do
-        Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
-        nxml <- Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
-        let emi = mapM go2
+    nmapCache :: ExceptT String IO MacIpMap
+    nmapCache = do
+        nxml <- liftIO . Sh.shelly . Sh.silently $ do
+          Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
+          Sh.run  "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
+        let emi = mapM nmapGo
                     . sections (~== ("<status state=\"up\" reason=\"arp-response\">" :: String))
                     . parseTags
                     $ nxml
-        mi <- case emi of
-          Right xs -> return (M.fromListWith addIp xs)
-          Left _ -> undefined
-        liftIO $ Y.encodeFile macIpMapFile mi
-        return mi
-    go2 :: [Tag T.Text] -> Either String (MacAddr, [IP])
-    go2 xs = case filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String)) $ xs of
-        [x, y]  -> do
-                    ip  <- parseIP (fromAttrib "addr" x)
-                    mac <- parseMacAddr (fromAttrib "addr" y)
-                    return (mac, [ip])
-        _       -> Left "Incorrect ip, mac pair from nmap."
+        M.fromListWith addIp <$> ExceptT (return emi)
+    nmapGo :: [Tag T.Text] -> Either String (MacAddr, [IP])
+    nmapGo xs =
+        let oneHost = filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String))
+        in  case oneHost xs of
+              [x, y]  -> do
+                          ip  <- parseIP (fromAttrib "addr" x)
+                          mac <- parseMacAddr (fromAttrib "addr" y)
+                          return (mac, [ip])
+              _       -> Left "Incorrect ip, mac pair from nmap."
 
 
 
@@ -434,15 +439,15 @@ main    = do
     swports <- parseArgs <$> getArgs
     print swports
     atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
-    emm <- runExceptT . flip runReaderT swInfo $ run
-    case emm of
-      Right mm -> do
-        print $ "Gathered ac map:"
-        print mm
-        --arp1 <- queryMikrotikArp "r1"
-        arp1 <- queryLinuxArp "certbot"
-        print "Finally, ips..."
-        mapM_ (putStrLn . show) (getIPs mm arp1)
+    res <- runExceptT $ do
+      mm <-  flip runReaderT swInfo $ run
+      liftIO $ print $ "Gathered ac map:"
+      liftIO $ print mm
+      arp1 <- queryLinuxArp "certbot"
+      liftIO $ print "Finally, ips..."
+      liftIO $ mapM_ (putStrLn . show) (getIPs mm arp1)
+    case res of
+      Right () -> return ()
       Left err -> print err
 
 parseSwInfo :: T.Text -> M.Map SwName SwInfo
