@@ -315,19 +315,19 @@ queryLinuxArp host   = do
         Sh.run_ "ssh"
                 (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
         liftIO $ threadDelay 5000000
-        mi <- Sh.runFoldLines (return M.empty) (\zs -> go zs . T.words) "ssh"
+        mi <- Sh.runFoldLines (return M.empty) (\zs -> ipNeighGo zs . T.words) "ssh"
                 (host : T.words "ip neighbour show nud reachable nud stale")
         Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
         return mi
-    go :: Either String MacIpMap -> [T.Text] -> Either String MacIpMap
-    go mzs (x : _ : _ : _ : y : s : _)
+    ipNeighGo :: Either String MacIpMap -> [T.Text] -> Either String MacIpMap
+    ipNeighGo mzs (x : _ : _ : _ : y : s : _)
       | s == "REACHABLE" || s == "STALE" = do
         zs <- mzs
         ip <- parseIP x
         ma <- parseMacAddr y
         return (M.insertWith addIp ma [ip] zs)
       | otherwise   = mzs
-    go mzs _        = mzs
+    ipNeighGo mzs _        = mzs
     nmapCache :: ExceptT String IO MacIpMap
     nmapCache = do
         liftIO $ print "Updating arp cache using `nmap`..."
