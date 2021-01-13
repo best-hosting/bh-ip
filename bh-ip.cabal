@@ -70,6 +70,7 @@ executable t
       base >=4.7 && <5
     , tagsoup
     , HTTP
+    , contravariant
   default-language: Haskell2010
 
 test-suite bh-ip-test
