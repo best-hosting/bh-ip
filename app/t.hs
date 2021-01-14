@@ -1,3 +1,10 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 module Main where
 
 import Data.Char
@@ -6,6 +13,9 @@ import Text.HTML.TagSoup
 import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible
 import Data.Void
+import Control.Monad.Reader
+import System.IO
+import Data.Time.Clock
 
 openURL :: String -> IO String
 openURL x = getResponseBody =<< simpleHTTP (getRequest x)
@@ -34,8 +44,8 @@ parseHost xs = case filter (~== "<address>") . takeWhile (~/= "</host>") $ xs of
     [x, y]  -> Host {ip = fromAttrib "addr" x, mac = fromAttrib "addr" y}
     _       -> undefined
 
-main :: IO ()
-main = haskellLastModifiedDateTime
+{-main :: IO ()
+main = haskellLastModifiedDateTime-}
 
 
 newtype Printer a   = Printer {runPrinter :: a -> String}
@@ -108,3 +118,121 @@ carPrint = carToTuple >$<
             >*< enginePrint
             )
 
+newtype LogAction m msg = LogAction
+    { unLogAction :: msg -> m ()
+    }
+
+instance Applicative m => Semigroup (LogAction m a) where
+    LogAction action1 <> LogAction action2 =
+        LogAction $ \a -> action1 a *> action2 a
+
+instance Applicative m => Monoid (LogAction m a) where
+    mempty = LogAction $ \_ -> pure ()
+
+logStringStdout :: LogAction IO String
+logStringStdout = LogAction putStrLn
+
+instance Contravariant (LogAction m) where
+    contramap f (LogAction action) = LogAction (action . f)
+
+cfilter :: Applicative m => (msg -> Bool) -> LogAction m msg -> LogAction m msg
+cfilter p (LogAction action) = LogAction $ \a -> when (p a) (action a)
+
+cmapM :: Monad m => (a -> m b) -> LogAction m b -> LogAction m a
+cmapM f (LogAction action) = LogAction (action <=< f)
+
+infix 5 <&
+(<&) :: LogAction m msg -> msg -> m ()
+(<&) = unLogAction
+
+newtype LoggerT msg m a = LoggerT
+    { runLoggerT :: ReaderT (LogAction (LoggerT msg m) msg) m a
+    } deriving ( Functor, Applicative, Monad, MonadIO
+               , MonadReader (LogAction (LoggerT msg m) msg)
+               )
+
+class HasLog env msg m where
+    getLogAction :: env -> LogAction m msg
+    setLogAction :: LogAction m msg -> env -> env
+
+instance HasLog (LogAction m msg) msg m where
+    getLogAction = id
+    setLogAction = const
+
+type WithLog env msg m = (MonadReader env m, HasLog env msg m)
+
+liftLA :: Monad m => LogAction m msg -> LogAction (LoggerT msg m) msg
+liftLA la = LogAction $ \msg -> LoggerT (lift (unLogAction la msg))
+
+usingLoggerT :: Monad m => LogAction m msg -> LoggerT msg m a -> m a
+usingLoggerT la lt = runReaderT (runLoggerT lt) (liftLA la)
+
+logMsg :: forall msg env m . WithLog env msg m => msg -> m ()
+logMsg msg = do
+    LogAction log <- asks getLogAction
+    log msg
+
+example :: WithLog env String m => m ()
+example = do
+    logMsg "Starting application..."
+    logMsg "Finishing application..."
+
+{-main :: IO ()
+main = usingLoggerT logStringStdout example-}
+
+logStringStderr :: LogAction IO String
+logStringStderr = LogAction $ hPutStrLn stderr
+
+logStringBoth :: LogAction IO String
+logStringBoth = logStringStdout <> logStringStderr
+
+data Severity = Debug | Info | Warning | Error
+    deriving (Eq, Ord, Show)
+
+data Message = Message
+    { messageSeverity :: Severity
+    , messageText     :: String
+    }
+  deriving (Show)
+
+fmtMessage :: Message -> String
+fmtMessage (Message sev txt) = "[" ++ show sev ++ "] " ++ txt
+
+logM :: WithLog env Message m => Severity -> String -> m ()
+logM sev txt = logMsg (Message sev txt)
+
+exampleM :: WithLog env Message m => m ()
+exampleM = do
+    logM Debug "Starting application..."
+    logM Info  "Finishing application..."
+
+{-main :: IO ()
+main = usingLoggerT (contramap fmtMessage logStringStdout) exampleM-}
+
+{-main :: IO ()
+main = usingLoggerT
+    ( cfilter (\(Message sev _) -> sev > Debug)
+    $ contramap fmtMessage logStringStdout
+    )
+    exampleM-}
+
+data RichMessage = RichMessage
+    { richMessageMsg  :: Message
+    , richMessageTime :: UTCTime
+    }
+
+fmtRichMessage :: RichMessage -> String
+fmtRichMessage (RichMessage msg t) = "[" ++ show t ++ "] " ++ fmtMessage msg
+
+makeRich :: LogAction IO RichMessage -> LogAction IO Message
+makeRich = cmapM toRichMessage
+  where
+    toRichMessage :: Message -> IO RichMessage
+    toRichMessage msg = do
+        time <- getCurrentTime
+        pure $ RichMessage msg time
+
+main :: IO ()
+main = usingLoggerT
+    (makeRich $ contramap fmtRichMessage logStringStdout)
+    exampleM

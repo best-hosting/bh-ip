@@ -71,6 +71,7 @@ executable t
     , tagsoup
     , HTTP
     , contravariant
+    , time
   default-language: Haskell2010
 
 test-suite bh-ip-test
