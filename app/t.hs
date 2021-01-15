@@ -74,7 +74,7 @@ instance Divisible Printer where
 
 instance Decidable Printer where
     choose f (Printer py) (Printer pz) = Printer $ \x -> either py pz (f x)
-    lose f  = Printer $ \x -> absurd (f x)
+    lose f = Printer $ \x -> absurd (f x)
 
 infixr 4 >*<
 (>*<) :: Divisible f => f a -> f b -> f (a, b)
@@ -98,8 +98,8 @@ data Car = Car {make :: String, model :: String, engine :: Engine}
 data Engine = Pistons Int | Rocket
   deriving (Show)
 
-car :: Car
-car = Car "Toyota" "Corolla" (Pistons 4)
+toyota :: Car
+toyota = Car "Toyota" "Corolla" (Pistons 4)
 
 engineToEither :: Engine -> Either Int ()
 engineToEither (Pistons n)  = Left n
@@ -135,6 +135,16 @@ logStringStdout = LogAction putStrLn
 instance Contravariant (LogAction m) where
     contramap f (LogAction action) = LogAction (action . f)
 
+instance (Applicative m) => Divisible (LogAction m) where
+    conquer = mempty
+    divide f (LogAction actionB) (LogAction actionC) =
+        LogAction $ \x -> let (b, c) = f x in actionB b *> actionC c
+
+instance (Applicative m) => Decidable (LogAction m) where
+    lose f = LogAction (absurd . f)
+    choose f (LogAction actionB) (LogAction actionC) =
+        LogAction (either actionB actionC . f)
+
 cfilter :: Applicative m => (msg -> Bool) -> LogAction m msg -> LogAction m msg
 cfilter p (LogAction action) = LogAction $ \a -> when (p a) (action a)
 
@@ -144,6 +154,21 @@ cmapM f (LogAction action) = LogAction (action <=< f)
 infix 5 <&
 (<&) :: LogAction m msg -> msg -> m ()
 (<&) = unLogAction
+
+stringL :: LogAction IO String
+stringL = logStringStdout
+
+-- Combinator that allows to log any showable value
+showL :: Show a => LogAction IO a
+showL   = show >$< stringL
+
+-- Returns a log action that logs a given string ignoring its input.
+constL :: String -> LogAction IO a
+--constL s = const s >$< stringL
+constL s = s >$ stringL
+
+intL :: LogAction IO Int
+intL    = showL
 
 newtype LoggerT msg m a = LoggerT
     { runLoggerT :: ReaderT (LogAction (LoggerT msg m) msg) m a
@@ -232,7 +257,18 @@ makeRich = cmapM toRichMessage
         time <- getCurrentTime
         pure $ RichMessage msg time
 
-main :: IO ()
+{-main :: IO ()
 main = usingLoggerT
     (makeRich $ contramap fmtRichMessage logStringStdout)
-    exampleM
+    exampleM-}
+
+carL :: LogAction IO Car
+carL = carToTuple >$<
+        (   (constL "Logging make.." *< stringL >* constL "Finished logging make..")
+        >*< (constL "Logging model.." *< stringL >* constL "Finished logging model..")
+        >*< (constL "Logging pistons.." *< (engineToEither >$< (intL >|< constL "Rocket")) >* constL "Finished logging pistons..")
+        )
+
+main :: IO ()
+main = usingLoggerT carL (logMsg toyota)
+
