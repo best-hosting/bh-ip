@@ -4,6 +4,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module Main where
 
@@ -16,6 +18,7 @@ import Data.Void
 import Control.Monad.Reader
 import System.IO
 import Data.Time.Clock
+import Data.List
 
 openURL :: String -> IO String
 openURL x = getResponseBody =<< simpleHTTP (getRequest x)
@@ -272,3 +275,84 @@ carL = carToTuple >$<
 main :: IO ()
 main = usingLoggerT carL (logMsg toyota)
 
+data U a    = U [a] a [a]
+  deriving (Show, Eq, Ord)
+
+instance Functor U where
+    fmap f (U ls x rs)  = U (map f ls) (f x) (map f rs)
+
+class Functor f => Comonad f where
+    (=>>)    :: f a -> (f a -> b) -> f b
+    coreturn :: f a -> a
+    cojoin   :: f a -> f (f a)
+    x =>> f = fmap f (cojoin x)
+
+right :: U a -> U a
+right (U ls x (r:rs)) = U (x:ls) r rs
+
+left :: U a -> U a
+left mx@(U [] x _)  = mx
+left mx@(U _ x [])  = mx
+left    (U (l:ls) x rs) = U ls l (x:rs)
+
+instance Comonad U where
+{-    cojoin mx@(U ls x rs)  = U (map up ls) mx (map up rs)
+      where up x = U [] x []-}
+    cojoin mx = U (tail $ iterate left mx) mx (tail $ iterate right mx)
+    coreturn (U ls x rs) = x
+
+t :: U Int
+t = U [-1, -2] 0 [1, 2]
+
+rule :: U Bool -> Bool
+rule (U (a:_) b (c:_)) = not (a && b && not c || (a==b))
+
+shift :: Int -> U a -> U a
+shift i u = (iterate (if i<0 then left else right) u) !! abs i
+
+toList :: Int -> Int -> U a -> [a]
+toList i j u = take (j-i) $ half $ shift i u
+
+half :: U a -> [a]
+half (U _ b c) = [b] ++ c
+
+test = let u = U (repeat False) True (repeat False)
+      in putStr $
+         unlines $
+         take 20 $
+         map (map (\x -> if x then '#' else ' ') . toList (-20) 20) $
+         iterate (=>> rule) u
+
+{-data Stream a = Cons a (Stream a)
+  deriving (Show)
+
+headS :: Stream a -> a
+headS (Cons x _ ) = x
+
+tailS :: Stream a -> Stream a
+tailS (Cons _ xs) = xs
+
+tailsS :: Stream a -> Stream (Stream a)
+tailsS xs = Cons xs (tailsS (tailS xs))
+
+tS :: Stream Int
+tS  = Cons 1 (Cons 2 (Cons 3 undefined))-}
+
+data Stream a = a :> Stream a
+  deriving (Functor, Foldable)
+
+fromList :: [a] -> Stream a
+fromList xs = go (cycle xs)
+  where
+    go (a:rest) = a :> go rest
+
+countStream :: Stream Int
+countStream = fromList [0..]
+
+ix :: Int -> Stream a -> a
+ix n _ | n < 0 = error "whoops"
+ix 0 (a :> _) = a
+ix n (_ :> rest) = ix (n - 1) rest
+
+dropS :: Int -> Stream a -> Stream a
+dropS = undefined
