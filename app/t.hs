@@ -19,6 +19,8 @@ import Control.Monad.Reader
 import System.IO
 import Data.Time.Clock
 import Data.List
+import Data.Foldable
+import qualified Data.Map as M
 
 openURL :: String -> IO String
 openURL x = getResponseBody =<< simpleHTTP (getRequest x)
@@ -275,54 +277,6 @@ carL = carToTuple >$<
 main :: IO ()
 main = usingLoggerT carL (logMsg toyota)
 
-data U a    = U [a] a [a]
-  deriving (Show, Eq, Ord)
-
-instance Functor U where
-    fmap f (U ls x rs)  = U (map f ls) (f x) (map f rs)
-
-class Functor f => Comonad f where
-    (=>>)    :: f a -> (f a -> b) -> f b
-    coreturn :: f a -> a
-    cojoin   :: f a -> f (f a)
-    x =>> f = fmap f (cojoin x)
-
-right :: U a -> U a
-right (U ls x (r:rs)) = U (x:ls) r rs
-
-left :: U a -> U a
-left mx@(U [] x _)  = mx
-left mx@(U _ x [])  = mx
-left    (U (l:ls) x rs) = U ls l (x:rs)
-
-instance Comonad U where
-{-    cojoin mx@(U ls x rs)  = U (map up ls) mx (map up rs)
-      where up x = U [] x []-}
-    cojoin mx = U (tail $ iterate left mx) mx (tail $ iterate right mx)
-    coreturn (U ls x rs) = x
-
-t :: U Int
-t = U [-1, -2] 0 [1, 2]
-
-rule :: U Bool -> Bool
-rule (U (a:_) b (c:_)) = not (a && b && not c || (a==b))
-
-shift :: Int -> U a -> U a
-shift i u = (iterate (if i<0 then left else right) u) !! abs i
-
-toList :: Int -> Int -> U a -> [a]
-toList i j u = take (j-i) $ half $ shift i u
-
-half :: U a -> [a]
-half (U _ b c) = [b] ++ c
-
-test = let u = U (repeat False) True (repeat False)
-      in putStr $
-         unlines $
-         take 20 $
-         map (map (\x -> if x then '#' else ' ') . toList (-20) 20) $
-         iterate (=>> rule) u
-
 {-data Stream a = Cons a (Stream a)
   deriving (Show)
 
@@ -339,20 +293,103 @@ tS :: Stream Int
 tS  = Cons 1 (Cons 2 (Cons 3 undefined))-}
 
 data Stream a = a :> Stream a
-  deriving (Functor, Foldable)
+  deriving (Functor, Foldable, Show)
 
 fromList :: [a] -> Stream a
 fromList xs = go (cycle xs)
   where
     go (a:rest) = a :> go rest
 
+class Functor w => Comonad w where
+    extract :: w a -> a
+    duplicate :: w a -> w (w a)
+    extend :: (w a -> b) -> w a -> w b
+
+instance Comonad Stream where
+    extract (a :> _) = a
+    duplicate w@(a :> rs) = w :> duplicate rs
+    --extend f = fmap f . duplicate
+    extend f w@(a :> rs) = f w :> extend f rs
+
+infixl 4 =>>
+(=>>) :: Comonad w => w a -> (w a -> b) -> w b
+wx =>> f = extend f wx
+
 countStream :: Stream Int
 countStream = fromList [0..]
+
+evens :: Stream Int
+evens = fromList [0, 2..]
 
 ix :: Int -> Stream a -> a
 ix n _ | n < 0 = error "whoops"
 ix 0 (a :> _) = a
 ix n (_ :> rest) = ix (n - 1) rest
+--ix n = extract . dropS n
 
 dropS :: Int -> Stream a -> Stream a
-dropS = undefined
+dropS n = ix n . duplicate
+
+takeS :: Int -> Stream a -> [a]
+takeS n = take n . toList
+
+rollingAvg :: Int -> Stream Int -> Stream Double
+rollingAvg  = extend . windowedAvg
+{-rollingAvg wn = extend go
+  where
+    go :: Stream Int -> Double
+    go = (/ fromIntegral wn) . fromIntegral . sum . takeS wn-}
+
+windowedAvg :: Int -> Stream Int -> Double
+windowedAvg windowSize = avg . takeS windowSize
+  where
+    avg :: [Int] -> Double
+    avg xs = fromIntegral (sum xs) / fromIntegral (length xs)
+
+data Store s a = Store (s -> a) s
+  deriving (Functor)
+
+instance Comonad (Store s) where
+    extract (Store f s0) = f s0
+    duplicate (Store f s0) = 
+
+inventory :: M.Map Int String
+inventory = M.fromList  [ (0, "Fidget spinners")
+                        , (1, "Books")
+                        , (2, "Guitars")
+                        , (3, "Laptops")
+                        ]
+
+warehouse :: Store Int (Maybe String)
+warehouse = Store (\shelf -> M.lookup shelf inventory) 1
+
+pos :: Store s a -> s
+pos (Store f s0) = s0
+
+peek :: s -> Store s a -> a
+peek s1 (Store f s0) = f s1
+
+peeks :: (s -> s) -> Store s a -> a
+peeks g (Store f s0) = f (g s0)
+
+seek :: s -> Store s a -> Store s a
+seek s1 (Store f s0) = Store f s1
+
+seeks :: (s -> s) -> Store s a -> Store s a
+seeks g (Store f s0) = Store f (g s0)
+
+squared :: Store Int Int
+squared = Store (\x -> x^2) 10
+
+experiment :: Functor f => (s -> f s) -> Store s a -> f a
+experiment g (Store f s0) = f <$> g s0
+
+aboveZero :: Int -> Maybe Int
+aboveZero n | n > 0     = Just n
+            | otherwise = Nothing
+
+withN :: Store Int (String, Int)
+withN = undefined
+
+shifted :: Store Int (String, Int)
+shifted = undefined
