@@ -304,6 +304,7 @@ class Functor w => Comonad w where
     extract :: w a -> a
     duplicate :: w a -> w (w a)
     extend :: (w a -> b) -> w a -> w b
+    extend f = fmap f . duplicate
 
 instance Comonad Stream where
     extract (a :> _) = a
@@ -351,7 +352,15 @@ data Store s a = Store (s -> a) s
 
 instance Comonad (Store s) where
     extract (Store f s0) = f s0
-    duplicate (Store f s0) = 
+    duplicate (Store f s0) = Store (\s -> Store f s) s0
+    --extend wf wx@(Store g s0) = Store (\s -> wf (Store g s)) s0
+
+data StoreT s w a = StoreT (w (s -> a)) s
+  deriving (Functor)
+
+instance Comonad w => Comonad (StoreT s w) where
+    extract (StoreT fw s0)  = extract fw s0
+    --duplicate (StoreT fw s0) = 
 
 inventory :: M.Map Int String
 inventory = M.fromList  [ (0, "Fidget spinners")
@@ -373,7 +382,7 @@ peeks :: (s -> s) -> Store s a -> a
 peeks g (Store f s0) = f (g s0)
 
 seek :: s -> Store s a -> Store s a
-seek s1 (Store f s0) = Store f s1
+seek s1 (Store f _) = Store f s1
 
 seeks :: (s -> s) -> Store s a -> Store s a
 seeks g (Store f s0) = Store f (g s0)
@@ -389,7 +398,7 @@ aboveZero n | n > 0     = Just n
             | otherwise = Nothing
 
 withN :: Store Int (String, Int)
-withN = undefined
+withN = squared =>> experiment (\n -> (show n, n))
 
 shifted :: Store Int (String, Int)
 shifted = undefined
