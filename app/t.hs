@@ -424,7 +424,10 @@ drawLine m ss l = map go [0..m - 1]
     go n    = if (Sum l, Sum n) `S.member` ss then '#' else '.'
 
 checkCellAlive :: Store (Sum Int, Sum Int) Bool -> Bool
-checkCellAlive = undefined
+checkCellAlive w = case (extract w, numLivingNeighbours w) of
+    (True, 2) -> True
+    (_, 3)    -> True
+    _         -> False
 
 numLivingNeighbours :: Store (Sum Int, Sum Int) Bool -> Int
 numLivingNeighbours = getSum . foldMap toCount . experiment neighbourLocations
