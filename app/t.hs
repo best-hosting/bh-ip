@@ -21,6 +21,8 @@ import Data.Time.Clock
 import Data.List
 import Data.Foldable
 import qualified Data.Map as M
+import Data.Monoid
+import qualified Data.Set as S
 
 openURL :: String -> IO String
 openURL x = getResponseBody =<< simpleHTTP (getRequest x)
@@ -402,3 +404,39 @@ withN = squared =>> experiment (\n -> (show n, n))
 
 shifted :: Store Int (String, Int)
 shifted = undefined
+
+startingGrid :: Store (Sum Int, Sum Int) Bool
+startingGrid = Store checkAlive (0, 0)
+  where
+    checkAlive :: (Sum Int, Sum Int) -> Bool
+    checkAlive coord = S.member coord livingCells
+
+livingCells :: S.Set (Sum Int, Sum Int)
+livingCells = S.fromList [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)]
+
+drawGrid :: Int -> S.Set (Sum Int, Sum Int) -> String
+drawGrid k ss = concatMap ((++ "\n") . drawLine k ss) [0..k - 1]
+
+drawLine :: Int -> S.Set (Sum Int, Sum Int) -> Int -> String
+drawLine m ss l = map go [0..m - 1]
+  where
+    go :: Int -> Char
+    go n    = if (Sum l, Sum n) `S.member` ss then '#' else '.'
+
+checkCellAlive :: Store (Sum Int, Sum Int) Bool -> Bool
+checkCellAlive = undefined
+
+numLivingNeighbours :: Store (Sum Int, Sum Int) Bool -> Int
+numLivingNeighbours = getSum . foldMap toCount . experiment neighbourLocations
+  where
+    toCount :: Bool -> Sum Int
+    toCount True  = Sum 1
+    toCount False = Sum 0
+
+neighbourLocations :: (Sum Int, Sum Int) -> [(Sum Int, Sum Int)]
+neighbourLocations loc = mappend loc <$>
+    [ (-1, -1), (-1, 0), (-1, 1)
+    ,  (0, -1),           (0, 1)
+    ,  (1, -1),  (1, 0),  (1, 1)
+    ]
+
