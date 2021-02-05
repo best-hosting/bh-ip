@@ -414,27 +414,17 @@ startingGrid = Store checkAlive (0, 0)
 livingCells :: S.Set (Sum Int, Sum Int)
 livingCells = S.fromList [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)]
 
-drawGrid :: Int -> S.Set (Sum Int, Sum Int) -> String
-drawGrid k ss = concatMap ((++ "\n") . drawLine k ss) [0..k - 1]
-
 drawLine :: Int -> S.Set (Sum Int, Sum Int) -> Int -> String
 drawLine m ss l = map go [0..m - 1]
   where
     go :: Int -> Char
     go n    = if (Sum l, Sum n) `S.member` ss then '#' else '.'
 
-checkCellAlive :: Store (Sum Int, Sum Int) Bool -> Bool
-checkCellAlive w = case (extract w, numLivingNeighbours w) of
-    (True, 2) -> True
-    (_, 3)    -> True
-    _         -> False
+drawSet :: Int -> S.Set (Sum Int, Sum Int) -> String
+drawSet k ss = concatMap ((++ "\n") . drawLine k ss) [0..k - 1]
 
-numLivingNeighbours :: Store (Sum Int, Sum Int) Bool -> Int
-numLivingNeighbours = getSum . foldMap toCount . experiment neighbourLocations
-  where
-    toCount :: Bool -> Sum Int
-    toCount True  = Sum 1
-    toCount False = Sum 0
+drawGrid :: Int -> Store (Sum Int, Sum Int) Bool -> String
+drawGrid = undefined
 
 neighbourLocations :: (Sum Int, Sum Int) -> [(Sum Int, Sum Int)]
 neighbourLocations loc = mappend loc <$>
@@ -443,3 +433,18 @@ neighbourLocations loc = mappend loc <$>
     ,  (1, -1),  (1, 0),  (1, 1)
     ]
 
+numLivingNeighbours :: Store (Sum Int, Sum Int) Bool -> Int
+numLivingNeighbours = getSum . foldMap toCount . experiment neighbourLocations
+  where
+    toCount :: Bool -> Sum Int
+    toCount True  = Sum 1
+    toCount False = Sum 0
+
+checkCellAlive :: Store (Sum Int, Sum Int) Bool -> Bool
+checkCellAlive w = case (extract w, numLivingNeighbours w) of
+    (True, 2) -> True
+    (_, 3)    -> True
+    _         -> False
+
+step :: Store (Sum Int, Sum Int) Bool -> Store (Sum Int, Sum Int) Bool
+step = extend checkCellAlive
