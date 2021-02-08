@@ -448,3 +448,68 @@ checkCellAlive w = case (extract w, numLivingNeighbours w) of
 
 step :: Store (Sum Int, Sum Int) Bool -> Store (Sum Int, Sum Int) Bool
 step = extend checkCellAlive
+
+data Env e a = Env e a
+  deriving (Eq, Show, Functor)
+
+instance Comonad (Env e) where
+    extract (Env _ x) = x
+    duplicate w@(Env e x) = Env e w
+    extend f w@(Env e x) = Env e (f w)
+
+askE :: Env e a -> e
+askE (Env e _) = e
+
+asksE :: (e -> e') -> Env e a -> e'
+asksE f (Env e _) = f e
+
+data Settings = Settings
+                { padAmount :: Int
+                , maxLength :: Int
+                , padChar :: Char
+                }
+  deriving (Show)
+
+getPadChar :: Env Settings a -> Char
+getPadChar  = asksE padChar
+
+context :: Env Settings String
+context = Env (Settings {padAmount = 3, maxLength = 5, padChar = '*'}) "Hello world"
+
+trunc :: Env Settings [a] -> [a]
+trunc w = let mxLngth = asksE maxLength w in take mxLngth (extract w)
+
+pad :: Env Settings String -> String
+pad w = let padAmt = asksE padAmount w
+            c      = asksE padChar w
+        in     replicate padAmt c
+            <> extract w
+            <> replicate padAmt c
+
+pad' :: Env Settings String -> String
+pad' = do
+    padAmt <- asksE padAmount
+    c      <- asksE padChar
+    txt    <- extract
+    let padding = replicate padAmt c
+    --return $ padding <> txt <> padding
+    const padding <> extract <> const padding
+
+
+infixl 5 =>=
+(=>=) :: Comonad w => (w a -> b) -> (w b -> c) -> (w a -> c)
+--f =>= g = \wx -> g (extend f wx)
+f =>= g = \wx -> g (f <$> duplicate wx)
+
+pipeline :: Env Settings String -> String
+pipeline = trunc =>= pad
+
+pipeline2 :: Env Settings String -> String
+pipeline2 = pad =>= trunc
+
+localE :: (e -> e') -> Env e a -> Env e' a
+localE f (Env e x) = Env (f e) x
+
+pipeline3 :: Env Settings String -> String
+pipeline3 = trunc =>= pad . localE (\s -> s{padChar = '_'}) =>= pad
+
