@@ -513,3 +513,30 @@ localE f (Env e x) = Env (f e) x
 pipeline3 :: Env Settings String -> String
 pipeline3 = trunc =>= pad . localE (\s -> s{padChar = '_'}) =>= pad
 
+newtype Traced m a = Traced (m -> a)
+  deriving (Functor)
+
+instance Monoid m => Comonad (Traced m) where
+    extract (Traced f) = f mempty
+    --duplicate (Traced f) = Traced $ \m -> Traced (\m' -> f (m <> m'))
+    duplicate (Traced f) = Traced $ \m -> Traced (f . mappend m)
+    --extend g w@(Traced f) = Traced (\m -> g (Traced (\m' -> f (m <> m'))))
+    extend g w@(Traced f) = Traced $ \m -> g (Traced (f . mappend m))
+
+sumL :: [Int] -> Int
+sumL xs = sum xs
+
+adder :: Traced [Int] Int
+adder = Traced sumL
+
+trace :: m -> Traced m a -> a
+trace m (Traced f) = f m
+
+adder' :: Traced [Int] Int
+adder' = adder =>> trace [1,2,3]
+
+newBuilder :: Traced [String] String
+newBuilder = Traced concat
+
+logMsgT :: Traced [String] String -> String
+logMsgT = trace ["hello"] =>= trace ["world"]
