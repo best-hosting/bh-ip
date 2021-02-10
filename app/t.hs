@@ -498,8 +498,8 @@ pad' = do
 
 infixl 5 =>=
 (=>=) :: Comonad w => (w a -> b) -> (w b -> c) -> (w a -> c)
---f =>= g = \wx -> g (extend f wx)
-f =>= g = \wx -> g (f <$> duplicate wx)
+f =>= g = g . extend f
+--f =>= g = \wx -> g (f <$> duplicate wx)
 
 pipeline :: Env Settings String -> String
 pipeline = trunc =>= pad
@@ -540,3 +540,15 @@ newBuilder = Traced concat
 
 logMsgT :: Traced [String] String -> String
 logMsgT = trace ["hello"] =>= trace ["world"]
+
+func :: Sum Double -> Double
+func (Sum x) = x ^ 2 - 16
+
+f :: Traced (Sum Double) Double
+f = Traced func
+
+derivative :: Traced (Sum Double) Double
+derivative = let w1 = f =>> trace (Sum 1)
+                 w2 = f =>> trace (Sum (-1))
+             in  Traced $ \x -> (trace x w1 + trace x w2) / 2
+
