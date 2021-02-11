@@ -314,6 +314,15 @@ instance Comonad Stream where
     --extend f = fmap f . duplicate
     extend f w@(a :> rs) = f w :> extend f rs
 
+class Comonad w => ComonadApply w where
+    (<@>) :: w (a -> b) -> w a -> w b
+
+liftW2 :: ComonadApply w => (a -> b -> c) -> w a -> w b -> w c
+liftW2 f wx wy = (f <$> wx) <@> wy
+
+instance ComonadApply Stream where
+    (f :> rs) <@> (x :> xs) = f x :> (rs <@> xs)
+
 infixl 4 =>>
 (=>>) :: Comonad w => w a -> (w a -> b) -> w b
 wx =>> f = extend f wx
@@ -523,6 +532,9 @@ instance Monoid m => Comonad (Traced m) where
     --extend g w@(Traced f) = Traced (\m -> g (Traced (\m' -> f (m <> m'))))
     extend g w@(Traced f) = Traced $ \m -> g (Traced (f . mappend m))
 
+instance Monoid m => ComonadApply (Traced m) where
+    Traced h <@> Traced f = Traced $ \m -> (h m) (f m)
+
 sumL :: [Int] -> Int
 sumL xs = sum xs
 
@@ -550,5 +562,31 @@ f = Traced func
 derivative :: Traced (Sum Double) Double
 derivative = let w1 = f =>> trace (Sum 1)
                  w2 = f =>> trace (Sum (-1))
-             in  Traced $ \x -> (trace x w1 + trace x w2) / 2
+             in  Traced $ \x -> (trace x w1 - trace x w2) / 2
 
+estimateDerivative :: Traced (Sum Double) Double -> Double
+estimateDerivative = do
+    leftY  <- trace (Sum (-1))
+    rightY <- trace (Sum 1)
+    return $ (rightY - leftY) / 2
+{-estimateDerivative w = let leftY  = trace (Sum (-1)) w
+                           rightY = trace (Sum 1) w
+                       in  (rightY - leftY) / 2-}
+
+derive :: Traced (Sum Double) Double -> Traced (Sum Double) Double
+derive = extend estimateDerivative
+
+withDerivative :: Traced (Sum Double) (Double, Double)
+withDerivative = liftW2 (,) f (derive f)
+
+ingredientsOf :: String -> S.Set String
+ingredientsOf "string" = S.fromList ["wool"]
+ingredientsOf "sticks" = S.fromList ["wood"]
+ingredientsOf "bow" = S.fromList ["sticks", "string"]
+ingredientsOf "arrow" = S.fromList ["sticks", "feather", "stone"]
+ingredientsOf "quiver" = S.fromList ["arrow", "bow"]
+ingredientsOf "torches" = S.fromList ["coal", "sticks"]
+ingredientsOf _ = mempty
+
+recipes :: Traced (S.Set String) (S.Set String)
+recipes = Traced (foldMap ingredientsOf)
