@@ -590,3 +590,7 @@ ingredientsOf _ = mempty
 
 recipes :: Traced (S.Set String) (S.Set String)
 recipes = Traced (foldMap ingredientsOf)
+
+traces :: Monoid m => (a -> m) -> Traced m a -> a
+traces f w = trace (f (extract w)) w
+
