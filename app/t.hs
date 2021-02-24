@@ -544,6 +544,9 @@ adder = Traced sumL
 trace :: m -> Traced m a -> a
 trace m (Traced f) = f m
 
+traces :: Monoid m => (a -> m) -> Traced m a -> a
+traces f w = trace (f (extract w)) w
+
 adder' :: Traced [Int] Int
 adder' = adder =>> trace [1,2,3]
 
@@ -591,6 +594,54 @@ ingredientsOf _ = mempty
 recipes :: Traced (S.Set String) (S.Set String)
 recipes = Traced (foldMap ingredientsOf)
 
-traces :: Monoid m => (a -> m) -> Traced m a -> a
-traces f w = trace (f (extract w)) w
+a0 :: S.Set String
+a0 = trace (S.fromList ["quiver"]) $ recipes =>> traces id
+
+a1 :: S.Set String
+a1 = trace (S.fromList ["quiver"]) $ Traced $ (\m -> traces id (Traced (f . mappend m)))
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a2 :: S.Set String
+a2 = (\m -> traces id (Traced (f . mappend m))) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a3 :: S.Set String
+a3 = (\m -> (\w -> trace (id (extract w)) w) (Traced (f . mappend m))) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a4 :: S.Set String
+a4 = (\m -> (\w -> trace (id (f (m <> mempty))) w) (Traced (f . mappend m))) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a5 :: S.Set String
+a5 = (\m -> trace (id (f (m <> mempty))) (Traced (f . mappend m)) ) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a6 :: S.Set String
+a6 = (\m -> (f . mappend m) (f (m <> mempty))) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a7 :: S.Set String
+a7 = (f . (S.fromList ["quiver"] <>)) (f (S.fromList ["quiver"] <> mempty))
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a8 :: S.Set String
+a8 = f (S.fromList ["quiver"] <> (f (S.fromList ["quiver"] <> mempty)))
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
 
