@@ -6,6 +6,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Main where
 
@@ -171,7 +173,7 @@ showL   = show >$< stringL
 
 -- Returns a log action that logs a given string ignoring its input.
 constL :: String -> LogAction IO a
---constL s = const s >$< stringL
+---constL s = const s >$< stringL
 constL s = s >$ stringL
 
 intL :: LogAction IO Int
@@ -205,6 +207,8 @@ logMsg msg = do
     log msg
 
 example :: WithLog env String m => m ()
+--example :: WithLog (LogAction m String) String m => m ()
+--example :: WithLog (LogAction (LoggerT String IO) String) String (LoggerT String IO) => (LoggerT String IO) ()
 example = do
     logMsg "Starting application..."
     logMsg "Finishing application..."
@@ -241,12 +245,22 @@ exampleM = do
 {-main :: IO ()
 main = usingLoggerT (contramap fmtMessage logStringStdout) exampleM-}
 
-{-main :: IO ()
-main = usingLoggerT
+mainCF :: IO ()
+mainCF = usingLoggerT
     ( cfilter (\(Message sev _) -> sev > Debug)
     $ contramap fmtMessage logStringStdout
     )
-    exampleM-}
+    exampleM
+
+mainCF2 :: IO ()
+mainCF2 = usingLoggerT
+    (sevToEither >$< (mempty >|< contramap fmtMessage logStringStdout))
+    exampleM
+
+sevToEither :: Message -> Either Message Message
+sevToEither m@(Message sev _)
+  | sev > Debug = Right m
+  | otherwise   = Left m
 
 data RichMessage = RichMessage
     { richMessageMsg  :: Message
@@ -257,7 +271,7 @@ fmtRichMessage :: RichMessage -> String
 fmtRichMessage (RichMessage msg t) = "[" ++ show t ++ "] " ++ fmtMessage msg
 
 makeRich :: LogAction IO RichMessage -> LogAction IO Message
-makeRich = cmapM toRichMessage
+makeRich lrich = cmapM toRichMessage lrich
   where
     toRichMessage :: Message -> IO RichMessage
     toRichMessage msg = do
@@ -277,7 +291,23 @@ carL = carToTuple >$<
         )
 
 main :: IO ()
+main = return ()
+
+{-main :: IO ()
 main = usingLoggerT carL (logMsg toyota)
+-}
+
+extractL :: Monoid a => LogAction m a -> m ()
+extractL (LogAction f) = f mempty
+
+extendL :: Monoid a => (LogAction m a -> m ()) -> LogAction m a -> LogAction m a
+extendL g (LogAction f) = LogAction $ \m -> g (LogAction $ \m' -> f (m <> m'))
+
+fL :: Applicative m => LogAction m String -> m ()
+fL (LogAction f) = f ".f1" *> f ".f2"
+
+gL :: LogAction m String -> m ()
+gL (LogAction f) = f ".g"
 
 {-data Stream a = Cons a (Stream a)
   deriving (Show)
@@ -305,6 +335,7 @@ fromList xs = go (cycle xs)
 class Functor w => Comonad w where
     extract :: w a -> a
     duplicate :: w a -> w (w a)
+    duplicate = extend id
     extend :: (w a -> b) -> w a -> w b
     extend f = fmap f . duplicate
 
@@ -364,14 +395,47 @@ data Store s a = Store (s -> a) s
 instance Comonad (Store s) where
     extract (Store f s0) = f s0
     duplicate (Store f s0) = Store (\s -> Store f s) s0
-    --extend wf wx@(Store g s0) = Store (\s -> wf (Store g s)) s0
+    --extend f wx@(Store g s0) = Store (\s -> f (Store g s)) s0
 
 data StoreT s w a = StoreT (w (s -> a)) s
   deriving (Functor)
 
 instance Comonad w => Comonad (StoreT s w) where
-    extract (StoreT fw s0)  = extract fw s0
-    --duplicate (StoreT fw s0) = 
+    extract (StoreT wg s0)  = extract wg s0
+    extend f (StoreT wg s0) = StoreT (extend (\wg' s -> f (StoreT wg' s)) wg) s0
+    duplicate (StoreT wg s0) = StoreT (StoreT <$> duplicate wg) s0
+
+class Comonad w =>ComonadStore s w | w -> s where
+    posT :: w a -> s
+    peekT :: s -> w a -> a
+
+    peeksT :: (s -> s) -> w a -> a
+    peeksT f w = peekT (f (posT w)) w
+
+    seekT :: s -> w a -> w a
+    seekT s = peekT s . duplicate
+
+    seeksT :: (s -> s) -> w a -> w a
+    seeksT f w = seekT (f (posT w)) w
+
+    experimentT :: Functor f => (s -> f s) -> w a -> f a
+    experimentT g w = fmap (`peekT` w) $ g (posT w)
+
+instance ComonadStore s (Store s) where
+    posT = pos
+    peekT = peek
+    peeksT = peeks
+    seekT = seek
+    seeksT = seeks
+    experimentT = experiment
+
+instance ComonadStore s w => ComonadStore s (EnvT e w) where
+    posT (EnvT _ w) = posT w
+    peekT s (EnvT _ w) = peekT s w
+
+instance (Monoid m, ComonadStore s w) => ComonadStore s (TracedT m w) where
+    posT (TracedT wf) = posT wf
+    peekT s (TracedT wf) = peekT s (fmap ($ mempty) wf)
 
 inventory :: M.Map Int String
 inventory = M.fromList  [ (0, "Fidget spinners")
@@ -463,8 +527,25 @@ data Env e a = Env e a
 
 instance Comonad (Env e) where
     extract (Env _ x) = x
-    duplicate w@(Env e x) = Env e w
-    extend f w@(Env e x) = Env e (f w)
+    duplicate w@(Env e _) = Env e w
+    extend f w@(Env e _) = Env e (f w)
+
+data EnvT e w a = EnvT e (w a)
+  deriving (Eq, Show)
+
+instance Functor w => Functor (EnvT e w) where
+    fmap f (EnvT e wx) = EnvT e (fmap f wx)
+
+instance Comonad w => Comonad (EnvT e w) where
+    extract (EnvT _ wx) = extract wx
+    duplicate w@(EnvT e wx) = EnvT e (EnvT e <$> duplicate wx)
+    --duplicate w@(EnvT e wx) = EnvT e (extend (EnvT e) wx)
+    --extend f w = fmap f (duplicate w)
+    --extend f w@(EnvT e wx) = fmap f (EnvT e (extend (EnvT e) wx))
+    extend f w@(EnvT e wx) = EnvT e (fmap f $ extend (EnvT e) wx)
+
+localET :: (e -> e') -> EnvT e w a -> EnvT e' w a
+localET f (EnvT e wx) = EnvT (f e) wx
 
 askE :: Env e a -> e
 askE (Env e _) = e
@@ -616,13 +697,25 @@ a3 = (\m -> (\w -> trace (id (extract w)) w) (Traced (f . mappend m))) (S.fromLi
     f = foldMap ingredientsOf
 
 a4 :: S.Set String
-a4 = (\m -> (\w -> trace (id (f (m <> mempty))) w) (Traced (f . mappend m))) (S.fromList ["quiver"])
+a4 = (\m -> (\w -> trace (id $ (f . mappend m) mempty) w) (Traced (f . mappend m))) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a4' :: S.Set String
+a4' = (\m -> trace (id $ (f . mappend m) mempty) (Traced (f . mappend m))) (S.fromList ["quiver"])
   where
     f :: S.Set String -> S.Set String
     f = foldMap ingredientsOf
 
 a5 :: S.Set String
-a5 = (\m -> trace (id (f (m <> mempty))) (Traced (f . mappend m)) ) (S.fromList ["quiver"])
+a5 = (\m -> (f . mappend m) (id $ (f . mappend m) mempty)) (S.fromList ["quiver"])
+  where
+    f :: S.Set String -> S.Set String
+    f = foldMap ingredientsOf
+
+a5' :: S.Set String
+a5' = (\m -> (f . mappend m) ((f . mappend m) mempty)) (S.fromList ["quiver"])
   where
     f :: S.Set String -> S.Set String
     f = foldMap ingredientsOf
@@ -634,7 +727,7 @@ a6 = (\m -> (f . mappend m) (f (m <> mempty))) (S.fromList ["quiver"])
     f = foldMap ingredientsOf
 
 a7 :: S.Set String
-a7 = (f . (S.fromList ["quiver"] <>)) (f (S.fromList ["quiver"] <> mempty))
+a7 = (f . mappend (S.fromList ["quiver"])) (f (S.fromList ["quiver"] <> mempty))
   where
     f :: S.Set String -> S.Set String
     f = foldMap ingredientsOf
@@ -644,4 +737,146 @@ a8 = f (S.fromList ["quiver"] <> (f (S.fromList ["quiver"] <> mempty)))
   where
     f :: S.Set String -> S.Set String
     f = foldMap ingredientsOf
+
+class ComonadTrans t where
+    lower :: Comonad w => t w a -> w a
+
+instance ComonadTrans (EnvT e) where
+    lower (EnvT _ w) = w
+
+instance ComonadTrans (StoreT s) where
+    lower (StoreT wf s) = fmap ($ s) wf
+
+data TracedT m w a = TracedT (w (m -> a))
+  deriving (Functor)
+
+instance (Monoid m, Comonad w) => Comonad (TracedT m w) where
+    extract (TracedT wf) = extract $ fmap ($ mempty) wf
+    --duplicate (TracedT wf) = TracedT $ (\wf' -> \m -> TracedT $ fmap (. mappend m) wf') <$> duplicate wf
+    --duplicate (TracedT wf) = TracedT $ extend (\wf' -> \m -> TracedT $ fmap (. mappend m) wf') wf
+{-    TracedT (w (m -> TracedT m w a))
+    TracedT (w (m -> TracedT (w (m -> a))))
+    w (w (m -> a))-}
+    extend f (TracedT wf) = TracedT . extend (\wf' m -> f (TracedT (fmap (. mappend m) wf'))) $ wf
+
+instance Monoid m => ComonadTrans (TracedT m) where
+    lower (TracedT wf) = fmap ($ mempty) wf
+
+t :: EnvT String (Traced (Sum Int)) Int
+t = EnvT "hi" (Traced (\(Sum x) -> x + 10))
+
+class Comonad w => ComonadEnv e w | w -> e where
+    askT :: w a -> e
+
+instance Comonad w => ComonadEnv e (EnvT e w) where
+    askT (EnvT e _) = e
+
+class Comonad w => ComonadTraced m w | w -> m where
+    traceT :: m -> w a -> a
+
+instance Monoid m => ComonadTraced m (Traced m) where
+    traceT = trace
+
+instance (Monoid m, Comonad w) => ComonadTraced m (TracedT m w) where
+    traceT m (TracedT w) = extract w m
+
+{-instance (Monoid m, Comonad w) => ComonadTraced m (TracedT m w) where
+    traceT m (TracedT wf) = extract $ fmap ($ m) wf-}
+
+instance ComonadTraced m w => ComonadTraced m (EnvT e w) where
+    traceT m (EnvT e w) = traceT m w
+
+instance ComonadTraced m w => ComonadTraced m (StoreT e w) where
+    traceT m (StoreT w s0) = traceT m (fmap ($ s0) w)
+
+data ReportStyle = Detailed | Summary
+  deriving (Show)
+
+data Region = America | UK | Germany
+  deriving (Show, Eq)
+
+projections :: Sum Int -> Float
+projections (Sum month) = 1.2 ^ (max 0 month) * 100
+
+projections2 :: Region -> Sum Int -> Float
+projections2 UK (Sum month) = 1.2 ^ (max 0 month) * 100
+projections2 America (Sum month) = 1.3 ^ (max 0 month) * 200
+projections2 Germany (Sum month) = 1.5 ^ (max 0 month) * 300
+
+reportConfig :: EnvT ReportStyle (Traced (Sum Int)) Float
+reportConfig = EnvT Detailed (Traced projections)
+
+reportConfig2 :: EnvT ReportStyle (TracedT (Sum Int) (Store Region)) Float
+reportConfig2 = EnvT Detailed (TracedT (Store projections2 UK))
+
+previousMonth :: ComonadTraced (Sum Int) w => w a -> a
+previousMonth = traceT (Sum (-1))
+
+nextMonth :: ComonadTraced (Sum Int) w => w a -> a
+nextMonth = traceT (Sum 1)
+
+detailedReport :: ComonadTraced (Sum Int) w => w Float -> String
+detailedReport = do
+    salesAmt <- extract
+    prev <- previousMonth
+    next <- nextMonth
+    return $ unlines [ "This month sales in totality are: " ++ show salesAmt
+                     , "Previous month's sales: " ++ show prev
+                     , "Next month's projections: " ++ show next
+                     ]
+
+detailedReport2 :: (ComonadStore Region w, ComonadTraced (Sum Int) w) => w Float -> String
+detailedReport2 = do
+    salesAmt <- extract
+    prev <- previousMonth
+    next <- nextMonth
+    region <- posT
+    return $ unlines [ show region ++ ":"
+                     , "This month sales in totality are: " ++ show salesAmt
+                     , "Previous month's sales: " ++ show prev
+                     , "Next month's projections: " ++ show next
+                     ]
+
+buildHeader :: ComonadEnv ReportStyle w => w a -> String
+buildHeader = do
+    style <- askT
+    return $ case style of 
+        Detailed -> "DETAILED report following: \n"
+        Summary  -> "SUMMARY report following: \n"
+
+buildReport :: (ComonadTraced (Sum Int) w, ComonadEnv ReportStyle w) => w Float -> String
+buildReport = do
+    header <- buildHeader
+    salesAmt <- extract
+    style <- askT
+    case style of
+        Summary ->
+          return $ header <> "We achieved " ++ show salesAmt ++ " in sales!\n"
+        Detailed -> do
+          rpt <- detailedReport
+          return $ header <> rpt
+
+buildReport2 :: (ComonadStore Region w, ComonadTraced (Sum Int) w, ComonadEnv ReportStyle w) => w Float -> String
+buildReport2 = do
+    header <- buildHeader
+    salesAmt <- extract
+    style <- askT
+    case style of
+        Summary ->
+          return $ header <> "We achieved " ++ show salesAmt ++ " in sales!\n"
+        Detailed -> do
+          rpt <- detailedReport
+          comReport <- comparisonReport
+          return $ header <> rpt <> "\n" <> comReport
+
+otherRegions :: ComonadStore Region w => w a -> [a]
+otherRegions = experimentT others
+  where
+    others s = filter (/= s) [America, UK, Germany]
+
+comparisonReport :: (ComonadTraced (Sum Int) w, ComonadStore Region w)
+    => w Float -> String
+comparisonReport w =
+    let otherReports = extract $ w =>> detailedReport2 =>> otherRegions
+    in  "Comparison report:\n" <> unlines otherReports
 
