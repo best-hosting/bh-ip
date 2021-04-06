@@ -3,9 +3,6 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE QuantifiedConstraints #-}
 
 module BH.Switch
     ( SwName (..)
@@ -93,22 +90,20 @@ class Eq a => TelnetRefC t a where
     enablePasswordC :: t a -> T.Text
     telnetStateC :: t a -> TelnetState a
     setTelnetStateC :: TelnetState a -> t a -> t a
-    conC :: TL.HasTelnetPtr c => t a -> c
 
 data TelnetRef a    = TelnetRef
                         { switchInfo :: SwInfo
                         , telnetState :: TelnetState a
                         , macMap :: PortMacMap
-                        , telnetCon :: forall c. TL.HasTelnetPtr c => c
                         }
+  deriving (Show)
 
-instance Eq a  => TelnetRefC TelnetRef a where
+instance Eq a => TelnetRefC TelnetRef a where
     userNameC = userName . switchInfo
     passwordC = password . switchInfo
     enablePasswordC = enablePassword . switchInfo
     telnetStateC = telnetState
     setTelnetStateC s r = r{telnetState = s}
-    conC = telnetCon
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 
