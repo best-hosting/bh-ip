@@ -17,6 +17,12 @@ module BH.Switch
 import           Network.Simple.TCP
 import qualified Data.Text as T
 import qualified Data.Map as M
+import Control.Monad.Trans.Maybe
+import Control.Monad.Reader
+import Control.Monad.Trans.Cont
+
+import qualified Network.Telnet.LibTelnet as TL
+import qualified Data.ByteString.Char8 as B8
 
 import BH.IP
 
@@ -55,21 +61,21 @@ data SwPort         = SwPort Int
 data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
-data TelnetState    = Unauth
+data TelnetState a  = Unauth
                     | AuthUsername
                     | Password
                     | Logged
                     | EnableRequested
                     | EnablePassword
                     | Enabled
-                    | ShowMacAddressTable PortId
+                    | Command a
                     | Exit
   deriving (Eq, Show)
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
-data TelnetRef      = TelnetRef
+data TelnetRef a    = TelnetRef
                         { switchInfo :: SwInfo
-                        , telnetState :: TelnetState
+                        , telnetState :: TelnetState a
                         , macMap :: PortMacMap
                         }
   deriving (Show)

@@ -37,7 +37,17 @@ import BH.IP
 import BH.Switch
 
 
-telnetRef :: IORef TelnetRef
+data TelnetShowMac = ShowMacAddressTable PortId
+  deriving (Show, Eq)
+
+type TelnetIORef a = IORef (TelnetRef a)
+
+{-class HasTelnetRef a where
+    telnetRef :: TelnetIORef
+
+instance HasTelnetRef TelnetShowMac where-}
+
+telnetRef :: IORef (TelnetRef TelnetShowMac)
 {-# NOINLINE telnetRef #-}
 telnetRef   = unsafePerformIO . newIORef
                 $ TelnetRef { switchInfo = undefined
@@ -45,29 +55,19 @@ telnetRef   = unsafePerformIO . newIORef
                             , macMap = M.empty
                             }
 
-{-t :: ContT Int IO Int
-t   = do
-        z <- resetT $ do
-            x <- shiftT $ (\k -> liftIO (k 7 >>= k))
-            let y = x + 1
-            return y
-        let w = z * 10
-        return w
--}
-
-telnetLogin :: TL.HasTelnetPtr t => t -> T.Text -> ContT () IO (t, T.Text)
-telnetLogin con ts = shiftT $ \k -> liftIO $ do
-    r@TelnetRef {switchInfo = swInfo, telnetState = s0} <- readIORef telnetRef
+telnetLogin :: TL.HasTelnetPtr t => TelnetIORef TelnetShowMac -> t -> T.Text -> ContT () IO (t, T.Text)
+telnetLogin tRef con ts = shiftT $ \k -> liftIO $ do
+    r@TelnetRef {switchInfo = swInfo, telnetState = s0} <- readIORef tRef
     ms' <- runMaybeT . runReaderT (go s0) $ swInfo
     case ms' of
       Just s'
-        | s' == Enabled -> atomicWriteIORef telnetRef r{telnetState = s'} >> k (con, ts)
-        | otherwise     -> atomicWriteIORef telnetRef r{telnetState = s'}
+        | s' == Enabled -> atomicWriteIORef tRef r{telnetState = s'} >> k (con, ts)
+        | otherwise     -> atomicWriteIORef tRef r{telnetState = s'}
       Nothing           -> k (con, ts)
   where
     -- | Return 'Nothing' if i don't understand state. And 'Just state'
     -- otherwise.
-    go :: TelnetState -> ReaderT SwInfo (MaybeT IO) TelnetState
+    go :: (TelnetState a) -> ReaderT SwInfo (MaybeT IO) (TelnetState a)
     go Unauth = go AuthUsername
     go s@AuthUsername
         | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts = do
@@ -99,15 +99,25 @@ telnetLogin con ts = shiftT $ \k -> liftIO $ do
         | otherwise                 = return s
     go _ = fail "Unknown state"
 
-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> ContT () IO ()
-getMacs (con, ts) = liftIO $ do
-    r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef telnetRef
+{-t :: ContT Int IO Int
+t   = do
+        z <- resetT $ do
+            x <- shiftT $ (\k -> liftIO (k 7 >>= k))
+            let y = x + 1
+            return y
+        let w = z * 10
+        return w
+-}
+
+getMacs :: TL.HasTelnetPtr t => TelnetIORef TelnetShowMac -> (t, T.Text) -> ContT () IO ()
+getMacs tRef (con, ts) = liftIO $ do
+    r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef tRef
     (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
             then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
             else flip runStateT mm0 . flip runReaderT swInfo $ go s0
-    atomicWriteIORef telnetRef r0{telnetState = s', macMap = mm'}
+    atomicWriteIORef tRef r0{telnetState = s', macMap = mm'}
   where
-    go :: TelnetState -> ReaderT SwInfo (StateT PortMacMap IO) TelnetState
+    go :: (TelnetState TelnetShowMac) -> ReaderT SwInfo (StateT PortMacMap IO) (TelnetState TelnetShowMac)
     go s@Enabled
         | "#" `T.isSuffixOf` ts = do
             curSw <- asks swName
@@ -122,10 +132,10 @@ getMacs (con, ts) = liftIO $ do
                 -- previous port info as info for new (just selected) port
                 -- 'p'.
                 liftIO $ TL.telnetSend con . B8.pack $ "\n"
-                return (ShowMacAddressTable pid)
+                return (Command (ShowMacAddressTable pid))
               [] -> go Exit
         | otherwise = return s
-    go s@(ShowMacAddressTable pid)
+    go s@(Command (ShowMacAddressTable pid))
         | "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts = do
             liftIO $ putStrLn $ "save port " ++ show pid
             modify (M.insert pid (Just (parseShowMacAddrTable ts)))
@@ -159,7 +169,7 @@ telnetH _ t (TL.Received b)
   = do
     putStr "R: "
     B8.putStrLn b
-    evalContT (telnetLogin t (T.decodeLatin1 b) >>= getMacs)
+    evalContT (telnetLogin telnetRef t (T.decodeLatin1 b) >>= getMacs telnetRef)
 telnetH s _ (TL.Send b)
   = putStr "S: " *> B8.putStrLn b *> print (L.map ord (B8.unpack b)) *> send s b
 telnetH _ _ (TL.Do o)

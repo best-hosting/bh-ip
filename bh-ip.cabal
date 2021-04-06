@@ -38,6 +38,10 @@ library
     , text
     , aeson
     , containers
+    , transformers
+    , mtl
+    , bytestring
+    , libtelnet
     , network-simple
   default-language: Haskell2010
 
