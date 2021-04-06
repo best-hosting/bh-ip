@@ -37,15 +37,23 @@ import BH.IP
 import BH.Switch
 
 
-data TelnetShowMac = ShowMacAddressTable PortId
+data TelnetShowMac = ShowMacAddressTable PortId | Huy
   deriving (Show, Eq)
 
 type TelnetIORef a = IORef (TelnetRef a)
 
-{-class HasTelnetRef a where
-    telnetRef :: TelnetIORef
+class Eq a => HasTelnetRef a where
+    telnetRef2 :: TelnetIORef a
+    emptyref :: a
 
-instance HasTelnetRef TelnetShowMac where-}
+instance HasTelnetRef TelnetShowMac where
+    {-# NOINLINE telnetRef2 #-}
+    telnetRef2   = unsafePerformIO . newIORef
+                    $ TelnetRef { switchInfo = undefined
+                                , telnetState = Unauth
+                                , macMap = M.empty
+                                }
+    emptyref = Huy
 
 telnetRef :: IORef (TelnetRef TelnetShowMac)
 {-# NOINLINE telnetRef #-}
@@ -54,6 +62,53 @@ telnetRef   = unsafePerformIO . newIORef
                             , telnetState = Unauth
                             , macMap = M.empty
                             }
+
+
+telnetLoginC :: (TelnetRefC t a, TL.HasTelnetPtr con) => IORef (t a) -> con -> T.Text -> ContT () IO (con, T.Text)
+telnetLoginC tRef con ts = shiftT $ \k -> liftIO $ do
+    r <- readIORef tRef
+    let s0 = telnetStateC r
+    ms' <- runMaybeT . runReaderT (go s0) $ r
+    case ms' of
+      Just s'
+        | s' == Enabled -> atomicWriteIORef tRef (setTelnetStateC s' r) >> k (con, ts)
+        | otherwise     -> atomicWriteIORef tRef (setTelnetStateC s' r)
+      Nothing           -> k (con, ts)
+  where
+    -- | Return 'Nothing' if i don't understand state. And 'Just state'
+    -- otherwise.
+    go :: TelnetRefC t a => (TelnetState a) -> ReaderT (t a) (MaybeT IO) (TelnetState a)
+    go Unauth = go AuthUsername
+    go s@AuthUsername
+        | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts = do
+            user <- asks userNameC
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            return s
+        | "Password" `T.isInfixOf` ts = go Password
+        | otherwise                 = return s
+    go s@Password
+        | "Password" `T.isInfixOf` ts = do
+            pw <- asks passwordC
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
+            return s
+        | ">" `T.isSuffixOf` ts       = go Logged
+        | "#" `T.isSuffixOf` ts       = return Enabled
+        | otherwise                 = return s
+    go s@Logged
+        | ">" `T.isSuffixOf` ts       = do
+            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
+            return s
+        | "Password" `T.isInfixOf` ts = go EnablePassword
+        | otherwise                 = return s
+    go s@EnablePassword
+        | "Password" `T.isInfixOf` ts = do
+            enpw <- asks enablePasswordC
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+            return s
+        | "#" `T.isSuffixOf` ts       = return Enabled
+        | otherwise                 = return s
+    go _ = fail "Unknown state"
+
 
 telnetLogin :: TL.HasTelnetPtr t => TelnetIORef TelnetShowMac -> t -> T.Text -> ContT () IO (t, T.Text)
 telnetLogin tRef con ts = shiftT $ \k -> liftIO $ do
@@ -92,7 +147,7 @@ telnetLogin tRef con ts = shiftT $ \k -> liftIO $ do
         | otherwise                 = return s
     go s@EnablePassword
         | "Password" `T.isInfixOf` ts = do
-            SwInfo{enablePasword = enpw} <- ask
+            SwInfo{enablePassword = enpw} <- ask
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
             return s
         | "#" `T.isSuffixOf` ts       = return Enabled
@@ -169,7 +224,7 @@ telnetH _ t (TL.Received b)
   = do
     putStr "R: "
     B8.putStrLn b
-    evalContT (telnetLogin telnetRef t (T.decodeLatin1 b) >>= getMacs telnetRef)
+    evalContT (telnetLoginC telnetRef t (T.decodeLatin1 b) >>= getMacs telnetRef)
 telnetH s _ (TL.Send b)
   = putStr "S: " *> B8.putStrLn b *> print (L.map ord (B8.unpack b)) *> send s b
 telnetH _ _ (TL.Do o)
