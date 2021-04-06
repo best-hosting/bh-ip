@@ -3,6 +3,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
 
 module BH.Switch
     ( SwName (..)
@@ -18,12 +19,14 @@ module BH.Switch
     , TState2 (..)
     , TStateCmd (..)
     , TelnetRefC (..)
+    , telnetLoginC
     )
   where
 
 import           Network.Simple.TCP
 import qualified Data.Text as T
 import qualified Data.Map as M
+import Data.IORef
 import Control.Monad.Trans.Maybe
 import Control.Monad.Reader
 import Control.Monad.Trans.Cont
@@ -110,4 +113,49 @@ type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 type MacIpMap       = M.Map MacAddr [IP]
 
 type PortMap        = M.Map PortId [(MacAddr, [IP])]
+
+telnetLoginC :: (TelnetRefC t a, TL.HasTelnetPtr con) => IORef (t a) -> con -> T.Text -> ContT () IO (con, T.Text)
+telnetLoginC tRef con ts = shiftT $ \k -> liftIO $ do
+    r <- readIORef tRef
+    let s0 = telnetStateC r
+    ms' <- runMaybeT . runReaderT (go s0) $ r
+    case ms' of
+      Just s'
+        | s' == Enabled -> atomicWriteIORef tRef (setTelnetStateC s' r) >> k (con, ts)
+        | otherwise     -> atomicWriteIORef tRef (setTelnetStateC s' r)
+      Nothing           -> k (con, ts)
+  where
+    -- | Return 'Nothing' if i don't understand state. And 'Just state'
+    -- otherwise.
+    go :: TelnetRefC t a => (TelnetState a) -> ReaderT (t a) (MaybeT IO) (TelnetState a)
+    go Unauth = go AuthUsername
+    go s@AuthUsername
+        | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts = do
+            user <- asks userNameC
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            return s
+        | "Password" `T.isInfixOf` ts = go Password
+        | otherwise                 = return s
+    go s@Password
+        | "Password" `T.isInfixOf` ts = do
+            pw <- asks passwordC
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
+            return s
+        | ">" `T.isSuffixOf` ts       = go Logged
+        | "#" `T.isSuffixOf` ts       = return Enabled
+        | otherwise                 = return s
+    go s@Logged
+        | ">" `T.isSuffixOf` ts       = do
+            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
+            return s
+        | "Password" `T.isInfixOf` ts = go EnablePassword
+        | otherwise                 = return s
+    go s@EnablePassword
+        | "Password" `T.isInfixOf` ts = do
+            enpw <- asks enablePasswordC
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+            return s
+        | "#" `T.isSuffixOf` ts       = return Enabled
+        | otherwise                 = return s
+    go _ = fail "Unknown state"
 
