@@ -40,21 +40,6 @@ import BH.Switch
 data TelnetShowMac = ShowMacAddressTable PortId | Huy
   deriving (Show, Eq)
 
-type TelnetIORef a = IORef (TelnetRef a)
-
-class Eq a => HasTelnetRef a where
-    telnetRef2 :: TelnetIORef a
-    emptyref :: a
-
-instance HasTelnetRef TelnetShowMac where
-    {-# NOINLINE telnetRef2 #-}
-    telnetRef2   = unsafePerformIO . newIORef
-                    $ TelnetRef { switchInfo = undefined
-                                , telnetState = Unauth
-                                , macMap = M.empty
-                                }
-    emptyref = Huy
-
 telnetRef :: IORef (TelnetRef TelnetShowMac)
 {-# NOINLINE telnetRef #-}
 telnetRef   = unsafePerformIO . newIORef
@@ -79,11 +64,11 @@ getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac
 getMacs (con, ts) = do
     tRef <- ask
     liftIO $ do
-    r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef tRef
-    (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
-            then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
-            else flip runStateT mm0 . flip runReaderT swInfo $ go s0
-    atomicWriteIORef tRef r0{telnetState = s', macMap = mm'}
+      r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef tRef
+      (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
+              then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
+              else flip runStateT mm0 . flip runReaderT swInfo $ go s0
+      atomicWriteIORef tRef r0{telnetState = s', macMap = mm'}
   where
     go :: (TelnetState TelnetShowMac) -> ReaderT SwInfo (StateT PortMacMap IO) (TelnetState TelnetShowMac)
     go s@Enabled

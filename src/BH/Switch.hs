@@ -14,6 +14,7 @@ module BH.Switch
     , TelnetState (..)
     , PortMacMap (..)
     , TelnetRef (..)
+    , TelnetRef2 (..)
     , MacIpMap (..)
     , PortMap (..)
     , TelnetRefClass (..)
@@ -89,13 +90,13 @@ class Eq a => TelnetRefClass t a where
     userNameC :: t a -> T.Text
     passwordC :: t a -> T.Text
     enablePasswordC :: t a -> T.Text
-    swNameC :: t a -> SwName
-    defPortSpecC :: t a -> T.Text
+    --swNameC :: t a -> SwName
+    --defPortSpecC :: t a -> T.Text
     telnetStateC :: t a -> TelnetState a
     setTelnetStateC :: TelnetState a -> t a -> t a
     -- FIXME: macMap may have different types depending on pass type. If i
     -- query by interface it'll be one. If i query be mac, it'll be another.
-    macMapC :: t a -> PortMacMap
+    --macMapC :: t a -> PortMacMap
 
 data TelnetRef a    = TelnetRef
                         { switchInfo :: SwInfo
@@ -108,11 +109,26 @@ instance Eq a => TelnetRefClass TelnetRef a where
     userNameC = userName . switchInfo
     passwordC = password . switchInfo
     enablePasswordC = enablePassword . switchInfo
-    swNameC = swName . switchInfo
-    defPortSpecC = defaultPortSpec . switchInfo
+    --swNameC = swName . switchInfo
+    --defPortSpecC = defaultPortSpec . switchInfo
     telnetStateC = telnetState
     setTelnetStateC s r = r{telnetState = s}
-    macMapC = macMap
+    --macMapC = macMap
+
+data TelnetRef2 a   = TelnetRef2
+                        { switchInfo2 :: SwInfo
+                        , telnetState2 :: TelnetState a
+                        , swConfs :: M.Map SwName T.Text
+                        }
+  deriving (Show)
+
+-- FIXME: TelnetRef payload (macMap, saveSws) depends on 'a'.. data families?
+instance Eq a => TelnetRefClass TelnetRef2 a where
+    userNameC = userName . switchInfo2
+    passwordC = password . switchInfo2
+    enablePasswordC = enablePassword . switchInfo2
+    telnetStateC = telnetState2
+    setTelnetStateC s r = r{telnetState2 = s}
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 
