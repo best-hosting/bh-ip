@@ -65,50 +65,6 @@ telnetRef   = unsafePerformIO . newIORef
 
 
 
-telnetLogin :: (Eq a, TL.HasTelnetPtr t) => TelnetIORef a -> t -> T.Text -> ContT () IO (t, T.Text)
-telnetLogin tRef con ts = shiftT $ \k -> liftIO $ do
-    r@TelnetRef {switchInfo = swInfo, telnetState = s0} <- readIORef tRef
-    ms' <- runMaybeT . runReaderT (go s0) $ swInfo
-    case ms' of
-      Just s'
-        | s' == Enabled -> atomicWriteIORef tRef r{telnetState = s'} >> k (con, ts)
-        | otherwise     -> atomicWriteIORef tRef r{telnetState = s'}
-      Nothing           -> k (con, ts)
-  where
-    -- | Return 'Nothing' if i don't understand state. And 'Just state'
-    -- otherwise.
-    go :: (TelnetState a) -> ReaderT SwInfo (MaybeT IO) (TelnetState a)
-    go Unauth = go AuthUsername
-    go s@AuthUsername
-        | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts = do
-            SwInfo{userName = user} <- ask
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            return s
-        | "Password" `T.isInfixOf` ts = go Password
-        | otherwise                 = return s
-    go s@Password
-        | "Password" `T.isInfixOf` ts = do
-            SwInfo{password = pw} <- ask
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
-            return s
-        | ">" `T.isSuffixOf` ts       = go Logged
-        | "#" `T.isSuffixOf` ts       = return Enabled
-        | otherwise                 = return s
-    go s@Logged
-        | ">" `T.isSuffixOf` ts       = do
-            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
-            return s
-        | "Password" `T.isInfixOf` ts = go EnablePassword
-        | otherwise                 = return s
-    go s@EnablePassword
-        | "Password" `T.isInfixOf` ts = do
-            SwInfo{enablePassword = enpw} <- ask
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-            return s
-        | "#" `T.isSuffixOf` ts       = return Enabled
-        | otherwise                 = return s
-    go _ = fail "Unknown state"
-
 {-t :: ContT Int IO Int
 t   = do
         z <- resetT $ do
@@ -119,8 +75,10 @@ t   = do
         return w
 -}
 
-getMacs :: TL.HasTelnetPtr t => TelnetIORef TelnetShowMac -> (t, T.Text) -> ContT () IO ()
-getMacs tRef (con, ts) = liftIO $ do
+getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
+getMacs (con, ts) = do
+    tRef <- ask
+    liftIO $ do
     r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef tRef
     (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
             then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
@@ -179,7 +137,7 @@ telnetH _ t (TL.Received b)
   = do
     putStr "R: "
     B8.putStrLn b
-    evalContT (telnetLoginC telnetRef t (T.decodeLatin1 b) >>= getMacs telnetRef)
+    flip runReaderT telnetRef . evalContT $ (telnetLogin t (T.decodeLatin1 b) >>= getMacs)
 telnetH s _ (TL.Send b)
   = putStr "S: " *> B8.putStrLn b *> print (L.map ord (B8.unpack b)) *> send s b
 telnetH _ _ (TL.Do o)
