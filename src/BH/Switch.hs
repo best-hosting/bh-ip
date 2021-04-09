@@ -13,6 +13,7 @@ module BH.Switch
     , PortId (..)
     , TelnetState (..)
     , PortMacMap (..)
+    , SwConfig (..)
     , TelnetRef (..)
     , TelnetRef2 (..)
     , MacIpMap (..)
@@ -135,6 +136,8 @@ type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 type MacIpMap       = M.Map MacAddr [IP]
 
 type PortMap        = M.Map PortId [(MacAddr, [IP])]
+
+type SwConfig       = M.Map SwName T.Text
 
 -- FIXME: Include TelnetRef into TelnetCtx ?
 type TelnetCtx t a  = ContT () (ReaderT (IORef (t a)) IO)
