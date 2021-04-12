@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module BH.Switch
     ( SwName (..)
@@ -16,11 +17,15 @@ module BH.Switch
     , SwConfig (..)
     , TelnetRef (..)
     , TelnetRef2 (..)
+    , TelnetRef3 (..)
+    , telnetRef3
     , MacIpMap (..)
     , PortMap (..)
     , TelnetRefClass (..)
     , TelnetCtx
+    , TelnetCtx3
     , telnetLogin
+    , TelnetOpClass (..)
     )
   where
 
@@ -31,6 +36,7 @@ import Data.IORef
 import Control.Monad.Trans.Maybe
 import Control.Monad.Reader
 import Control.Monad.Trans.Cont
+import System.IO.Unsafe
 
 import qualified Network.Telnet.LibTelnet as TL
 import qualified Data.ByteString.Char8 as B8
@@ -123,6 +129,24 @@ data TelnetRef2 a   = TelnetRef2
                         }
   deriving (Show)
 
+data TelnetRef3 a   = TelnetRef3
+                        { switchInfo3 :: SwInfo
+                        , telnetState3 :: TelnetState a
+                        , telnetRes :: TelnetOpRes a
+                        }
+
+class TelnetOpClass a where
+    data TelnetOpRes a :: *
+    telnetResDef :: TelnetOpRes a
+    telnetRef3 :: TelnetOpClass a => IORef (TelnetRef3 a)
+    {-# NOINLINE telnetRef3 #-}
+    telnetRef3  = unsafePerformIO . newIORef
+                    $ TelnetRef3 { telnetState3 = Unauth
+                                 , switchInfo3 = undefined
+                                 , telnetRes = telnetResDef
+                                 }
+
+
 -- FIXME: TelnetRef payload (macMap, saveSws) depends on 'a'.. data families?
 instance Eq a => TelnetRefClass TelnetRef2 a where
     userNameC = userName . switchInfo2
@@ -141,6 +165,8 @@ type SwConfig       = M.Map SwName T.Text
 
 -- FIXME: Include TelnetRef into TelnetCtx ?
 type TelnetCtx t a  = ContT () (ReaderT (IORef (t a)) IO)
+
+type TelnetCtx3 a  = ContT () (ReaderT (IORef (TelnetRef3 a)) IO)
 
 withReaderTM :: Monad m => (r' -> m r) -> ReaderT r m a -> ReaderT r' m a
 withReaderTM f m = ask >>= lift . f >>= lift . runReaderT m
