@@ -42,52 +42,78 @@ data FindPort = HuyF
   deriving (Show, Eq)
 
 instance TelnetOpClass FindPort where
-    data TelnetOpRes FindPort = PortId
+    data TelnetOpRes FindPort = MacPortMap
 
-{-saveSwitch :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef2 TelnetWrite ()
-saveSwitch (con, ts) = do
+data FRef = FRef {fInt :: Int, fCont :: Maybe (ReaderT (IORef FRef) IO ())}
+
+fRef :: IORef FRef
+fRef  = unsafePerformIO . newIORef $ FRef {fInt = 0, fCont = Nothing}
+
+f :: ContT () (ReaderT (IORef FRef) IO) ()
+f = shiftT $ \end -> do
     tRef <- ask
-    liftIO $ do
-      r0@TelnetRef2{switchInfo2 = swInfo, telnetState2 = s0, swConfs = mm0} <- readIORef tRef
-      (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
-              then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
-              else flip runStateT mm0 . flip runReaderT swInfo $ go s0
-      atomicWriteIORef tRef r0{telnetState2 = s', swConfs = mm'}
+    r0 <- liftIO (readIORef tRef)
+    let mCont = fCont r0
+    liftIO $ print (fInt r0)
+    maybe (liftIO (print "huy") >> return ()) lift mCont
+
+    mac <- shiftT $ \k1 -> do
+        liftIO $ putStrLn "show mac address"
+        liftIO $ atomicWriteIORef tRef r0{fInt = 1, fCont = Just (k1 "123")}
+        lift (end ())
+
+    shiftT $ \k2 -> do
+        liftIO $ putStrLn ("Read mac table " ++ show mac)
+        liftIO $ atomicWriteIORef tRef r0{fInt = 2, fCont = Just (k2 ())}
+        lift (end ())
+
+    undefined
+    liftIO $ atomicWriteIORef tRef r0{fInt = 3, fCont = Nothing}
+    liftIO $ putStrLn "End"
+
+runF :: IO ()
+runF = do
+    runReaderT (evalContT f) fRef
+    runReaderT (evalContT f) fRef
+    runReaderT (evalContT f) fRef
+
+findPort :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx3 FindPort ()
+findPort (con, ts) = shiftT $ \end -> do
+    tRef <- ask
+    r0 <- liftIO (readIORef tRef)
+    let mCont = telnetCont r0
+        mm0 = telnetRes r0
+    maybe (return ()) lift mCont
+
+{-    forM (M.toList . M.filter isNothing $ mm0) $ \(mac, _) -> do
+        mac <- shiftT $ \k -> do
+            putStrLn $ "show mac address table "
+            TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show mac
+            --liftIO $ atomicWriteIORef tRef r0{telnetCont = Just (k mac)}
+            --end ()
+        return ()
+    return ()-}
+
+    {-
+        shiftT $ \k -> do
+            when ("Mac Address Table" `T.isInfixOf` ts) $ do
+              let sws = parseShowMacAddrTable ts
+              liftIO $ atomicWriteIORef tRef r0{telnetRes = M.insert mac sws mm}
+            when ("#" `T.isSuffixOf` ts) $ do
+              liftIO $ atomicWriteIORef tRef r0{telnetCont = Nothing}
+              liftIO $ TL.telnetSend con . B8.pack $ "exit\n"-}
+
+
+parseShowMacAddrTable :: T.Text -> [SwPort]
+parseShowMacAddrTable = foldr go [] . T.lines
   where
-    go :: TelnetState TelnetWrite -> ReaderT SwInfo (StateT SwConfig IO) (TelnetState TelnetWrite)
-    go s@Enabled
-        | "#" `T.isSuffixOf` ts = do
-            liftIO $ TL.telnetSend con . B8.pack $ "terminal length 0\n"
-            return (Command TermLength)
-        | otherwise = return s
-    go s@(Command TermLength)
-        | "#" `T.isSuffixOf` ts = do
-            liftIO $ TL.telnetSend con . B8.pack $ "show running\n"
-            return (Command ShowRun)
-        | otherwise = return s
-    go s@(Command ShowRun)
-        | "#" `T.isSuffixOf` ts = do
-            curSw <- asks swName
-            liftIO $ putStrLn $ "save continues"
-            modify (M.insertWith (\x y -> y <> x) curSw ts)
-            go (Command WriteRun)
-        | otherwise = do
-            curSw <- asks swName
-            liftIO $ putStrLn $ "save continues"
-            modify (M.insertWith (\x y -> y <> x) curSw ts)
-            return s
-    go s@(Command WriteRun)
-        | "#" `T.isSuffixOf` ts = do
-            liftIO $ TL.telnetSend con . B8.pack $ "write\n"
-            return Exit
-        | otherwise = return s
-    go s@Exit
-        | "#" `T.isSuffixOf` ts   = do
-            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-            return s
-        | otherwise             = return s
-    go _ = error "Huy"
--}
+    go :: T.Text -> [SwPort] -> [SwPort]
+    go t zs = case (T.words t) of
+        (_ : _ : _ : p : _) -> either (const zs) (: zs) (parsePort p)
+        _               -> zs
+
+parsePort :: T.Text -> Either String SwPort
+parsePort = Right . SwPort . read . drop 1 . dropWhile (/= '/') . T.unpack
 
 telnetH :: IORef (TelnetRef3 a) -> (T.Text -> TelnetCtx3 a ()) -> Socket -> TL.EventHandler
 telnetH tRef telnetCmd _ t (TL.Received b)
@@ -95,7 +121,7 @@ telnetH tRef telnetCmd _ t (TL.Received b)
     putStr "R: "
     B8.putStrLn b
     return ()
-    flip runReaderT tRef . evalContT $ (telnetCmd (T.decodeLatin1 b))
+    flip runReaderT tRef . evalContT $ (resetT $ telnetCmd (T.decodeLatin1 b))
 telnetH _ _ s _ (TL.Send b)
   = do
     putStr ("S(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"

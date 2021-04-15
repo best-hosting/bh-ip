@@ -14,6 +14,7 @@ module BH.Switch
     , PortId (..)
     , TelnetState (..)
     , PortMacMap (..)
+    , MacPortMap (..)
     , SwConfig (..)
     , TelnetRef (..)
     , TelnetRef2 (..)
@@ -133,6 +134,7 @@ data TelnetRef3 a   = TelnetRef3
                         { switchInfo3 :: SwInfo
                         , telnetState3 :: TelnetState a
                         , telnetRes :: TelnetOpRes a
+                        , telnetCont :: Maybe (ReaderT (IORef (TelnetRef3 a)) IO ())
                         }
 
 class TelnetOpClass a where
@@ -143,6 +145,7 @@ class TelnetOpClass a where
     telnetRef3  = unsafePerformIO . newIORef
                     $ TelnetRef3 { telnetState3 = Unauth
                                  , switchInfo3 = undefined
+                                 , telnetCont = Nothing
                                  , telnetRes = telnetResDef
                                  }
 
@@ -156,6 +159,8 @@ instance Eq a => TelnetRefClass TelnetRef2 a where
     setTelnetStateC s r = r{telnetState2 = s}
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
+
+type MacPortMap     = M.Map MacAddr (Maybe [PortId])
 
 type MacIpMap       = M.Map MacAddr [IP]
 
