@@ -44,38 +44,141 @@ data FindPort = HuyF
 instance TelnetOpClass FindPort where
     data TelnetOpRes FindPort = MacPortMap
 
-data FRef = FRef {fInt :: Int, fCont :: Maybe (ReaderT (IORef FRef) IO ())}
+data FRef = FRef {fInt :: Int, fCont :: Maybe ResumeFRef}
 
 fRef :: IORef FRef
 fRef  = unsafePerformIO . newIORef $ FRef {fInt = 0, fCont = Nothing}
 
-f :: ContT () (ReaderT (IORef FRef) IO) ()
+type ResumeFRef = ReaderT (IORef FRef) IO ()
+
+{-f :: ContT () (ReaderT (IORef FRef) IO) ()
 f = shiftT $ \end -> do
     tRef <- ask
     r0 <- liftIO (readIORef tRef)
     let mCont = fCont r0
-    liftIO $ print (fInt r0)
-    maybe (liftIO (print "huy") >> return ()) lift mCont
+        n0 = fInt r0
+    liftIO $ print $ "f start: " ++ show n0
+    liftIO $ atomicWriteIORef tRef r0{fInt = n0 + 1}
+    case mCont of
+      Nothing -> liftIO (print "huy")
+      Just c  -> lift (c >> end ())
 
     mac <- shiftT $ \k1 -> do
-        liftIO $ putStrLn "show mac address"
-        liftIO $ atomicWriteIORef tRef r0{fInt = 1, fCont = Just (k1 "123")}
+        liftIO $ putStrLn "-->> show mac address"
+        r1 <- liftIO (readIORef tRef)
+        let mk1 = Just (k1 "123")
+            n1 = fInt r1
+        liftIO $ print n1
+        liftIO $ atomicWriteIORef tRef r1{fInt = n1 + 1}
+        liftIO $ atomicWriteIORef tRef r1{fCont = mk1}
         lift (end ())
 
     shiftT $ \k2 -> do
-        liftIO $ putStrLn ("Read mac table " ++ show mac)
-        liftIO $ atomicWriteIORef tRef r0{fInt = 2, fCont = Just (k2 ())}
+        liftIO $ putStrLn ("-->> Read mac table " ++ show mac)
+        r2 <- liftIO (readIORef tRef)
+        let mk2 = Just (k2 ())
+            n2 = fInt r2
+        liftIO $ print n2
+        liftIO $ atomicWriteIORef tRef r2{fInt = n2 + 1}
+        liftIO $ atomicWriteIORef tRef r2{fInt = 2, fCont = mk2}
         lift (end ())
 
-    undefined
-    liftIO $ atomicWriteIORef tRef r0{fInt = 3, fCont = Nothing}
-    liftIO $ putStrLn "End"
+    r3 <- liftIO (readIORef tRef)
+    let n3 = fInt r3
+    liftIO $ print n3
+    liftIO $ atomicWriteIORef tRef r3{fInt = n3 + 1}
+    liftIO $ atomicWriteIORef tRef r3{fCont = Nothing}
+    liftIO $ putStrLn "End"-}
+
+f0 :: ContT () (ReaderT (IORef FRef) IO) ()
+f0 = do
+    tRef <- ask
+    r0 <- liftIO (readIORef tRef)
+    let mCont = fCont r0
+        n0 = fInt r0
+    liftIO $ print $ "f start: " ++ show n0
+    liftIO $ atomicWriteIORef tRef r0{fInt = n0 + 1}
+    case mCont of
+      Nothing -> liftIO (print "huy") >> f'
+      Just c  -> lift c
+
+f' :: ContT () (ReaderT (IORef FRef) IO) ()
+f' = shiftT $ \end -> do
+    tRef <- ask
+    mac <- shiftT $ \k1 -> do
+        liftIO $ putStrLn "-->> show mac address"
+        r1 <- liftIO (readIORef tRef)
+        let mk1 = Just (k1 "123")
+            n1 = fInt r1
+        liftIO $ print n1
+        liftIO $ atomicWriteIORef tRef r1{fInt = n1 + 1, fCont = mk1}
+        lift (end ())
+
+    shiftT $ \k2 -> do
+        liftIO $ putStrLn ("-->> Read mac table " ++ show mac)
+        r2 <- liftIO (readIORef tRef)
+        let mk2 = Just (k2 ())
+            n2 = fInt r2
+        liftIO $ print n2
+        if n2 < 4
+          then liftIO $ atomicWriteIORef tRef r2{fInt = n2 + 1}
+          else liftIO $ atomicWriteIORef tRef r2{fInt = n2 + 1, fCont = mk2}
+        lift (end ())
+
+    r3 <- liftIO (readIORef tRef)
+    let n3 = fInt r3
+    liftIO $ print n3
+    liftIO $ atomicWriteIORef tRef r3{fInt = n3 + 1, fCont = Nothing}
+    liftIO $ putStrLn "-->> End"
+
+runF'2 :: IO ()
+runF'2 = do
+    r_init <- liftIO (readIORef fRef)
+    liftIO $ atomicWriteIORef fRef r_init{fInt = 0, fCont = Nothing}
+    let f = f0
+    flip runReaderT fRef . evalContT $ f
+    print "A"
+    flip runReaderT fRef . evalContT $ f
+    print "B"
+    flip runReaderT fRef . evalContT $ f
+    print "C"
+    flip runReaderT fRef . evalContT $ f
+    print "D"
+
+runF' :: IO ()
+runF' = do
+    r_init <- liftIO (readIORef fRef)
+    liftIO $ atomicWriteIORef fRef r_init{fInt = 0, fCont = Nothing}
+    let f = f0
+    flip runReaderT fRef . evalContT $ f
+
+    rF1 <- liftIO (readIORef fRef)
+    let Just kF1 = fCont rF1
+    liftIO $ putStrLn "runF calling to read.."
+    flip runReaderT fRef $ kF1
+
+    rF2 <- liftIO (readIORef fRef)
+    let Just kF2 = fCont rF2
+    liftIO $ putStrLn "runF calling to finish.."
+    flip runReaderT fRef $ kF2
+    return ()
 
 runF :: IO ()
 runF = do
-    runReaderT (evalContT f) fRef
-    runReaderT (evalContT f) fRef
-    runReaderT (evalContT f) fRef
+    r_init <- liftIO (readIORef fRef)
+    liftIO $ atomicWriteIORef fRef r_init{fInt = 0, fCont = Nothing}
+    let f = f0
+    flip runReaderT fRef . evalContT $ do
+        resetT f
+        rF1 <- liftIO (readIORef fRef)
+        let Just kF1 = fCont rF1
+        liftIO $ putStrLn "runF calling to read.."
+        lift kF1
+        rF2 <- liftIO (readIORef fRef)
+        let Just kF2 = fCont rF2
+        liftIO $ putStrLn "runF calling to finish.."
+        lift kF2
+        return ()
 
 findPort :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx3 FindPort ()
 findPort (con, ts) = shiftT $ \end -> do
