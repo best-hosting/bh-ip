@@ -144,6 +144,8 @@ runF'2 = do
     print "C"
     flip runReaderT fRef . evalContT $ f
     print "D"
+    flip runReaderT fRef . evalContT $ f
+    print "E"
 
 runF' :: IO ()
 runF' = do
@@ -242,8 +244,102 @@ telnetH _ _ _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH _ _ _ _ _ = pure ()
 
-main :: IO ()
-main = undefined
+telnetH4 :: CmdReader a -> ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> Socket -> TL.EventHandler
+telnetH4 cr telnetCmd _ con (TL.Received b)
+  = do
+    putStr "R: "
+    B8.putStrLn b
+    return ()
+    flip runReaderT cr . evalContT $ (runCmd (con, T.decodeLatin1 b) telnetCmd)
+telnetH4 _ _ s _ (TL.Send b)
+  = do
+    putStr ("S(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
+    print (L.map ord (B8.unpack b))
+    send s b
+telnetH4 _ _ _ _ (TL.Do o)
+  = putStr $ "DO " ++ show o ++ "\n"
+telnetH4 _ _ _ _ (TL.Dont o)
+  = putStr $ "DON'T " ++ show o ++ "\n"
+telnetH4 _ _ _ _ (TL.Will o)
+  = putStr $ "Will " ++ show o ++ "\n"
+telnetH4 _ _ _ _ (TL.Wont o)
+  = putStr $ "WON'T " ++ show o ++ "\n"
+telnetH4 _ _ _ _ (TL.Iac i)
+  = putStr $ "IAC " ++ show i ++ "\n"
+telnetH4 _ _ _ _ _ = pure ()
+
+loginCmd :: (TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader Int) IO) ()
+loginCmd (con, ts) = shiftT $ \end -> do
+    tRef <- asks telRef
+    (_, ts2) <- shiftT $ \k1 -> do
+        case ts of
+          _
+            | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts -> do
+                user <- asks (userName . switchInfo4)
+                liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+                r1 <- liftIO (readIORef tRef)
+                let n1 = tInt r1
+                liftIO $ print n1
+                liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
+                lift (end ())
+           | otherwise -> lift (end ())
+    shiftT $ \k2 -> do
+        case ts of
+          _
+            | "Password" `T.isInfixOf` ts2 -> do
+                user <- asks (password . switchInfo4)
+                liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+                r1 <- liftIO (readIORef tRef)
+                let n1 = tInt r1
+                liftIO $ print n1
+                liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
+                lift (end ())
+            -- FIXME: May be drop unexpected state?
+            | otherwise                 -> liftIO (print "AAA") >> lift (end ())
+
+runCmd :: (TL.TelnetPtr, T.Text) -> ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> ContT () (ReaderT (CmdReader a ) IO) ()
+runCmd (con, ts) cmd = do
+    tRef <- asks telRef
+    r0 <- liftIO (readIORef tRef)
+    let mCont = tResume r0
+        mFinal = tFinal r0
+        n0 = tInt r0
+    liftIO $ print $ "f start: " ++ show n0
+    liftIO $ atomicWriteIORef tRef r0{tInt = n0 + 1}
+    if isNothing mFinal
+      then
+        case mCont of
+          Nothing -> liftIO (print "huy") >> cmd (con, ts)
+          Just c  -> lift (c (con, ts))
+      else
+        error "huynya"
+
+run4 :: ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
+run4 telnetCmd = do
+    sws <- asks M.keys
+    forM_ sws $ \sw -> do
+        mSwInfo <- asks (M.lookup sw)
+        case mSwInfo of
+          Just swInfo@SwInfo{hostName = h} -> liftIO $ do
+            print $ "Connect to " ++ show h
+            let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4}
+            connect h "23" (\(s, _) -> handle cr s)
+          Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
+    tFinal <$> liftIO (readIORef telnetRef4)
+  where
+    --handle :: CmdReader a -> Socket -> IO ()
+    handle cr sock = do
+        telnet <- TL.telnetInit telnetOpts [] (telnetH4 cr telnetCmd sock)
+        whileJust_ (recv sock 4096) $ \bs -> do
+            let bl = B8.length bs
+            putStr $ "Socket (" ++ show bl ++ "): "
+            B8.putStrLn bs
+            TL.telnetRecv telnet bs
+
+    telnetOpts :: [TL.OptionSpec]
+    telnetOpts  = [ TL.OptionSpec TL.optEcho True True
+                  --, TL.OptionSpec TL.optLineMode True True
+                  ]
 
 run :: TelnetOpClass a => IORef (TelnetRef3 a) -> (T.Text -> TelnetCtx3 a ()) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (TelnetOpRes a)
 run tRef telnetCmd = do
@@ -277,15 +373,15 @@ run tRef telnetCmd = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-{-main :: IO ()
+main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
     sip <- head . map (parseIP . T.pack) <$> getArgs
     print sip
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run
+      mm <- flip runReaderT swInfo $ run4 loginCmd
       liftIO $ print $ "Found port:"
     case res of
       Right _ -> return ()
-      Left err -> print err-}
+      Left err -> print err

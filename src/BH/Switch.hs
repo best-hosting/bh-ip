@@ -20,6 +20,9 @@ module BH.Switch
     , TelnetRef2 (..)
     , TelnetRef3 (..)
     , telnetRef3
+    , TelnetRef4 (..)
+    , telnetRef4
+    , CmdReader (..)
     , MacIpMap (..)
     , PortMap (..)
     , TelnetRefClass (..)
@@ -149,6 +152,23 @@ class TelnetOpClass a where
                                  , telnetRes = telnetResDef
                                  }
 
+data TelnetRef4 a   = TelnetRef4
+                        { tFinal  :: Maybe a
+                        , tResume :: Maybe ((TL.TelnetPtr, T.Text) -> ReaderT (CmdReader a) IO ())
+                        , tInt :: Int
+                        }
+
+telnetRef4 :: IORef (TelnetRef4 a)
+{-# NOINLINE telnetRef4 #-}
+telnetRef4  = unsafePerformIO . newIORef
+                $ TelnetRef4 { tResume = Nothing
+                             , tFinal = Nothing
+                             , tInt = 0
+                             }
+
+data CmdReader a = CmdReader  { switchInfo4 :: SwInfo
+                            , telRef :: IORef (TelnetRef4 a)
+                            }
 
 -- FIXME: TelnetRef payload (macMap, saveSws) depends on 'a'.. data families?
 instance Eq a => TelnetRefClass TelnetRef2 a where
