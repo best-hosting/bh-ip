@@ -284,7 +284,7 @@ loginCmd (con, ts) = shiftT $ \end -> do
                 lift (end ())
            | otherwise -> lift (end ())
     shiftT $ \k2 -> do
-        case ts of
+        case ts2 of
           _
             | "Password" `T.isInfixOf` ts2 -> do
                 user <- asks (password . switchInfo4)
