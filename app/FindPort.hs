@@ -225,7 +225,7 @@ telnetH tRef telnetCmd _ t (TL.Received b)
   = do
     putStr "R: "
     B8.putStrLn b
-    return ()
+    putStr ("S(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
     flip runReaderT tRef . evalContT $ (resetT $ telnetCmd (T.decodeLatin1 b))
 telnetH _ _ s _ (TL.Send b)
   = do
@@ -247,9 +247,8 @@ telnetH _ _ _ _ _ = pure ()
 telnetH4 :: CmdReader a -> ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> Socket -> TL.EventHandler
 telnetH4 cr telnetCmd _ con (TL.Received b)
   = do
-    putStr "R: "
-    B8.putStrLn b
-    return ()
+    putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
+    print (L.map ord (B8.unpack b))
     flip runReaderT cr . evalContT $ (runCmd (con, T.decodeLatin1 b) telnetCmd)
 telnetH4 _ _ s _ (TL.Send b)
   = do
@@ -283,7 +282,7 @@ loginCmd (con, ts) = shiftT $ \end -> do
                 liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
                 lift (end ())
            | otherwise -> lift (end ())
-    shiftT $ \k2 -> do
+    (_, ts3) <- shiftT $ \k2 -> do
         case ts2 of
           _
             | "Password" `T.isInfixOf` ts2 -> do
@@ -292,10 +291,40 @@ loginCmd (con, ts) = shiftT $ \end -> do
                 r1 <- liftIO (readIORef tRef)
                 let n1 = tInt r1
                 liftIO $ print n1
-                liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
+                liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k2}
                 lift (end ())
             -- FIXME: May be drop unexpected state?
-            | otherwise                 -> liftIO (print "AAA") >> lift (end ())
+            | otherwise                 -> lift (end ())
+    (_, ts4) <- shiftT $ \k3 -> do
+      if ">" `T.isSuffixOf` ts3
+        then do
+          liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
+          r1 <- liftIO (readIORef tRef)
+          let n1 = tInt r1
+          liftIO $ print n1
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k3}
+          lift (end ())
+        else liftIO (print "AAA") >> lift (end ())
+    (_, ts5) <- shiftT $ \k4 -> do
+      if "Password" `T.isInfixOf` ts4
+        then do
+          enpw <- asks (enablePassword . switchInfo4)
+          liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+          r1 <- liftIO (readIORef tRef)
+          let n1 = tInt r1
+          liftIO $ print n1
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k4}
+          lift (end ())
+        else lift (end ())
+    if "#" `T.isSuffixOf` ts5
+      then do
+        liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+        r1 <- liftIO (readIORef tRef)
+        let n1 = tInt r1
+        liftIO $ print n1
+        liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
+        lift (end ())
+      else lift (end ())
 
 runCmd :: (TL.TelnetPtr, T.Text) -> ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> ContT () (ReaderT (CmdReader a ) IO) ()
 runCmd (con, ts) cmd = do
@@ -310,9 +339,8 @@ runCmd (con, ts) cmd = do
       then
         case mCont of
           Nothing -> liftIO (print "huy") >> cmd (con, ts)
-          Just c  -> lift (c (con, ts))
-      else
-        error "huynya"
+          Just c  -> liftIO (print "cont") >> lift (c (con, ts))
+      else return ()
 
 run4 :: ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
 run4 telnetCmd = do
