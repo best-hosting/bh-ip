@@ -182,14 +182,6 @@ runF = do
         lift kF2
         return ()
 
-findPort :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx3 FindPort ()
-findPort (con, ts) = shiftT $ \end -> do
-    tRef <- ask
-    r0 <- liftIO (readIORef tRef)
-    let mCont = telnetCont r0
-        mm0 = telnetRes r0
-    maybe (return ()) lift mCont
-
 {-    forM (M.toList . M.filter isNothing $ mm0) $ \(mac, _) -> do
         mac <- shiftT $ \k -> do
             putStrLn $ "show mac address table "
@@ -244,7 +236,7 @@ telnetH _ _ _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH _ _ _ _ _ = pure ()
 
-telnetH4 :: CmdReader a -> ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> Socket -> TL.EventHandler
+telnetH4 :: CmdReader a -> (TelnetCmd a) -> Socket -> TL.EventHandler
 telnetH4 cr telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
@@ -267,22 +259,22 @@ telnetH4 _ _ _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH4 _ _ _ _ _ = pure ()
 
-loginCmd :: (TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader Int) IO) ()
-loginCmd (con, ts) = shiftT $ \end -> do
+loginCmd :: (TL.TelnetPtr, TelnetEnd Int, T.Text) -> ContT () (ReaderT (CmdReader Int) IO) (TL.TelnetPtr, TelnetEnd Int, T.Text)
+loginCmd (con, suspend1, ts1) = shiftT $ \finish -> do
     tRef <- asks telRef
-    (_, ts2) <- shiftT $ \k1 -> do
-        case ts of
-          _
-            | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts -> do
-                user <- asks (userName . switchInfo4)
-                liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-                r1 <- liftIO (readIORef tRef)
-                let n1 = tInt r1
-                liftIO $ print n1
-                liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
-                lift (end ())
-           | otherwise -> lift (end ())
-    (_, ts3) <- shiftT $ \k2 -> do
+    (_, suspend2, ts2) <- shiftT $ \k1 -> do
+      if "Username" `T.isInfixOf` ts1 || "User Name" `T.isInfixOf` ts1
+        then do
+          user <- asks (userName . switchInfo4)
+          liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+          r1 <- liftIO (readIORef tRef)
+          let n1 = tInt r1
+          liftIO $ print n1
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
+          lift (suspend1 ())
+        else lift (suspend1 ())
+    return ()
+    (_, suspend3, ts3) <- shiftT $ \k2 -> do
         case ts2 of
           _
             | "Password" `T.isInfixOf` ts2 -> do
@@ -292,10 +284,10 @@ loginCmd (con, ts) = shiftT $ \end -> do
                 let n1 = tInt r1
                 liftIO $ print n1
                 liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k2}
-                lift (end ())
+                lift (suspend2 ())
             -- FIXME: May be drop unexpected state?
-            | otherwise                 -> lift (end ())
-    (_, ts4) <- shiftT $ \k3 -> do
+            | otherwise                 -> lift (suspend2 ())
+    (_, suspend4, ts4) <- shiftT $ \k3 -> do
       if ">" `T.isSuffixOf` ts3
         then do
           liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
@@ -303,9 +295,9 @@ loginCmd (con, ts) = shiftT $ \end -> do
           let n1 = tInt r1
           liftIO $ print n1
           liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k3}
-          lift (end ())
-        else liftIO (print "AAA") >> lift (end ())
-    (_, ts5) <- shiftT $ \k4 -> do
+          lift (suspend3 ())
+        else liftIO (print "AAA") >> lift (suspend3 ())
+    (con5, suspend5, ts5) <- shiftT $ \k4 -> do
       if "Password" `T.isInfixOf` ts4
         then do
           enpw <- asks (enablePassword . switchInfo4)
@@ -314,19 +306,43 @@ loginCmd (con, ts) = shiftT $ \end -> do
           let n1 = tInt r1
           liftIO $ print n1
           liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k4}
-          lift (end ())
-        else lift (end ())
+          lift (suspend4 ())
+        else lift (suspend4 ())
     if "#" `T.isSuffixOf` ts5
       then do
-        liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+        --liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
         r1 <- liftIO (readIORef tRef)
         let n1 = tInt r1
         liftIO $ print n1
         liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
-        lift (end ())
-      else lift (end ())
+        lift (finish (con5, suspend5, ts5))
+      else lift (suspend5 ())
 
-runCmd :: (TL.TelnetPtr, T.Text) -> ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> ContT () (ReaderT (CmdReader a ) IO) ()
+findPort :: TelnetCmd Int
+findPort (con, suspend1, ts1) = shiftT $ \finish -> do
+    tRef <- asks telRef
+    (_, suspend2, ts2) <- shiftT $ \k1 -> do
+      if "#" `T.isSuffixOf` ts1
+        then do
+          m <- asks findMac
+          liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
+          r1 <- liftIO (readIORef tRef)
+          let n1 = tInt r1
+          liftIO $ print n1
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
+          lift (suspend1 ())
+        else lift (suspend1 ())
+    liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+    r1 <- liftIO (readIORef tRef)
+    let n1 = tInt r1
+    liftIO $ print n1
+    liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
+    lift (finish ())
+    lift (finish ())
+
+runCmd :: (TL.TelnetPtr, T.Text)
+          -> (TelnetCmd a)
+          -> ContT () (ReaderT (CmdReader a ) IO) ()
 runCmd (con, ts) cmd = do
     tRef <- asks telRef
     r0 <- liftIO (readIORef tRef)
@@ -335,22 +351,23 @@ runCmd (con, ts) cmd = do
         n0 = tInt r0
     liftIO $ print $ "f start: " ++ show n0
     liftIO $ atomicWriteIORef tRef r0{tInt = n0 + 1}
-    if isNothing mFinal
-      then
-        case mCont of
-          Nothing -> liftIO (print "huy") >> cmd (con, ts)
-          Just c  -> liftIO (print "cont") >> lift (c (con, ts))
-      else return ()
+    shiftT $ \end -> do
+      if isNothing mFinal
+        then
+          case mCont of
+            Nothing -> liftIO (print "huy")  >> cmd (con, end, ts)
+            Just c  -> liftIO (print "cont") >> lift (c (con, end, ts))
+        else return ()
 
-run4 :: ((TL.TelnetPtr, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
+run4 :: (TelnetCmd a) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
 run4 telnetCmd = do
     sws <- asks M.keys
-    forM_ sws $ \sw -> do
+    forM_ [head sws] $ \sw -> do
         mSwInfo <- asks (M.lookup sw)
         case mSwInfo of
           Just swInfo@SwInfo{hostName = h} -> liftIO $ do
             print $ "Connect to " ++ show h
-            let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4}
+            let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, findMac = MacAddr "003048830f9c"}
             connect h "23" (\(s, _) -> handle cr s)
           Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
     tFinal <$> liftIO (readIORef telnetRef4)
@@ -408,7 +425,7 @@ main    = do
     sip <- head . map (parseIP . T.pack) <$> getArgs
     print sip
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run4 loginCmd
+      mm <- flip runReaderT swInfo $ run4 (findPort <=< loginCmd)
       liftIO $ print $ "Found port:"
     case res of
       Right _ -> return ()
