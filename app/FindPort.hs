@@ -298,16 +298,14 @@ loginCmd (con, suspend1, ts1) = shiftT $ \finish -> do
           lift (suspend3 ())
         else liftIO (print "AAA") >> lift (suspend3 ())
     (con5, suspend5, ts5) <- shiftT $ \k4 -> do
-      if "Password" `T.isInfixOf` ts4
-        then do
-          enpw <- asks (enablePassword . switchInfo4)
-          liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-          r1 <- liftIO (readIORef tRef)
-          let n1 = tInt r1
-          liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k4}
-          lift (suspend4 ())
-        else lift (suspend4 ())
+      when ("Password" `T.isInfixOf` ts4) $ do
+        enpw <- asks (enablePassword . switchInfo4)
+        liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+        r1 <- liftIO (readIORef tRef)
+        let n1 = tInt r1
+        liftIO $ print n1
+        liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k4}
+      lift (suspend4 ())
     if "#" `T.isSuffixOf` ts5
       then do
         --liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
