@@ -210,7 +210,9 @@ parseShowMacAddrTable = foldr go [] . T.lines
         _               -> zs
 
 parsePort :: T.Text -> Either String SwPort
-parsePort = Right . SwPort . read . drop 1 . dropWhile (/= '/') . T.unpack
+parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
+  (n, _) : _ -> Right (SwPort n)
+  _          -> Left "Huy"
 
 telnetH :: IORef (TelnetRef3 a) -> (T.Text -> TelnetCtx3 a ()) -> Socket -> TL.EventHandler
 telnetH tRef telnetCmd _ t (TL.Received b)
@@ -259,7 +261,7 @@ telnetH4 _ _ _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH4 _ _ _ _ _ = pure ()
 
-loginCmd :: (TL.TelnetPtr, TelnetEnd Int, T.Text) -> ContT () (ReaderT (CmdReader Int) IO) (TL.TelnetPtr, TelnetEnd Int, T.Text)
+loginCmd :: (TL.TelnetPtr, TelnetEnd a, T.Text) -> ContT () (ReaderT (CmdReader a) IO) (TL.TelnetPtr, TelnetEnd a, T.Text)
 loginCmd (con, suspend1, ts1) = shiftT $ \finish -> do
     tRef <- asks telRef
     (_, suspend2, ts2) <- shiftT $ \k1 -> do
@@ -334,7 +336,7 @@ execCmd (con, suspend, ts) = shiftT $ \k -> do
           lift (suspend1 ())
         else lift (suspend1 ())-}
 
-findPort :: TelnetCmd Int
+findPort :: TelnetCmd [SwPort]
 findPort (con, suspend1, ts1) = shiftT $ \finish -> do
     tRef <- asks telRef
     (_, suspend2, ts2) <- shiftT $ \k1 -> do
@@ -350,16 +352,18 @@ findPort (con, suspend1, ts1) = shiftT $ \finish -> do
           lift (suspend1 ())
         else lift (suspend1 ())
     (_, suspend3, ts3) <- shiftT $ \k2 -> do
-      when ("Mac Address Table" `T.isInfixOf` ts2 || "Mac Address" `T.isInfixOf` ts2) $ do
-        let swp = parseShowMacAddrTable ts2
-        liftIO $ putStrLn $ "parse port "
+      swp <-
+        if "Mac Address Table" `T.isInfixOf` ts2 || "Mac Address" `T.isInfixOf` ts2 then do
+          liftIO $ putStrLn $ "parse port "
+          return (parseShowMacAddrTable ts2)
+        else return []
       if "#" `T.isSuffixOf` ts2
         then do
           liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
           r1 <- liftIO (readIORef tRef)
           let n1 = tInt r1
           liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k2}
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k2, tFinal = Just swp}
           lift (suspend2 ())
         else lift (suspend2 ())
     return ()
@@ -450,7 +454,7 @@ main    = do
     print sip
     res <- runExceptT $ do
       mm <- flip runReaderT swInfo $ run4 (findPort <=< loginCmd)
-      liftIO $ print $ "Found port:"
+      liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()
       Left err -> print err
