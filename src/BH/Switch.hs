@@ -182,6 +182,7 @@ telnetRef4  = unsafePerformIO . newIORef
 -- a query. Though, if i consider all this not as queries/response, but just
 -- like input/program/output, then..
 data CmdReader a = CmdReader { switchInfo4 :: SwInfo
+                             , tCon :: TL.TelnetPtr
                              , findMac :: MacAddr
                              , telRef :: IORef (TelnetRef4 a)
                              }
