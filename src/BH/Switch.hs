@@ -155,10 +155,10 @@ class TelnetOpClass a where
                                  , telnetRes = telnetResDef
                                  }
 
-type TelnetEnd a = ()                                  -> ReaderT (CmdReader a) IO ()
-type TelnetRes a = (TL.TelnetPtr, TelnetEnd a, T.Text) -> ReaderT (CmdReader a) IO ()
+type TelnetEnd a = ()     -> ReaderT (CmdReader a) IO ()
+type TelnetRes a = T.Text -> ReaderT (CmdReader a) IO ()
 
-type TelnetCmd a = (TL.TelnetPtr, TelnetEnd a, T.Text) -> ContT () (ReaderT (CmdReader a) IO) ()
+type TelnetCmd a = T.Text -> ContT () (ReaderT (CmdReader a) IO) ()
 data TelnetRef4 a   = TelnetRef4
                         { tFinal  :: Maybe a
                         , tResume :: Maybe (TelnetRes a)
