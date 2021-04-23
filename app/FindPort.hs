@@ -273,7 +273,6 @@ loginCmd (con, suspend1, ts1) = shiftT $ \finish -> do
           liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
           lift (suspend1 ())
         else lift (suspend1 ())
-    return ()
     (_, suspend3, ts3) <- shiftT $ \k2 -> do
         case ts2 of
           _
@@ -312,9 +311,28 @@ loginCmd (con, suspend1, ts1) = shiftT $ \finish -> do
         r1 <- liftIO (readIORef tRef)
         let n1 = tInt r1
         liftIO $ print n1
-        liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
+        liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing}
         lift (finish (con5, suspend5, ts5))
       else lift (suspend5 ())
+
+{-execCmd :: ((TL.TelnetPtr, TelnetEnd a, T.Text) -> ReaderT (CmdReader a) IO ())
+            -> ContT () (ReaderT (CmdReader a) IO) (TL.TelnetPtr, TelnetEnd a, T.Text)
+execCmd (con, suspend, ts) = shiftT $ \k -> do
+      ts <- get
+      if "#" `T.isSuffixOf` ts
+        then do
+          m <- asks findMac
+          liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
+          suspendAndFinish
+            (susp, resume) <- get
+            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just resume}
+            susp ()
+          r1 <- liftIO (readIORef tRef)
+          let n1 = tInt r1
+          liftIO $ print n1
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
+          lift (suspend1 ())
+        else lift (suspend1 ())-}
 
 findPort :: TelnetCmd Int
 findPort (con, suspend1, ts1) = shiftT $ \finish -> do
@@ -324,19 +342,27 @@ findPort (con, suspend1, ts1) = shiftT $ \finish -> do
         then do
           m <- asks findMac
           liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
+          liftIO $ putStrLn $ "show port "
           r1 <- liftIO (readIORef tRef)
           let n1 = tInt r1
           liftIO $ print n1
           liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k1}
           lift (suspend1 ())
         else lift (suspend1 ())
-    liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-    r1 <- liftIO (readIORef tRef)
-    let n1 = tInt r1
-    liftIO $ print n1
-    liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing, tFinal = Just 1}
-    lift (finish ())
-    lift (finish ())
+    (_, suspend3, ts3) <- shiftT $ \k2 -> do
+      when ("Mac Address Table" `T.isInfixOf` ts2 || "Mac Address" `T.isInfixOf` ts2) $ do
+        let swp = parseShowMacAddrTable ts2
+        liftIO $ putStrLn $ "parse port "
+      if "#" `T.isSuffixOf` ts2
+        then do
+          liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+          r1 <- liftIO (readIORef tRef)
+          let n1 = tInt r1
+          liftIO $ print n1
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k2}
+          lift (suspend2 ())
+        else lift (suspend2 ())
+    return ()
 
 runCmd :: (TL.TelnetPtr, T.Text)
           -> (TelnetCmd a)
@@ -355,7 +381,7 @@ runCmd (con, ts) cmd = do
           case mCont of
             Nothing -> liftIO (print "huy")  >> cmd (con, end, ts)
             Just c  -> liftIO (print "cont") >> lift (c (con, end, ts))
-        else return ()
+        else liftIO (print "A nehuya") >> return ()
 
 run4 :: (TelnetCmd a) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
 run4 telnetCmd = do
