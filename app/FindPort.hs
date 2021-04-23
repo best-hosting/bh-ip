@@ -387,15 +387,15 @@ runCmd (con, ts) cmd = do
             Just c  -> liftIO (print "cont") >> lift (c (con, end, ts))
         else liftIO (print "A nehuya") >> return ()
 
-run4 :: (TelnetCmd a) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
-run4 telnetCmd = do
+run4 :: MacAddr -> (TelnetCmd a) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)
+run4 mac telnetCmd = do
     sws <- asks M.keys
     forM_ [head sws] $ \sw -> do
         mSwInfo <- asks (M.lookup sw)
         case mSwInfo of
           Just swInfo@SwInfo{hostName = h} -> liftIO $ do
             print $ "Connect to " ++ show h
-            let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, findMac = MacAddr "003048830f9c"}
+            let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, findMac = mac}
             connect h "23" (\(s, _) -> handle cr s)
           Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
     tFinal <$> liftIO (readIORef telnetRef4)
@@ -450,10 +450,10 @@ main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
-    sip <- head . map (parseIP . T.pack) <$> getArgs
-    print sip
+    Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
+    print mac
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run4 (findPort <=< loginCmd)
+      mm <- flip runReaderT swInfo $ run4 mac (findPort <=< loginCmd)
       liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()
