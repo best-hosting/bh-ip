@@ -385,6 +385,7 @@ runCmd (con, ts) cmd = do
           case mCont of
             Nothing -> liftIO (print "huy")  >> cmd (con, end, ts)
             Just c  -> liftIO (print "cont") >> lift (c (con, end, ts))
+        -- FIXME: Do i need this or just short-circuit in program itself?
         else liftIO (print "A nehuya") >> return ()
 
 run4 :: MacAddr -> (TelnetCmd a) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe a)

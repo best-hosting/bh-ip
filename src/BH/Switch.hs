@@ -173,6 +173,14 @@ telnetRef4  = unsafePerformIO . newIORef
                              , tInt = 0
                              }
 
+-- FIXME: Query, result and program (telnet commands) are all bound together.
+-- I.e. if i query by IP, i definitely need 'findPort' and result will be
+-- switch port. Etc. That means, i may group this triple: query type, result
+-- type and actual function to execute after login into single class instance.
+--
+-- That been said, the 'config save' operation is different: it does not have
+-- a query. Though, if i consider all this not as queries/response, but just
+-- like input/program/output, then..
 data CmdReader a = CmdReader { switchInfo4 :: SwInfo
                              , findMac :: MacAddr
                              , telRef :: IORef (TelnetRef4 a)
