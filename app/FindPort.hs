@@ -261,76 +261,86 @@ telnetH4 _ _ _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
 telnetH4 _ _ _ _ _ = pure ()
 
+shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
+shiftW f x = shiftT (\k -> f (k, x))
+
 loginCmd :: T.Text -> ContT () (ReaderT (CmdReader a) IO) T.Text
-loginCmd ts1 = shiftT $ \finish -> do
+loginCmd ts0 = shiftT $ \finish -> do
     tRef <- asks telRef
     con  <- asks tCon
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
-    ts2 <- shiftT $ \k -> do
-      when ("Username" `T.isInfixOf` ts1 || "User Name" `T.isInfixOf` ts1) $ do
-          user <- asks (userName . switchInfo4)
-          liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+    pure ts0 >>=
+      shiftW (\(k, ts) -> do
+          when ("Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts) $ do
+            user <- asks (userName . switchInfo4)
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            r1 <- liftIO (readIORef tRef)
+            let n1 = tInt r1
+            liftIO $ print n1
+            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+        ) >>=
+      shiftW (\(k, ts) -> do
+          when ("Password" `T.isInfixOf` ts) $ do
+            user <- asks (password . switchInfo4)
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            r1 <- liftIO (readIORef tRef)
+            let n1 = tInt r1
+            liftIO $ print n1
+            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+        ) >>=
+      shiftW (\(k, ts) -> do
+          when (">" `T.isSuffixOf` ts) $ do
+              liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
+              r1 <- liftIO (readIORef tRef)
+              let n1 = tInt r1
+              liftIO $ print n1
+              liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+        ) >>=
+      shiftW (\(k, ts) -> do
+          when ("Password" `T.isInfixOf` ts) $ do
+            enpw <- asks (enablePassword . switchInfo4)
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+            r1 <- liftIO (readIORef tRef)
+            let n1 = tInt r1
+            liftIO $ print n1
+            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+        ) >>= \ts ->
+      when ("#" `T.isSuffixOf` ts) $ do
           r1 <- liftIO (readIORef tRef)
           let n1 = tInt r1
           liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
-    ts3 <- shiftT $ \k -> do
-        when ("Password" `T.isInfixOf` ts2) $ do
-          user <- asks (password . switchInfo4)
-          liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-          r1 <- liftIO (readIORef tRef)
-          let n1 = tInt r1
-          liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
-    ts4 <- shiftT $ \k -> do
-      when (">" `T.isSuffixOf` ts3) $ do
-          liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
-          r1 <- liftIO (readIORef tRef)
-          let n1 = tInt r1
-          liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
-    ts5 <- shiftT $ \k -> do
-      when ("Password" `T.isInfixOf` ts4) $ do
-        enpw <- asks (enablePassword . switchInfo4)
-        liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-        r1 <- liftIO (readIORef tRef)
-        let n1 = tInt r1
-        liftIO $ print n1
-        liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
-    when ("#" `T.isSuffixOf` ts5) $ do
-        r1 <- liftIO (readIORef tRef)
-        let n1 = tInt r1
-        liftIO $ print n1
-        liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing}
-        lift (finish ts5)
+          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing}
+          lift (finish ts)
 
 findPort :: TelnetCmd [SwPort]
-findPort ts1 = do
+findPort ts0 = do
     tRef <- asks telRef
     con  <- asks tCon
-    ts2 <- shiftT $ \k ->
-      when ("#" `T.isSuffixOf` ts1) $ do
-          m <- asks findMac
-          liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
-          liftIO $ putStrLn $ "show port "
-          r1 <- liftIO (readIORef tRef)
-          let n1 = tInt r1
-          liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
-    _ <- shiftT $ \k -> do
-      swp <-
-        if "Mac Address Table" `T.isInfixOf` ts2 || "Mac Address" `T.isInfixOf` ts2 then do
-          liftIO $ putStrLn $ "parse port "
-          return (parseShowMacAddrTable ts2)
-        else return []
-      when ("#" `T.isSuffixOf` ts2) $ do
-          liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-          r1 <- liftIO (readIORef tRef)
-          let n1 = tInt r1
-          liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k, tFinal = Just swp}
-    return ()
+    pure ts0 >>=
+      shiftW (\(k, ts) ->
+        when ("#" `T.isSuffixOf` ts) $ do
+            m <- asks findMac
+            liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
+            liftIO $ putStrLn $ "show port "
+            r1 <- liftIO (readIORef tRef)
+            let n1 = tInt r1
+            liftIO $ print n1
+            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+        ) >>=
+      shiftW (\(k, ts) -> do
+        swp <-
+          if "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts then do
+            liftIO $ putStrLn $ "parse port "
+            return (parseShowMacAddrTable ts)
+          else return []
+        when ("#" `T.isSuffixOf` ts) $ do
+            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+            r1 <- liftIO (readIORef tRef)
+            let n1 = tInt r1
+            liftIO $ print n1
+            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just (\_ -> k ()), tFinal = Just swp}
+        )
 
 runCmd :: T.Text
           -> (TelnetCmd a)
