@@ -72,7 +72,7 @@ findPort ts0 = do
         when ("#" `T.isSuffixOf` ts) $ do
             liftIO $ do
               TL.telnetSend con . B8.pack $ "exit\n"
-              atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> k ()), tFinal = Just swp}, ()))
+              atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ()), tFinal = Just swp}, ()))
         )
 
 main :: IO ()
