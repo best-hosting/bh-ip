@@ -323,7 +323,7 @@ loginCmd ts0 = shiftT $ \finish -> do
               atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>= \ts ->
       when ("#" `T.isSuffixOf` ts) $ do
-          liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Nothing}, ()))
+          liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ())}, ()))
           lift (finish ts)
 
 run :: a -> (TelnetCmd a b) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
