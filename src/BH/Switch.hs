@@ -21,9 +21,7 @@ module BH.Switch
     , TelnetRef3 (..)
     , telnetRef3
     , TelnetRef4 (..)
-    , TelnetEnd
     , TelnetCmd
-    , TelnetRes
     , telnetRef4
     , CmdReader (..)
     , MacIpMap (..)
@@ -33,6 +31,7 @@ module BH.Switch
     , TelnetCtx3
     , telnetLogin
     , TelnetOpClass (..)
+    , TelnetClass (..)
     )
   where
 
@@ -155,17 +154,14 @@ class TelnetOpClass a where
                                  , telnetRes = telnetResDef
                                  }
 
-type TelnetEnd a = ()     -> ReaderT (CmdReader a) IO ()
-type TelnetRes a = T.Text -> ReaderT (CmdReader a) IO ()
-
-type TelnetCmd a = T.Text -> ContT () (ReaderT (CmdReader a) IO) ()
-data TelnetRef4 a   = TelnetRef4
-                        { tFinal  :: Maybe a
-                        , tResume :: Maybe (TelnetRes a)
+type TelnetCmd a b = T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
+data TelnetRef4 a b  = TelnetRef4
+                        { tFinal  :: Maybe b
+                        , tResume :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
                         , tInt :: Int
                         }
 
-telnetRef4 :: IORef (TelnetRef4 a)
+telnetRef4 :: IORef (TelnetRef4 a b)
 {-# NOINLINE telnetRef4 #-}
 telnetRef4  = unsafePerformIO . newIORef
                 $ TelnetRef4 { tResume = Nothing
@@ -181,11 +177,16 @@ telnetRef4  = unsafePerformIO . newIORef
 -- That been said, the 'config save' operation is different: it does not have
 -- a query. Though, if i consider all this not as queries/response, but just
 -- like input/program/output, then..
-data CmdReader a = CmdReader { switchInfo4 :: SwInfo
+data CmdReader a b = CmdReader { switchInfo4 :: SwInfo
                              , tCon :: TL.TelnetPtr
-                             , findMac :: MacAddr
-                             , telRef :: IORef (TelnetRef4 a)
+                             , telnetIn :: a
+                             , telRef :: IORef (TelnetRef4 a b)
                              }
+
+
+class TelnetClass t where
+    type TelnetInput t  :: *
+    type TelnetResult t :: *
 
 -- FIXME: TelnetRef payload (macMap, saveSws) depends on 'a'.. data families?
 instance Eq a => TelnetRefClass TelnetRef2 a where
