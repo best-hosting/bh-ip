@@ -303,7 +303,7 @@ main    = do
     print swports
     atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
     res <- runExceptT $ do
-      mm <-  flip runReaderT swInfo $ run
+      mm <-  flip runReaderT swInfo $ Main.run
       liftIO $ print $ "Gathered ac map:"
       liftIO $ print mm
       arp1 <- queryLinuxArp "certbot"

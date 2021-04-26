@@ -91,6 +91,52 @@ saveSwitch (con, ts) = do
         | otherwise             = return s
     go _ = error "Huy"
 
+{-saveSwitch2 :: TelnetCmd () String
+saveSwitch2 ts0 = do
+    tRef <- asks telRef
+    con  <- asks tCon
+    --pure ts0 >>=
+    liftIO $ do
+      r0@TelnetRef2{switchInfo2 = swInfo, telnetState2 = s0, swConfs = mm0} <- readIORef tRef
+      (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
+              then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
+              else flip runStateT mm0 . flip runReaderT swInfo $ go s0
+      atomicWriteIORef tRef r0{telnetState2 = s', swConfs = mm'}
+  where
+    go :: TelnetState TelnetWrite -> ReaderT SwInfo (StateT SwConfig IO) (TelnetState TelnetWrite)
+    go s@Enabled
+        | "#" `T.isSuffixOf` ts = do
+            liftIO $ TL.telnetSend con . B8.pack $ "terminal length 0\n"
+            return (Command TermLength)
+        | otherwise = return s
+    go s@(Command TermLength)
+        | "#" `T.isSuffixOf` ts = do
+            liftIO $ TL.telnetSend con . B8.pack $ "show running\n"
+            return (Command ShowRun)
+        | otherwise = return s
+    go s@(Command ShowRun)
+        | "#" `T.isSuffixOf` ts = do
+            curSw <- asks swName
+            liftIO $ putStrLn $ "save continues"
+            modify (M.insertWith (\x y -> y <> x) curSw ts)
+            go (Command WriteRun)
+        | otherwise = do
+            curSw <- asks swName
+            liftIO $ putStrLn $ "save continues"
+            modify (M.insertWith (\x y -> y <> x) curSw ts)
+            return s
+    go s@(Command WriteRun)
+        | "#" `T.isSuffixOf` ts = do
+            liftIO $ TL.telnetSend con . B8.pack $ "write\n"
+            return Exit
+        | otherwise = return s
+    go s@Exit
+        | "#" `T.isSuffixOf` ts   = do
+            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+            return s
+        | otherwise             = return s
+    go _ = error "Huy"-}
+
 telnetH :: Socket -> TL.EventHandler
 telnetH _ t (TL.Received b)
   = do
@@ -154,7 +200,7 @@ main    = do
     print swcfs
     atomicModifyIORef telnetRef2 (\r -> (r{swConfs = swcfs}, ()))
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run
+      mm <- flip runReaderT swInfo $ Main.run
       liftIO $ print $ "Gathered config:"
       liftIO . forM (M.toList mm) $ \(s, cf) -> do
         print s

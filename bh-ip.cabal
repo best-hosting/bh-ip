@@ -43,6 +43,7 @@ library
     , bytestring
     , libtelnet
     , network-simple
+    , monad-loops
   default-language: Haskell2010
 
 executable bh-ip-exe
