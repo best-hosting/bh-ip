@@ -91,11 +91,30 @@ saveSwitch (con, ts) = do
         | otherwise             = return s
     go _ = error "Huy"
 
-{-saveSwitch2 :: TelnetCmd () String
+{-saveSwitch2 :: TelnetCmd () (M.Map SwName T.Text)
 saveSwitch2 ts0 = do
     tRef <- asks telRef
     con  <- asks tCon
-    --pure ts0 >>=
+    pure ts0 >>=
+      shiftW (\(k, ts) ->
+          when ("#" `T.isSuffixOf` ts) $ do
+            liftIO $ TL.telnetSend con . B8.pack $ "terminal length 0\n"
+        ) >>=
+      shiftW (\(k, ts) ->
+          when ("#" `T.isSuffixOf` ts) $ do
+            liftIO $ TL.telnetSend con . B8.pack $ "show running\n"
+        ) >>=
+      shiftW (\(k, ts) ->
+          if "#" `T.isSuffixOf` ts
+            then do
+              curSw <- asks swName
+              liftIO $ putStrLn $ "save finishes"
+              modify (M.insertWith (\x y -> y <> x) curSw ts)
+            else
+              curSw <- asks swName
+              liftIO $ putStrLn $ "save continues"
+              modify (M.insertWith (\x y -> y <> x) curSw ts)
+        ) >>=
     liftIO $ do
       r0@TelnetRef2{switchInfo2 = swInfo, telnetState2 = s0, swConfs = mm0} <- readIORef tRef
       (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
