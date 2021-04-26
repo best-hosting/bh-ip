@@ -59,12 +59,9 @@ findPort ts0 = do
       shiftW (\(k, ts) ->
         when ("#" `T.isSuffixOf` ts) $ do
             m <- asks telnetIn
-            liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
-            liftIO $ putStrLn $ "show port "
-            r1 <- liftIO (readIORef tRef)
-            let n1 = tInt r1
-            liftIO $ print n1
-            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+            liftIO $ do
+              TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
+              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>=
       shiftW (\(k, ts) -> do
         swp <-
@@ -73,11 +70,9 @@ findPort ts0 = do
             return (parseShowMacAddrTable ts)
           else return []
         when ("#" `T.isSuffixOf` ts) $ do
-            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-            r1 <- liftIO (readIORef tRef)
-            let n1 = tInt r1
-            liftIO $ print n1
-            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just (\_ -> k ()), tFinal = Just swp}
+            liftIO $ do
+              TL.telnetSend con . B8.pack $ "exit\n"
+              atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> k ()), tFinal = Just swp}, ()))
         )
 
 main :: IO ()

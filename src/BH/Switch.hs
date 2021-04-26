@@ -296,46 +296,34 @@ loginCmd ts0 = shiftT $ \finish -> do
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
-      shiftW (\(k, ts) -> do
+      shiftW (\(k, ts) ->
           when ("Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts) $ do
             user <- asks (userName . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            r1 <- liftIO (readIORef tRef)
-            let n1 = tInt r1
-            liftIO $ print n1
-            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+            liftIO $ do
+              TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>=
-      shiftW (\(k, ts) -> do
+      shiftW (\(k, ts) ->
           when ("Password" `T.isInfixOf` ts) $ do
             user <- asks (password . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            r1 <- liftIO (readIORef tRef)
-            let n1 = tInt r1
-            liftIO $ print n1
-            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+            liftIO $ do
+              TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>=
-      shiftW (\(k, ts) -> do
-          when (">" `T.isSuffixOf` ts) $ do
-              liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
-              r1 <- liftIO (readIORef tRef)
-              let n1 = tInt r1
-              liftIO $ print n1
-              liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+      shiftW (\(k, ts) ->
+          when (">" `T.isSuffixOf` ts) . liftIO $ do
+            TL.telnetSend con . B8.pack $ "enable\n"
+            atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>=
-      shiftW (\(k, ts) -> do
+      shiftW (\(k, ts) ->
           when ("Password" `T.isInfixOf` ts) $ do
             enpw <- asks (enablePassword . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-            r1 <- liftIO (readIORef tRef)
-            let n1 = tInt r1
-            liftIO $ print n1
-            liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Just k}
+            liftIO $ do
+              TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>= \ts ->
       when ("#" `T.isSuffixOf` ts) $ do
-          r1 <- liftIO (readIORef tRef)
-          let n1 = tInt r1
-          liftIO $ print n1
-          liftIO $ atomicWriteIORef tRef r1{tInt = n1 + 1, tResume = Nothing}
+          liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Nothing}, ()))
           lift (finish ts)
 
 run :: a -> (TelnetCmd a b) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
