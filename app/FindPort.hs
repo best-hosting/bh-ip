@@ -57,19 +57,17 @@ findPort ts0 = do
     con  <- asks tCon
     pure ts0 >>=
       shiftW (\(k, ts) ->
-        when ("#" `T.isSuffixOf` ts) $ do
+          when ("#" `T.isSuffixOf` ts) $ do
             m <- asks telnetIn
             liftIO $ do
               TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
               atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
         ) >>=
       shiftW (\(k, ts) -> do
-        swp <-
-          if "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts then do
-            liftIO $ putStrLn $ "parse port "
-            return (parseShowMacAddrTable ts)
-          else return []
-        when ("#" `T.isSuffixOf` ts) $ do
+          let swp = if "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts
+                      then parseShowMacAddrTable ts
+                      else []
+          when ("#" `T.isSuffixOf` ts) $ do
             liftIO $ do
               TL.telnetSend con . B8.pack $ "exit\n"
               atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ()), tFinal = Just swp}, ()))
