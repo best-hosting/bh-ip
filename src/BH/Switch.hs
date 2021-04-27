@@ -29,6 +29,8 @@ module BH.Switch
     , telnetLogin
     , shiftW
     , saveResume
+    , modifyResult
+    , saveResult
     , finishCmd
     , run
     )
@@ -282,10 +284,21 @@ saveResume k = do
     tRef <- asks telRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
 
-finishCmd :: MonadIO m => Maybe b -> ContT () (ReaderT (CmdReader a b) m) ()
-finishCmd mRes = do
+-- | Modify result. If there's not result yet, initialize it with empty value.
+modifyResult :: (Monoid b, MonadIO m) => (b -> b) -> ContT () (ReaderT (CmdReader a b) m) ()
+modifyResult f = do
     tRef <- asks telRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ()), tFinal = mRes}, ()))
+    liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = f <$> (tFinal r <> pure mempty)}, ()))
+
+saveResult :: MonadIO m => b -> ContT () (ReaderT (CmdReader a b) m) ()
+saveResult x = do
+    tRef <- asks telRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = Just x}, ()))
+
+finishCmd :: MonadIO m => ContT () (ReaderT (CmdReader a b) m) ()
+finishCmd = do
+    tRef <- asks telRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ())}, ()))
 
 runCmd :: T.Text
           -> (TelnetCmd a b)
@@ -331,9 +344,7 @@ loginCmd ts0 = shiftT $ \finish -> do
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
             saveResume k
         ) >>= \ts ->
-      when ("#" `T.isSuffixOf` ts) $ do
-          finishCmd Nothing
-          lift (finish ts)
+      when ("#" `T.isSuffixOf` ts) (finishCmd >> lift (finish ts))
 
 run :: a -> (TelnetCmd a b) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 run mac telnetCmd = do

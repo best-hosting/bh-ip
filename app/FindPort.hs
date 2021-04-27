@@ -67,7 +67,8 @@ findPort ts0 = do
                       else []
           when ("#" `T.isSuffixOf` ts) $ do
             liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-            finishCmd (Just swp)
+            saveResult swp
+            finishCmd
         )
 
 main :: IO ()
