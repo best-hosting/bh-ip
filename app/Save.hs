@@ -42,6 +42,11 @@ saveSwitch ts0 = do
     pure ts0 >>=
       shiftW (\(k, ts) ->
           when ("#" `T.isSuffixOf` ts) $ do
+            liftIO $ TL.telnetSend con . B8.pack $ "write\n"
+            saveResume k
+        ) >>=
+      shiftW (\(k, ts) ->
+          when ("#" `T.isSuffixOf` ts) $ do
             liftIO $ TL.telnetSend con . B8.pack $ "terminal length 0\n"
             saveResume k
         ) >>=
@@ -72,15 +77,13 @@ main    = do
     print swInfo
     swcfs <- parseArgs <$> getArgs
     print swcfs
-    res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ BH.Switch.run () saveSwitch
-      --mm <- flip runReaderT swInfo $ Main.run
-      liftIO $ print $ "Gathered config:"
-      liftIO . forM (M.toList mm) $ \(s, cf) -> do
-        print s
-        mapM print (T.lines cf)
+    res <- runExceptT . flip runReaderT swInfo $ run () saveSwitch
     case res of
-      Right _ -> return ()
+      Right (Just m) -> do
+        forM_ (M.toList m) $ \(SwName s, cf) -> do
+          print $ "Writing config for " ++ T.unpack s
+          writeFile (T.unpack s ++ ".cf") (T.unpack cf)
+      Right Nothing -> print "A nihuya netu.."
       Left err -> print err
 
 parseArgs :: [String] -> SwConfig
