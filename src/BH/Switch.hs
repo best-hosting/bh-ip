@@ -346,6 +346,8 @@ loginCmd ts0 = shiftT $ \finish -> do
         ) >>= \ts ->
       when ("#" `T.isSuffixOf` ts) (finishCmd >> lift (finish ts))
 
+-- FIXME: Provide variants of run for running till result is found. Or running
+-- on all switches.
 run :: a -> (TelnetCmd a b) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 run mac telnetCmd = do
     sws <- asks M.keys
