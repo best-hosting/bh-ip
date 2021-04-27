@@ -28,6 +28,8 @@ module BH.Switch
     , TelnetCtx3
     , telnetLogin
     , shiftW
+    , saveResume
+    , finishCmd
     , run
     )
   where
@@ -274,6 +276,17 @@ telnetLogin con ts = shiftT $ \k -> lift $ do
 shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
+saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
+              -> ContT () (ReaderT (CmdReader a b) m) ()
+saveResume k = do
+    tRef <- asks telRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+
+finishCmd :: MonadIO m => Maybe b -> ContT () (ReaderT (CmdReader a b) m) ()
+finishCmd mRes = do
+    tRef <- asks telRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ()), tFinal = mRes}, ()))
+
 runCmd :: T.Text
           -> (TelnetCmd a b)
           -> ContT () (ReaderT (CmdReader a b) IO) ()
@@ -291,7 +304,6 @@ runCmd ts cmd = do
 
 loginCmd :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 loginCmd ts0 = shiftT $ \finish -> do
-    tRef <- asks telRef
     con  <- asks tCon
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
@@ -299,31 +311,28 @@ loginCmd ts0 = shiftT $ \finish -> do
       shiftW (\(k, ts) ->
           when ("Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts) $ do
             user <- asks (userName . switchInfo4)
-            liftIO $ do
-              TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            saveResume k
         ) >>=
       shiftW (\(k, ts) ->
           when ("Password" `T.isInfixOf` ts) $ do
             user <- asks (password . switchInfo4)
-            liftIO $ do
-              TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
+            saveResume k
         ) >>=
       shiftW (\(k, ts) ->
-          when (">" `T.isSuffixOf` ts) . liftIO $ do
-            TL.telnetSend con . B8.pack $ "enable\n"
-            atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+          when (">" `T.isSuffixOf` ts) $ do
+            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
+            saveResume k
         ) >>=
       shiftW (\(k, ts) ->
           when ("Password" `T.isInfixOf` ts) $ do
             enpw <- asks (enablePassword . switchInfo4)
-            liftIO $ do
-              TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
+            saveResume k
         ) >>= \ts ->
       when ("#" `T.isSuffixOf` ts) $ do
-          liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ())}, ()))
+          finishCmd Nothing
           lift (finish ts)
 
 run :: a -> (TelnetCmd a b) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)

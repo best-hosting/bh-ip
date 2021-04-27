@@ -53,24 +53,21 @@ parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
 
 findPort :: TelnetCmd MacAddr [SwPort]
 findPort ts0 = do
-    tRef <- asks telRef
     con  <- asks tCon
     pure ts0 >>=
       shiftW (\(k, ts) ->
           when ("#" `T.isSuffixOf` ts) $ do
             m <- asks telnetIn
-            liftIO $ do
-              TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
-              atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+            liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
+            saveResume k
         ) >>=
       shiftW (\(k, ts) -> do
           let swp = if "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts
                       then parseShowMacAddrTable ts
                       else []
           when ("#" `T.isSuffixOf` ts) $ do
-            liftIO $ do
-              TL.telnetSend con . B8.pack $ "exit\n"
-              atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ()), tFinal = Just swp}, ()))
+            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
+            finishCmd (Just swp)
         )
 
 main :: IO ()
