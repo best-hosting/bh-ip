@@ -36,7 +36,7 @@ import Text.HTML.TagSoup
 import BH.Switch
 
 
-saveSwitch :: TelnetCmd () (M.Map SwName T.Text)
+saveSwitch :: TelnetCmd () T.Text
 saveSwitch ts0 = do
     con  <- asks tCon
     pure ts0 >>=
@@ -60,13 +60,15 @@ saveSwitch ts0 = do
             then do
               curSw <- asks (swName . switchInfo4)
               liftIO $ putStrLn $ "save finishes"
-              modifyResult (M.insertWith (\x y -> y <> x) curSw ts)
+              --modifyResult (M.insertWith (\x y -> y <> x) curSw ts)
+              modifyResult (<> ts)
               liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
               finishCmd
             else do
               curSw <- asks (swName . switchInfo4)
               liftIO $ putStrLn $ "save continues"
-              modifyResult (M.insertWith (\x y -> y <> x) curSw ts)
+              --modifyResult (M.insertWith (\x y -> y <> x) curSw ts)
+              modifyResult (<> ts)
               -- Iterate over this block.
               return ()
         )
@@ -77,22 +79,13 @@ main    = do
     print swInfo
     swcfs <- parseArgs <$> getArgs
     print swcfs
-    res <- runExceptT . flip runReaderT swInfo $ run () saveSwitch
+    res <- runExceptT . flip runReaderT swInfo $ runAll () saveSwitch
     case res of
-      Right (Just m) -> do
+      Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do
           print $ "Writing config for " ++ T.unpack s
           writeFile (T.unpack s ++ ".cf") (T.unpack cf)
-      Right Nothing -> print "A nihuya netu.."
       Left err -> print err
 
-parseArgs :: [String] -> SwConfig
-parseArgs = foldr go M.empty
-  where
-    go :: String -> SwConfig -> SwConfig
-    go xs z = let (sn, '/' : sp) = span (/= '/') xs
-              in  M.insert
-                    (SwName (T.pack sn))
-                    mempty
-                    z
-
+parseArgs :: [String] -> [SwName]
+parseArgs = map (SwName . T.pack)

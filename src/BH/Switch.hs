@@ -33,6 +33,7 @@ module BH.Switch
     , saveResult
     , finishCmd
     , run
+    , runAll
     )
   where
 
@@ -51,6 +52,8 @@ import System.IO.Unsafe
 import Control.Monad.Trans.Cont
 import Control.Monad.Reader
 import Control.Monad.Trans.Except
+import Data.Foldable
+import Data.Maybe
 
 import qualified Network.Telnet.LibTelnet as TL
 
@@ -348,17 +351,37 @@ loginCmd ts0 = shiftT $ \finish -> do
 
 -- FIXME: Provide variants of run for running till result is found. Or running
 -- on all switches.
-run :: a -> (TelnetCmd a b) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
-run mac telnetCmd = do
+runTill :: Monoid b => (b -> Bool) -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+runTill p input telnetCmd = do
     sws <- asks M.keys
-    forM_ [head sws] $ \sw -> do
-        mSwInfo <- asks (M.lookup sw)
-        case mSwInfo of
-          Just swInfo@SwInfo{hostName = h} -> liftIO $ do
-            print $ "Connect to " ++ show h
-            let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, telnetIn = mac}
-            connect h "23" (\(s, _) -> handle cr s)
-          Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
+    foldrM go Nothing sws
+  where
+    --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+    go sn zs = do
+        mr <- run sn input telnetCmd
+        if fromMaybe False (p <$> mr)
+          then return mr
+          else return (zs <> mr)
+
+-- | Run on all switches.
+runAll :: a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runAll input telnetCmd = do
+    sws <- asks M.keys
+    foldM go M.empty sws
+  where
+    --go :: (M.Map SwName b) -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+    go zs sn = run sn input telnetCmd >>= return . maybe zs (\x -> M.insert sn x zs)
+
+-- | Run on one switch.
+run :: SwName -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run sw input telnetCmd = do
+    mSwInfo <- asks (M.lookup sw)
+    case mSwInfo of
+      Just swInfo@SwInfo{hostName = h} -> liftIO $ do
+        print $ "Connect to " ++ show h
+        let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, telnetIn = input}
+        connect h "23" (\(s, _) -> handle cr s)
+      Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
     tFinal <$> liftIO (readIORef telnetRef4)
   where
     --handle :: CmdReader a -> Socket -> IO ()

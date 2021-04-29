@@ -78,7 +78,7 @@ main    = do
     Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
     print mac
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run mac findPort
+      mm <- flip runReaderT swInfo $ run (SwName "sw-huy") mac findPort
       liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()
