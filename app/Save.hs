@@ -82,8 +82,7 @@ main    = do
     res <- runExceptT . flip runReaderT swInfo $
       if null sns
         then runAll () saveSwitch
-        else let sn = head sns
-             in  ($ M.empty) . maybe id (M.insert sn) <$> run (head sns) () saveSwitch
+        else runOn sns () saveSwitch
     case res of
       Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do

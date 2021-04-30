@@ -34,6 +34,7 @@ module BH.Switch
     , finishCmd
     , run
     , runAll
+    , runOn
     )
   where
 
@@ -373,6 +374,10 @@ runAll input telnetCmd = do
   where
     --go :: (M.Map SwName b) -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
     go zs sn = run sn input telnetCmd >>= return . maybe zs (\x -> M.insert sn x zs)
+
+runOn :: [SwName] -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runOn sns input telnetCmd =
+    foldM (\zs sn -> ($ zs) . maybe id (M.insert sn) <$> run sn input telnetCmd) M.empty sns
 
 -- | Run on one switch.
 run :: SwName -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
