@@ -34,6 +34,7 @@ module BH.Switch
     , finishCmd
     , run
     , runOn
+    , runTill
     , sendTelnetCmd
     , sendTelnetExit
     , parseTelnetCmdOut
@@ -375,21 +376,15 @@ loginCmd ts0 = shiftT $ \finish -> do
 
 -- FIXME: Provide variants of run for running till result is found. Or running
 -- on all switches.
-runTill :: Monoid b => (b -> Bool) -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
-runTill p input telnetCmd = do
+runTill :: (Monoid b, Show b) => a -> TelnetCmd a b -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+runTill input telnetCmd p = do
     sws <- asks M.keys
-    foldrM go Nothing sws
+    foldM go Nothing sws
   where
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
-    go sn zs = do
-        mr <- run input telnetCmd sn
-        if fromMaybe False (p <$> mr)
-          then return mr
-          else return (zs <> mr)
-
-{--- | Run on all switches.
-runAll :: a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
-runAll input telnetCmd = asks M.keys >>= runOn input telnetCmd-}
+    go zs sn
+      | fromMaybe False (p <$> zs) = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
+      | otherwise                  = run input telnetCmd sn
 
 runOn :: a -> TelnetCmd a b -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =

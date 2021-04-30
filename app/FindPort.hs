@@ -54,12 +54,15 @@ parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
   (n, _) : _ -> Right (SwPort n)
   _          -> Left "Huy"
 
-findPort :: TelnetCmd MacAddr [SwPort]
+findPort :: TelnetCmd MacAddr (M.Map SwName [SwPort])
 findPort ts0 = do
     mac <- asks telnetIn
+    sn  <- asks (swName . switchInfo4)
+    let parse ts _ = let xs = parseShowMacAddrTable ts
+                     in  if null xs then mempty else pure (M.singleton sn xs)
     pure ts0 >>=
       sendTelnetCmd ("show mac address-table address " <> T.pack (show mac)) >>=
-      parseTelnetCmdOut (const . pure . parseShowMacAddrTable) >>=
+      parseTelnetCmdOut parse >>=
       sendTelnetExit
 
 main :: IO ()
@@ -69,7 +72,7 @@ main    = do
     Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
     print mac
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run mac findPort (SwName "sw-1")
+      mm <- flip runReaderT swInfo $ runTill mac findPort (const True)
       liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()
