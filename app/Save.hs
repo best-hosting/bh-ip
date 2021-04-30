@@ -37,41 +37,12 @@ import BH.Switch
 
 
 saveSwitch :: TelnetCmd () T.Text
-saveSwitch ts0 = do
-    con  <- asks tCon
-    pure ts0 >>=
-      shiftW (\(k, ts) ->
-          when ("#" `T.isSuffixOf` ts) $ do
-            liftIO $ TL.telnetSend con . B8.pack $ "write\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) ->
-          when ("#" `T.isSuffixOf` ts) $ do
-            liftIO $ TL.telnetSend con . B8.pack $ "terminal length 0\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) ->
-          when ("#" `T.isSuffixOf` ts) $ do
-            liftIO $ TL.telnetSend con . B8.pack $ "show running\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) ->
-          if "#" `T.isSuffixOf` ts
-            then do
-              curSw <- asks (swName . switchInfo4)
-              liftIO $ putStrLn $ "save finishes"
-              --modifyResult (M.insertWith (\x y -> y <> x) curSw ts)
-              modifyResult (<> ts)
-              liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-              finishCmd
-            else do
-              curSw <- asks (swName . switchInfo4)
-              liftIO $ putStrLn $ "save continues"
-              --modifyResult (M.insertWith (\x y -> y <> x) curSw ts)
-              modifyResult (<> ts)
-              -- Iterate over this block.
-              return ()
-        )
+saveSwitch ts0 = pure ts0 >>=
+    sendTelnetCmd "write" >>=
+    sendTelnetCmd "terminal length 0" >>=
+    sendTelnetCmd "show running" >>=
+    parseTelnetCmdOut (flip (<>)) >>=
+    sendTelnetExit
 
 main :: IO ()
 main    = do

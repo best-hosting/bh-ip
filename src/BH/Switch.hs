@@ -34,6 +34,9 @@ module BH.Switch
     , finishCmd
     , run
     , runOn
+    , sendTelnetCmd
+    , sendTelnetExit
+    , parseTelnetCmdOut
     )
   where
 
@@ -282,6 +285,24 @@ telnetLogin con ts = shiftT $ \k -> lift $ do
 -- monad result to shiftT's function.
 shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
+
+-- | Send telnet command in 'enable'-d mode.
+sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+sendTelnetCmd cmd = shiftW $ \(k, ts) -> do
+    con  <- asks tCon
+    when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
+      liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
+      saveResume k
+
+-- | Gather result and then proceed to next command immediately.
+parseTelnetCmdOut :: Monoid b => (T.Text -> b -> b) -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
+    if "#" `T.isSuffixOf` ts
+      then modifyResult (f ts) >> lift (k ts)
+      else modifyResult (f ts)
+
+sendTelnetExit :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
+sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
 
 saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
               -> ContT () (ReaderT (CmdReader a b) m) ()
