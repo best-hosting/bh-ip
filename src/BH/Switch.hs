@@ -33,7 +33,6 @@ module BH.Switch
     , saveResult
     , finishCmd
     , run
-    , runAll
     , runOn
     )
   where
@@ -361,35 +360,30 @@ runTill p input telnetCmd = do
   where
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
     go sn zs = do
-        mr <- run sn input telnetCmd
+        mr <- run input telnetCmd sn
         if fromMaybe False (p <$> mr)
           then return mr
           else return (zs <> mr)
 
--- | Run on all switches.
+{--- | Run on all switches.
 runAll :: a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
-runAll input telnetCmd = do
-    sws <- asks M.keys
-    foldM go M.empty sws
-  where
-    --go :: (M.Map SwName b) -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
-    go zs sn = run sn input telnetCmd >>= return . maybe zs (\x -> M.insert sn x zs)
+runAll input telnetCmd = asks M.keys >>= runOn input telnetCmd-}
 
-runOn :: [SwName] -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
-runOn sns input telnetCmd =
-    foldM (\zs sn -> ($ zs) . maybe id (M.insert sn) <$> run sn input telnetCmd) M.empty sns
+runOn :: a -> TelnetCmd a b -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runOn input telnetCmd =
+    foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
 
 -- | Run on one switch.
-run :: SwName -> a -> TelnetCmd a b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
-run sw input telnetCmd = do
-    mSwInfo <- asks (M.lookup sw)
+run :: a -> TelnetCmd a b -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run input telnetCmd sn = do
+    mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
         let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, telnetIn = input}
         atomicWriteIORef telnetRef4 defTelnetRef4
         connect h "23" (\(s, _) -> handle cr s)
-      Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
+      Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
     tFinal <$> liftIO (readIORef telnetRef4)
   where
     --handle :: CmdReader a -> Socket -> IO ()

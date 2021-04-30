@@ -81,8 +81,8 @@ main    = do
     print sns
     res <- runExceptT . flip runReaderT swInfo $
       if null sns
-        then runAll () saveSwitch
-        else runOn sns () saveSwitch
+        then runOn () saveSwitch (M.keys swInfo)
+        else runOn () saveSwitch sns
     case res of
       Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do
