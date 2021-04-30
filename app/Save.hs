@@ -77,9 +77,13 @@ main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
-    swcfs <- parseArgs <$> getArgs
-    print swcfs
-    res <- runExceptT . flip runReaderT swInfo $ runAll () saveSwitch
+    sns <- parseArgs <$> getArgs
+    print sns
+    res <- runExceptT . flip runReaderT swInfo $
+      if null sns
+        then runAll () saveSwitch
+        else let sn = head sns
+             in  ($ M.empty) . maybe id (M.insert sn) <$> run (head sns) () saveSwitch
     case res of
       Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do

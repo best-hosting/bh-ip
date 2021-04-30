@@ -171,13 +171,15 @@ data TelnetRef4 a b  = TelnetRef4
                         , tInt :: Int
                         }
 
+defTelnetRef4 :: TelnetRef4 a b
+defTelnetRef4 = TelnetRef4  { tResume = Nothing
+                            , tFinal = Nothing
+                            , tInt = 0
+                            }
+
 telnetRef4 :: IORef (TelnetRef4 a b)
 {-# NOINLINE telnetRef4 #-}
-telnetRef4  = unsafePerformIO . newIORef
-                $ TelnetRef4 { tResume = Nothing
-                             , tFinal = Nothing
-                             , tInt = 0
-                             }
+telnetRef4  = unsafePerformIO (newIORef defTelnetRef4)
 
 -- FIXME: Query, result and program (telnet commands) are all bound together.
 -- I.e. if i query by IP, i definitely need 'findPort' and result will be
@@ -380,6 +382,7 @@ run sw input telnetCmd = do
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
         let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, telnetIn = input}
+        atomicWriteIORef telnetRef4 defTelnetRef4
         connect h "23" (\(s, _) -> handle cr s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
     tFinal <$> liftIO (readIORef telnetRef4)
