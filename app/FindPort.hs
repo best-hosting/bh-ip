@@ -39,7 +39,10 @@ import BH.Switch
 
 
 parseShowMacAddrTable :: T.Text -> [SwPort]
-parseShowMacAddrTable = foldr go [] . T.lines
+parseShowMacAddrTable ts
+  | "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts
+              = foldr go [] (T.lines ts)
+  | otherwise = []
   where
     go :: T.Text -> [SwPort] -> [SwPort]
     go t zs = case (T.words t) of
@@ -53,23 +56,11 @@ parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
 
 findPort :: TelnetCmd MacAddr [SwPort]
 findPort ts0 = do
-    con  <- asks tCon
+    mac <- asks telnetIn
     pure ts0 >>=
-      shiftW (\(k, ts) ->
-          when ("#" `T.isSuffixOf` ts) $ do
-            m <- asks telnetIn
-            liftIO $ TL.telnetSend con . B8.pack $ "show mac address-table address " ++ show m ++ "\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) -> do
-          let swp = if "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts
-                      then parseShowMacAddrTable ts
-                      else []
-          when ("#" `T.isSuffixOf` ts) $ do
-            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-            saveResult swp
-            finishCmd
-        )
+      sendTelnetCmd ("show mac address-table address " <> T.pack (show mac)) >>=
+      parseTelnetCmdOut (const . pure . parseShowMacAddrTable) >>=
+      sendTelnetExit
 
 main :: IO ()
 main    = do
@@ -78,7 +69,7 @@ main    = do
     Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
     print mac
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ run mac findPort (SwName "sw-huy")
+      mm <- flip runReaderT swInfo $ run mac findPort (SwName "sw-1")
       liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()

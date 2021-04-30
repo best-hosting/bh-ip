@@ -295,7 +295,8 @@ sendTelnetCmd cmd = shiftW $ \(k, ts) -> do
       saveResume k
 
 -- | Gather result and then proceed to next command immediately.
-parseTelnetCmdOut :: Monoid b => (T.Text -> b -> b) -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parseTelnetCmdOut :: Monoid b => (T.Text -> Maybe b -> Maybe b)
+                      -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     if "#" `T.isSuffixOf` ts
       then modifyResult (f ts) >> lift (k ts)
@@ -311,10 +312,10 @@ saveResume k = do
     liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
 
 -- | Modify result. If there's not result yet, initialize it with empty value.
-modifyResult :: (Monoid b, MonadIO m) => (b -> b) -> ContT () (ReaderT (CmdReader a b) m) ()
+modifyResult :: (Monoid b, MonadIO m) => (Maybe b -> Maybe b) -> ContT () (ReaderT (CmdReader a b) m) ()
 modifyResult f = do
     tRef <- asks telRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = f <$> (tFinal r <> pure mempty)}, ()))
+    liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = f (tFinal r)}, ()))
 
 saveResult :: MonadIO m => b -> ContT () (ReaderT (CmdReader a b) m) ()
 saveResult x = do

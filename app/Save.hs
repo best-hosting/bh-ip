@@ -41,7 +41,7 @@ saveSwitch ts0 = pure ts0 >>=
     sendTelnetCmd "write" >>=
     sendTelnetCmd "terminal length 0" >>=
     sendTelnetCmd "show running" >>=
-    parseTelnetCmdOut (flip (<>)) >>=
+    parseTelnetCmdOut (flip (<>) . pure) >>=
     sendTelnetExit
 
 main :: IO ()
