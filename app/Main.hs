@@ -77,13 +77,18 @@ getMacs2 ts0 = do
 
 go :: PortId -> T.Text -> ContT () (ReaderT (CmdReader [PortId] (M.Map PortId [MacAddr])) IO) T.Text
 go pid@PortId{port = SwPort pn} ts = do
+    liftIO $ print $ "Show and parse " ++ show pid
     portSpec <- asks (defaultPortSpec . switchInfo4)
-    let parse ts zm = let xs = parseShowMacAddrTable ts
-                      in  if null xs then zm else Just (M.singleton pid xs) <> zm
-    sendAndParseTelnetCmd
-      ("show mac address-table interface " <> portSpec <> T.pack (show pn) <> "\n")
-      parse
-      ts
+    let parse xs mz = let ys = parseShowMacAddrTable xs
+                      in  if null ys then mz else Just (M.singleton pid ys) <> mz
+                      --in  error "break" -- if pn == 16 then error (show ts) else if null xs then zm else Just (M.singleton pid xs) <> zm
+    liftIO $ putStrLn $ "########## (" ++ show pn ++ ")" ++ show ts
+    sendTelnetCmd
+      ("show mac address-table interface " <> portSpec <> T.pack (show pn) <> "\n") ts >>= \t1 -> do
+        liftIO $ putStrLn $ "########## (" ++ show pn ++ ")" ++  show t1
+        parseTelnetCmdOut parse t1 >>=
+          parseTelnetCmdOut (\_ z -> z)
+
 
 {-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
 getMacs (con, ts) = do
@@ -322,7 +327,7 @@ main    = do
     let sw = head . M.keys $ swports
     atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run [sw] getMacs2 (portSw sw)
+      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs2 (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ print $ "Gathered ac map:"
