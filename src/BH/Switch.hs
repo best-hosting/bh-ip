@@ -291,6 +291,7 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
+-- FIXME: Strip newlines at the end of cmd?
 sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 sendTelnetCmd cmd t0 = do
     pure t0 >>=
