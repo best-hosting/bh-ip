@@ -60,7 +60,28 @@ t   = do
         return w
 -}
 
-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
+parseShowMacAddrTable :: T.Text -> [MacAddr]
+parseShowMacAddrTable = foldr go [] . T.lines
+  where
+    go :: T.Text -> [MacAddr] -> [MacAddr]
+    go t zs = case (T.words t) of
+        (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
+        _            -> zs
+
+-- FIXME: defaultPortSpec should be part of PortId ?
+getMacs2 :: TelnetCmd PortId (M.Map PortId [MacAddr])
+getMacs2 ts0 = do
+    pid@PortId{port = SwPort pn} <- asks telnetIn
+    portSpec <- asks (defaultPortSpec . switchInfo4)
+    let parse ts _ = let xs = parseShowMacAddrTable ts
+                     in  if null xs then mempty else pure (M.singleton pid xs)
+    pure ts0 >>=
+      sendAndParseTelnetCmd
+        ("show mac address-table interface " <> portSpec <> T.pack (show pn) <> "\n")
+        parse >>=
+      sendTelnetExit
+
+{-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
 getMacs (con, ts) = do
     tRef <- ask
     liftIO $ do
@@ -109,13 +130,6 @@ getMacs (con, ts) = do
             return s
         | otherwise             = return s
     go _ = undefined
-    parseShowMacAddrTable :: T.Text -> [MacAddr]
-    parseShowMacAddrTable = foldr go [] . T.lines
-      where
-        go :: T.Text -> [MacAddr] -> [MacAddr]
-        go t zs = case (T.words t) of
-            (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
-            _            -> zs
 
 telnetH :: Socket -> TL.EventHandler
 telnetH _ t (TL.Received b)
@@ -135,7 +149,7 @@ telnetH _ _ (TL.Wont o)
   = putStr $ "WON'T " ++ show o ++ "\n"
 telnetH _ _ (TL.Iac i)
   = putStr $ "IAC " ++ show i ++ "\n"
-telnetH _ _ _ = pure ()
+telnetH _ _ _ = pure ()-}
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host   = Sh.shelly . Sh.silently $
@@ -262,7 +276,7 @@ parseLinuxArp zs t = case T.words t of
 addIp :: [IP] -> [IP] -> [IP]
 addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
 
-run :: ReaderT (M.Map SwName SwInfo) (ExceptT String IO) PortMacMap
+{-run :: ReaderT (M.Map SwName SwInfo) (ExceptT String IO) PortMacMap
 run = do
     swports <- macMap <$> liftIO (readIORef telnetRef)
     forM_ (M.keys swports) $ \(PortId {portSw = sw}) -> do
@@ -292,7 +306,7 @@ run = do
     telnetOpts :: [TL.OptionSpec]
     telnetOpts  = [ TL.OptionSpec TL.optEcho True True
                   --, TL.OptionSpec TL.optLineMode True True
-                  ]
+                  ]-}
 
 
 main :: IO ()
@@ -301,14 +315,17 @@ main    = do
     print swInfo
     swports <- parseArgs <$> getArgs
     print swports
+    let sw = head . M.keys $ swports
     atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
     res <- runExceptT $ do
-      mm <-  flip runReaderT swInfo $ Main.run
+      Just mm <- flip runReaderT swInfo $ run sw getMacs2 (portSw sw)
+      --mm <-  flip runReaderT swInfo $ Main.run
+      --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ print $ "Gathered ac map:"
       liftIO $ print mm
       arp1 <- queryLinuxArp "certbot"
       liftIO $ print "Finally, ips..."
-      liftIO $ mapM_ (putStrLn . show) (getIPs mm arp1)
+      liftIO $ print (macsToIPs arp1 mm)
     case res of
       Right () -> return ()
       Left err -> print err
@@ -331,4 +348,10 @@ getIPs portMac macIp = foldr go [] portMac
     go (Just ms) zs = foldr goMacs zs ms
     goMacs :: MacAddr -> [IP] -> [IP]
     goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
+
+macsToIPs :: MacIpMap -> M.Map PortId [MacAddr] -> M.Map PortId [IP]
+macsToIPs macIp = M.map (foldr go [])
+  where
+    go :: MacAddr -> [IP] -> [IP]
+    go m zs = fromMaybe [] (M.lookup m macIp) ++ zs
 

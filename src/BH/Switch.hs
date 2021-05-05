@@ -36,6 +36,7 @@ module BH.Switch
     , runOn
     , runTill
     , sendTelnetCmd
+    , sendAndParseTelnetCmd
     , sendTelnetExit
     , parseTelnetCmdOut
     )
@@ -302,6 +303,10 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     if "#" `T.isSuffixOf` ts
       then modifyResult (f ts) >> lift (k ts)
       else modifyResult (f ts)
+
+sendAndParseTelnetCmd :: Monoid b => T.Text -> (T.Text -> Maybe b -> Maybe b)
+                      -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+sendAndParseTelnetCmd cmd f = parseTelnetCmdOut f <=< sendTelnetCmd cmd
 
 sendTelnetExit :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
