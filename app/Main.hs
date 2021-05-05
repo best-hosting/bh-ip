@@ -84,10 +84,9 @@ go pid@PortId{port = SwPort pn} ts = do
                       --in  error "break" -- if pn == 16 then error (show ts) else if null xs then zm else Just (M.singleton pid xs) <> zm
     liftIO $ putStrLn $ "########## (" ++ show pn ++ ")" ++ show ts
     sendTelnetCmd
-      ("show mac address-table interface " <> portSpec <> T.pack (show pn) <> "\n") ts >>= \t1 -> do
+      ("show mac address-table interface " <> portSpec <> T.pack (show pn)) ts >>= \t1 -> do
         liftIO $ putStrLn $ "########## (" ++ show pn ++ ")" ++  show t1
-        parseTelnetCmdOut parse t1 >>=
-          parseTelnetCmdOut (\_ z -> z)
+        parseTelnetCmdOut parse t1
 
 
 {-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()

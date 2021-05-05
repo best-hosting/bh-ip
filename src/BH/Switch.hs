@@ -174,12 +174,14 @@ data TelnetRef4 a b  = TelnetRef4
                         { tFinal  :: Maybe b
                         , tResume :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
                         , tInt :: Int
+                        , tEcho :: T.Text
                         }
 
 defTelnetRef4 :: TelnetRef4 a b
 defTelnetRef4 = TelnetRef4  { tResume = Nothing
                             , tFinal = Nothing
                             , tInt = 0
+                            , tEcho = T.empty
                             }
 
 telnetRef4 :: IORef (TelnetRef4 a b)
@@ -288,18 +290,37 @@ telnetLogin con ts = shiftT $ \k -> lift $ do
 shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
--- | Send telnet command in 'enable'-d mode.
+-- | Send telnet command and wait until it'll be echo-ed back.
 sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
-sendTelnetCmd cmd = shiftW $ \(k, ts) -> do
-    con  <- asks tCon
-    when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
-      liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
-      saveResume k
+sendTelnetCmd cmd t0 = do
+    pure t0 >>=
+      shiftW (\(k, ts) -> do
+          con  <- asks tCon
+          when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
+            saveResume k
+        ) >>=
+      shiftW (\(k, ts) -> do
+          tRef <- asks telRef
+          r <- liftIO (readIORef tRef)
+          let echoCmd = tEcho r <> ts
+          liftIO $ print $ "Command echo-ed back: " <> echoCmd
+          liftIO $ print $ "Original was: " <> cmd
+          if cmd `T.isInfixOf` echoCmd
+            then do
+              liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = T.empty}, ()))
+              liftIO $ print $ "Command echo complete"
+              saveResume k
+              lift (k ts)
+            else do
+              liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = echoCmd}, ()))
+        )
 
 -- | Gather result and then proceed to next command immediately.
 parseTelnetCmdOut :: Monoid b => (T.Text -> Maybe b -> Maybe b)
                       -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
+    liftIO $ print "Go parsing"
     if "#" `T.isSuffixOf` ts
       then modifyResult (f ts) >> lift (k ts)
       else modifyResult (f ts)
