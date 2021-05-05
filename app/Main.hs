@@ -69,17 +69,21 @@ parseShowMacAddrTable = foldr go [] . T.lines
         _            -> zs
 
 -- FIXME: defaultPortSpec should be part of PortId ?
-getMacs2 :: TelnetCmd PortId (M.Map PortId [MacAddr])
+getMacs2 :: TelnetCmd [PortId] (M.Map PortId [MacAddr])
 getMacs2 ts0 = do
-    pid@PortId{port = SwPort pn} <- asks telnetIn
+    curSn <- asks (swName . switchInfo4)
+    ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
+    foldM (flip go) ts0 ps >>= sendTelnetExit
+
+go :: PortId -> T.Text -> ContT () (ReaderT (CmdReader [PortId] (M.Map PortId [MacAddr])) IO) T.Text
+go pid@PortId{port = SwPort pn} ts = do
     portSpec <- asks (defaultPortSpec . switchInfo4)
-    let parse ts _ = let xs = parseShowMacAddrTable ts
-                     in  if null xs then mempty else pure (M.singleton pid xs)
-    pure ts0 >>=
-      sendAndParseTelnetCmd
-        ("show mac address-table interface " <> portSpec <> T.pack (show pn) <> "\n")
-        parse >>=
-      sendTelnetExit
+    let parse ts zm = let xs = parseShowMacAddrTable ts
+                      in  if null xs then zm else Just (M.singleton pid xs) <> zm
+    sendAndParseTelnetCmd
+      ("show mac address-table interface " <> portSpec <> T.pack (show pn) <> "\n")
+      parse
+      ts
 
 {-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
 getMacs (con, ts) = do
@@ -318,7 +322,7 @@ main    = do
     let sw = head . M.keys $ swports
     atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run sw getMacs2 (portSw sw)
+      Just mm <- flip runReaderT swInfo $ run [sw] getMacs2 (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ print $ "Gathered ac map:"
