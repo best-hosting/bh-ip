@@ -159,6 +159,7 @@ shiftW f x = shiftT (\k -> f (k, x))
 sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 sendTelnetCmd = sendAndParseTelnetCmd (flip const)
 
+-- FIXME: Rename to just 'sendAndParse'
 sendAndParseTelnetCmd :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 sendAndParseTelnetCmd f cmd t0 =
     shiftW (\(k, ts) -> do
@@ -227,6 +228,7 @@ saveResult x = do
     tRef <- asks telRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = Just x}, ()))
 
+-- FIXME: Do i need this?
 finishCmd :: MonadIO m => ContT () (ReaderT (CmdReader a b) m) ()
 finishCmd = do
     tRef <- asks telRef
@@ -247,6 +249,7 @@ runCmd ts cmd = do
         Nothing -> liftIO (print "huy")  >> cmd ts
         Just c  -> liftIO (print "cont") >> lift (c ts)
 
+-- FIXME: Rewrite login to sendTelnetCmd, etc.
 loginCmd :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 loginCmd ts0 = shiftT $ \finish -> do
     con  <- asks tCon
