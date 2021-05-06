@@ -293,16 +293,20 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
--- FIXME: Strip newlines at the end of cmd?
 sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
-sendTelnetCmd cmd t0 =
+sendTelnetCmd = sendAndParseTelnetCmd (flip const)
+
+sendAndParseTelnetCmd :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+sendAndParseTelnetCmd f cmd t0 =
     shiftW (\(k, ts) -> do
         con  <- asks tCon
         when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
           liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
           saveResume k
       ) t0 >>=
-    parseEcho cmd
+    parseEcho cmd >>=
+    parseTelnetCmdOut f >>=
+    parsePrompt
 
 -- | Parse cmd echo-ed back.
 parseEcho :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
@@ -312,17 +316,22 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
       let echoCmd = tEcho r <> ts
       liftIO $ print $ "Command echo-ed back: " <> echoCmd
       liftIO $ print $ "Original was: " <> cmd
-      liftIO $ print $ tPrompt r
       if cmd `T.isInfixOf` echoCmd
         then do
-          liftIO $ atomicModifyIORef tRef (\x -> (r{tEcho = T.empty}, ()))
+          liftIO $ atomicModifyIORef tRef (\x -> (x{tEcho = T.empty}, ()))
           liftIO $ print $ "Command echo complete"
           saveResume k
           lift (k ts)
-        else liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = echoCmd}, ()))
+        else liftIO $ atomicModifyIORef tRef (\x -> (x{tEcho = echoCmd}, ()))
+
+parsePrompt :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parsePrompt ts = do
+      tRef <- asks telRef
+      r <- liftIO (readIORef tRef)
+      parseEcho (tPrompt r) ts
 
 -- | Gather result and then proceed to next command immediately.
-parseTelnetCmdOut :: Monoid b => (T.Text -> Maybe b -> Maybe b)
+parseTelnetCmdOut :: (T.Text -> Maybe b -> Maybe b)
                       -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     liftIO $ print "Go parsing"
@@ -335,9 +344,9 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
         modifyResult (f ts)
         liftIO $ print "Retry parsing.."
 
-sendAndParseTelnetCmd :: Monoid b => T.Text -> (T.Text -> Maybe b -> Maybe b)
+{-sendAndParseTelnetCmd :: Monoid b => T.Text -> (T.Text -> Maybe b -> Maybe b)
                       -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
-sendAndParseTelnetCmd cmd f = parseTelnetCmdOut f <=< sendTelnetCmd cmd
+sendAndParseTelnetCmd cmd f = parseTelnetCmdOut f <=< sendTelnetCmd cmd-}
 
 sendTelnetExit :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
@@ -349,7 +358,7 @@ saveResume k = do
     liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
 
 -- | Modify result. If there's not result yet, initialize it with empty value.
-modifyResult :: (Monoid b, MonadIO m) => (Maybe b -> Maybe b) -> ContT () (ReaderT (CmdReader a b) m) ()
+modifyResult :: MonadIO m => (Maybe b -> Maybe b) -> ContT () (ReaderT (CmdReader a b) m) ()
 modifyResult f = do
     tRef <- asks telRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = f (tFinal r)}, ()))

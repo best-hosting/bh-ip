@@ -77,16 +77,11 @@ getMacs2 ts0 = do
 
 go :: PortId -> T.Text -> ContT () (ReaderT (CmdReader [PortId] (M.Map PortId [MacAddr])) IO) T.Text
 go pid@PortId{port = SwPort pn} ts = do
-    liftIO $ print $ "Show and parse " ++ show pid
     portSpec <- asks (defaultPortSpec . switchInfo4)
     let parse xs mz = let ys = parseShowMacAddrTable xs
                       in  if null ys then mz else Just (M.singleton pid ys) <> mz
-                      --in  error "break" -- if pn == 16 then error (show ts) else if null xs then zm else Just (M.singleton pid xs) <> zm
-    liftIO $ putStrLn $ "########## (" ++ show pn ++ ")" ++ show ts
-    sendTelnetCmd
-      ("show mac address-table interface " <> portSpec <> T.pack (show pn)) ts >>= \t1 -> do
-        liftIO $ putStrLn $ "########## (" ++ show pn ++ ")" ++  show t1
-        parseTelnetCmdOut parse t1
+    sendAndParseTelnetCmd parse
+      ("show mac address-table interface " <> portSpec <> T.pack (show pn)) ts
 
 
 {-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
