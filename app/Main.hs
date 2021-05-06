@@ -36,30 +36,6 @@ import Text.HTML.TagSoup
 import BH.IP
 import BH.Switch
 
-
-data TelnetShowMac = ShowMacAddressTable PortId | Huy
-  deriving (Show, Eq)
-
-telnetRef :: IORef (TelnetRef TelnetShowMac)
-{-# NOINLINE telnetRef #-}
-telnetRef   = unsafePerformIO . newIORef
-                $ TelnetRef { switchInfo = undefined
-                            , telnetState = Unauth
-                            , macMap = M.empty
-                            }
-
-
-
-{-t :: ContT Int IO Int
-t   = do
-        z <- resetT $ do
-            x <- shiftT $ (\k -> liftIO (k 7 >>= k))
-            let y = x + 1
-            return y
-        let w = z * 10
-        return w
--}
-
 parseShowMacAddrTable :: T.Text -> [MacAddr]
 parseShowMacAddrTable = foldr go [] . T.lines
   where
@@ -83,76 +59,6 @@ go pid@PortId{port = SwPort pn} ts = do
     sendAndParseTelnetCmd parse
       ("show mac address-table interface " <> portSpec <> T.pack (show pn)) ts
 
-
-{-getMacs :: TL.HasTelnetPtr t => (t, T.Text) -> TelnetCtx TelnetRef TelnetShowMac ()
-getMacs (con, ts) = do
-    tRef <- ask
-    liftIO $ do
-      r0@TelnetRef{switchInfo = swInfo, telnetState = s0, macMap = mm0} <- readIORef tRef
-      (s', mm') <- if "Invalid input detected" `T.isInfixOf` ts
-              then flip runStateT mm0 . flip runReaderT swInfo $ go Exit
-              else flip runStateT mm0 . flip runReaderT swInfo $ go s0
-      atomicWriteIORef tRef r0{telnetState = s', macMap = mm'}
-  where
-    go :: (TelnetState TelnetShowMac) -> ReaderT SwInfo (StateT PortMacMap IO) (TelnetState TelnetShowMac)
-    go s@Enabled
-        | "#" `T.isSuffixOf` ts = do
-            curSw <- asks swName
-            mm    <- get
-            let isPortUndef pid ms = portSw pid == curSw && isNothing ms
-            case (M.toList . M.filterWithKey isPortUndef $ mm) of
-              ((pid, _) : _) -> do
-                -- I need this, because response to previous 'show' command
-                -- may contain both command result ("Mac Address Table") and
-                -- cmd line prompt (with '#'). Thus, calling 'getMacs2' now
-                -- with 'ShowMacAddressTable p' state will result in parsing
-                -- previous port info as info for new (just selected) port
-                -- 'p'.
-                liftIO $ TL.telnetSend con . B8.pack $ "\n"
-                return (Command (ShowMacAddressTable pid))
-              [] -> go Exit
-        | otherwise = return s
-    go s@(Command (ShowMacAddressTable pid))
-        | "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts = do
-            liftIO $ putStrLn $ "save port " ++ show pid
-            modify (M.insert pid (Just (parseShowMacAddrTable ts)))
-            go Enabled
-        | "#" `T.isSuffixOf` ts = do
-            portSpec <- asks defaultPortSpec
-            let SwPort pn = port pid
-            liftIO $ do
-              putStrLn $ "show port " ++ show pn
-              TL.telnetSend con . B8.pack $
-                    "show mac address-table interface "
-                    ++ T.unpack portSpec ++ show pn ++ "\n"
-            return s
-        | otherwise = return s
-    go s@Exit
-        | "#" `T.isSuffixOf` ts   = do
-            liftIO $ TL.telnetSend con . B8.pack $ "exit\n"
-            return s
-        | otherwise             = return s
-    go _ = undefined
-
-telnetH :: Socket -> TL.EventHandler
-telnetH _ t (TL.Received b)
-  = do
-    putStr "R: "
-    B8.putStrLn b
-    flip runReaderT telnetRef . evalContT $ (telnetLogin t (T.decodeLatin1 b) >>= getMacs)
-telnetH s _ (TL.Send b)
-  = putStr "S: " *> B8.putStrLn b *> print (L.map ord (B8.unpack b)) *> send s b
-telnetH _ _ (TL.Do o)
-  = putStr $ "DO " ++ show o ++ "\n"
-telnetH _ _ (TL.Dont o)
-  = putStr $ "DON'T " ++ show o ++ "\n"
-telnetH _ _ (TL.Will o)
-  = putStr $ "Will " ++ show o ++ "\n"
-telnetH _ _ (TL.Wont o)
-  = putStr $ "WON'T " ++ show o ++ "\n"
-telnetH _ _ (TL.Iac i)
-  = putStr $ "IAC " ++ show i ++ "\n"
-telnetH _ _ _ = pure ()-}
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host   = Sh.shelly . Sh.silently $
@@ -279,39 +185,6 @@ parseLinuxArp zs t = case T.words t of
 addIp :: [IP] -> [IP] -> [IP]
 addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
 
-{-run :: ReaderT (M.Map SwName SwInfo) (ExceptT String IO) PortMacMap
-run = do
-    swports <- macMap <$> liftIO (readIORef telnetRef)
-    forM_ (M.keys swports) $ \(PortId {portSw = sw}) -> do
-        mSwInfo <- asks (M.lookup sw)
-        case mSwInfo of
-          Just swInfo@SwInfo{hostName = h} -> liftIO $ do
-            print $ "Connect to " ++ show h
-            atomicModifyIORef telnetRef $ \r ->
-                ( r { switchInfo = swInfo
-                    , telnetState = Unauth
-                    }
-                , ()
-                )
-            connect h "23" (\(s, _) -> handle s)
-          Nothing -> fail $ "No auth info for switch: '" ++ show sw ++ "'"
-    macMap <$> liftIO (readIORef telnetRef)
-  where
-    handle :: Socket -> IO ()
-    handle sock = do
-        telnet <- TL.telnetInit telnetOpts [] (telnetH sock)
-        whileJust_ (recv sock 4096) $ \bs -> do
-            let bl = B8.length bs
-            putStr $ "Socket (" ++ show bl ++ "): "
-            B8.putStrLn bs
-            TL.telnetRecv telnet bs
-
-    telnetOpts :: [TL.OptionSpec]
-    telnetOpts  = [ TL.OptionSpec TL.optEcho True True
-                  --, TL.OptionSpec TL.optLineMode True True
-                  ]-}
-
-
 main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
@@ -319,7 +192,6 @@ main    = do
     swports <- parseArgs <$> getArgs
     print swports
     let sw = head . M.keys $ swports
-    atomicModifyIORef telnetRef (\r -> (r{macMap = swports}, ()))
     res <- runExceptT $ do
       Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs2 (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run

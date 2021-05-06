@@ -12,21 +12,15 @@ module BH.Switch
     , parseSwInfo
     , SwPort (..)
     , PortId (..)
-    , TelnetState (..)
     , PortMacMap
     , MacPortMap
     , SwConfig
-    , TelnetRef (..)
-    , TelnetRef2 (..)
     , TelnetRef4 (..)
     , TelnetCmd
     , telnetRef4
     , CmdReader (..)
     , MacIpMap
     , PortMap
-    , TelnetCtx
-    , TelnetCtx3
-    , telnetLogin
     , shiftW
     , saveResume
     , modifyResult
@@ -101,74 +95,6 @@ data SwPort         = SwPort Int
 data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
-data TelnetState a  = Unauth
-                    | AuthUsername
-                    | Password
-                    | Logged
-                    | EnableRequested
-                    | EnablePassword
-                    | Enabled
-                    | Command a
-                    | Exit
-  deriving (Eq, Show)
-
--- FIXME: Passwords should be 'Just T.Text', because if no password is given,
--- i'll not perform specified auth type.
-class Eq a => TelnetRefClass t a where
-    userNameC :: t a -> T.Text
-    passwordC :: t a -> T.Text
-    enablePasswordC :: t a -> T.Text
-    --swNameC :: t a -> SwName
-    --defPortSpecC :: t a -> T.Text
-    telnetStateC :: t a -> TelnetState a
-    setTelnetStateC :: TelnetState a -> t a -> t a
-    -- FIXME: macMap may have different types depending on pass type. If i
-    -- query by interface it'll be one. If i query be mac, it'll be another.
-    --macMapC :: t a -> PortMacMap
-
-data TelnetRef a    = TelnetRef
-                        { switchInfo :: SwInfo
-                        , telnetState :: TelnetState a
-                        , macMap :: PortMacMap
-                        }
-  deriving (Show)
-
-instance Eq a => TelnetRefClass TelnetRef a where
-    userNameC = userName . switchInfo
-    passwordC = password . switchInfo
-    enablePasswordC = enablePassword . switchInfo
-    --swNameC = swName . switchInfo
-    --defPortSpecC = defaultPortSpec . switchInfo
-    telnetStateC = telnetState
-    setTelnetStateC s r = r{telnetState = s}
-    --macMapC = macMap
-
-data TelnetRef2 a   = TelnetRef2
-                        { switchInfo2 :: SwInfo
-                        , telnetState2 :: TelnetState a
-                        , swConfs :: M.Map SwName T.Text
-                        }
-  deriving (Show)
-
-data TelnetRef3 a   = TelnetRef3
-                        { switchInfo3 :: SwInfo
-                        , telnetState3 :: TelnetState a
-                        , telnetRes :: TelnetOpRes a
-                        , telnetCont :: Maybe (ReaderT (IORef (TelnetRef3 a)) IO ())
-                        }
-
-class TelnetOpClass a where
-    data TelnetOpRes a :: *
-    telnetResDef :: TelnetOpRes a
-    telnetRef3 :: TelnetOpClass a => IORef (TelnetRef3 a)
-    {-# NOINLINE telnetRef3 #-}
-    telnetRef3  = unsafePerformIO . newIORef
-                    $ TelnetRef3 { telnetState3 = Unauth
-                                 , switchInfo3 = undefined
-                                 , telnetCont = Nothing
-                                 , telnetRes = telnetResDef
-                                 }
-
 type TelnetCmd a b = T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
 data TelnetRef4 a b  = TelnetRef4
                         { tFinal  :: Maybe b
@@ -205,14 +131,6 @@ data CmdReader a b = CmdReader { switchInfo4 :: SwInfo
                              }
 
 
--- FIXME: TelnetRef payload (macMap, saveSws) depends on 'a'.. data families?
-instance Eq a => TelnetRefClass TelnetRef2 a where
-    userNameC = userName . switchInfo2
-    passwordC = password . switchInfo2
-    enablePasswordC = enablePassword . switchInfo2
-    telnetStateC = telnetState2
-    setTelnetStateC s r = r{telnetState2 = s}
-
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
 
 type MacPortMap     = M.Map MacAddr (Maybe [PortId])
@@ -222,61 +140,6 @@ type MacIpMap       = M.Map MacAddr [IP]
 type PortMap        = M.Map PortId [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
-
--- FIXME: Include TelnetRef into TelnetCtx ?
-type TelnetCtx t a  = ContT () (ReaderT (IORef (t a)) IO)
-
-type TelnetCtx3 a  = ContT () (ReaderT (IORef (TelnetRef3 a)) IO)
-
-withReaderTM :: Monad m => (r' -> m r) -> ReaderT r m a -> ReaderT r' m a
-withReaderTM f m = ask >>= lift . f >>= lift . runReaderT m
-
-telnetLogin :: (TelnetRefClass t a, TL.HasTelnetPtr con) => con -> T.Text -> TelnetCtx t a (con, T.Text)
-telnetLogin con ts = shiftT $ \k -> lift $ do
-    tRef <- ask
-    r <- liftIO (readIORef tRef)
-    let s0 = telnetStateC r
-    ms' <- withReaderT (const r) (go s0)
-    case ms' of
-      Right s'
-        | s' == Enabled -> liftIO (atomicWriteIORef tRef (setTelnetStateC s' r)) >> k (con, ts)
-        | otherwise     -> liftIO (atomicWriteIORef tRef (setTelnetStateC s' r))
-      Left _            -> k (con, ts)
-  where
-    -- | Return 'Nothing' if i don't understand state. And 'Just state'
-    -- otherwise.
-    go :: TelnetRefClass t a => (TelnetState a) -> ReaderT (t a) IO (Either String (TelnetState a))
-    go Unauth = go AuthUsername
-    go s@AuthUsername
-        | "Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts = do
-            user <- asks userNameC
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            return (Right s)
-        | "Password" `T.isInfixOf` ts = go Password
-        -- FIXME: May be drop unexpected state?
-        | otherwise                 = return (Right s)
-    go s@Password
-        | "Password" `T.isInfixOf` ts = do
-            pw <- asks passwordC
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack pw ++ "\n"
-            return (Right s)
-        | ">" `T.isSuffixOf` ts       = go Logged
-        | "#" `T.isSuffixOf` ts       = return (Right Enabled)
-        | otherwise                 = return (Right s)
-    go s@Logged
-        | ">" `T.isSuffixOf` ts       = do
-            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
-            return (Right s)
-        | "Password" `T.isInfixOf` ts = go EnablePassword
-        | otherwise                 = return (Right s)
-    go s@EnablePassword
-        | "Password" `T.isInfixOf` ts = do
-            enpw <- asks enablePasswordC
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-            return (Right s)
-        | "#" `T.isSuffixOf` ts       = return (Right Enabled)
-        | otherwise                 = return (Right s)
-    go _ = return (Left "Unknown state")
 
 
 
@@ -343,10 +206,6 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
       else do
         modifyResult (f ts)
         liftIO $ print "Retry parsing.."
-
-{-sendAndParseTelnetCmd :: Monoid b => T.Text -> (T.Text -> Maybe b -> Maybe b)
-                      -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
-sendAndParseTelnetCmd cmd f = parseTelnetCmdOut f <=< sendTelnetCmd cmd-}
 
 sendTelnetExit :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
