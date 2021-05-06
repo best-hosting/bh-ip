@@ -175,6 +175,7 @@ data TelnetRef4 a b  = TelnetRef4
                         , tResume :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
                         , tInt :: Int
                         , tEcho :: T.Text
+                        , tPrompt :: T.Text
                         }
 
 defTelnetRef4 :: TelnetRef4 a b
@@ -182,6 +183,7 @@ defTelnetRef4 = TelnetRef4  { tResume = Nothing
                             , tFinal = Nothing
                             , tInt = 0
                             , tEcho = T.empty
+                            , tPrompt = T.empty
                             }
 
 telnetRef4 :: IORef (TelnetRef4 a b)
@@ -293,15 +295,14 @@ shiftW f x = shiftT (\k -> f (k, x))
 -- | Send telnet command and wait until it'll be echo-ed back.
 -- FIXME: Strip newlines at the end of cmd?
 sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
-sendTelnetCmd cmd t0 = do
-    pure t0 >>=
-      shiftW (\(k, ts) -> do
-          con  <- asks tCon
-          when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
-            saveResume k
-        ) >>=
-      parseEcho cmd
+sendTelnetCmd cmd t0 =
+    shiftW (\(k, ts) -> do
+        con  <- asks tCon
+        when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
+          liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
+          saveResume k
+      ) t0 >>=
+    parseEcho cmd
 
 -- | Parse cmd echo-ed back.
 parseEcho :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
@@ -311,9 +312,10 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
       let echoCmd = tEcho r <> ts
       liftIO $ print $ "Command echo-ed back: " <> echoCmd
       liftIO $ print $ "Original was: " <> cmd
+      liftIO $ print $ tPrompt r
       if cmd `T.isInfixOf` echoCmd
         then do
-          liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = T.empty}, ()))
+          liftIO $ atomicModifyIORef tRef (\x -> (r{tEcho = T.empty}, ()))
           liftIO $ print $ "Command echo complete"
           saveResume k
           lift (k ts)
@@ -395,8 +397,14 @@ loginCmd ts0 = shiftT $ \finish -> do
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
             saveResume k
         ) >>=
-      shiftW (\(k, ts) ->
+      shiftW (\(k, ts) -> do
           when (">" `T.isSuffixOf` ts) $ do
+            tRef <- asks telRef
+            r <- liftIO (readIORef tRef)
+            -- There should be at least one non-empty line, since we've
+            -- chacked this above.
+            let prompt = T.takeWhile (/= '>') $ last (T.lines ts)
+            liftIO $ atomicModifyIORef tRef (\x -> (x{tPrompt = prompt}, ()))
             liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
             saveResume k
         ) >>=
