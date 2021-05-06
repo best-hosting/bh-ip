@@ -301,21 +301,23 @@ sendTelnetCmd cmd t0 = do
             liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
             saveResume k
         ) >>=
-      shiftW (\(k, ts) -> do
-          tRef <- asks telRef
-          r <- liftIO (readIORef tRef)
-          let echoCmd = tEcho r <> ts
-          liftIO $ print $ "Command echo-ed back: " <> echoCmd
-          liftIO $ print $ "Original was: " <> cmd
-          if cmd `T.isInfixOf` echoCmd
-            then do
-              liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = T.empty}, ()))
-              liftIO $ print $ "Command echo complete"
-              saveResume k
-              lift (k ts)
-            else do
-              liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = echoCmd}, ()))
-        )
+      parseEcho cmd
+
+-- | Parse cmd echo-ed back.
+parseEcho :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parseEcho cmd = shiftW $ \(k, ts) -> do
+      tRef <- asks telRef
+      r <- liftIO (readIORef tRef)
+      let echoCmd = tEcho r <> ts
+      liftIO $ print $ "Command echo-ed back: " <> echoCmd
+      liftIO $ print $ "Original was: " <> cmd
+      if cmd `T.isInfixOf` echoCmd
+        then do
+          liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = T.empty}, ()))
+          liftIO $ print $ "Command echo complete"
+          saveResume k
+          lift (k ts)
+        else liftIO $ atomicModifyIORef tRef (\r -> (r{tEcho = echoCmd}, ()))
 
 -- | Gather result and then proceed to next command immediately.
 parseTelnetCmdOut :: Monoid b => (T.Text -> Maybe b -> Maybe b)
@@ -323,8 +325,13 @@ parseTelnetCmdOut :: Monoid b => (T.Text -> Maybe b -> Maybe b)
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     liftIO $ print "Go parsing"
     if "#" `T.isSuffixOf` ts
-      then modifyResult (f ts) >> lift (k ts)
-      else modifyResult (f ts)
+      then do
+        modifyResult (f ts)
+        saveResume k
+        lift (k ts)
+      else do
+        modifyResult (f ts)
+        liftIO $ print "Retry parsing.."
 
 sendAndParseTelnetCmd :: Monoid b => T.Text -> (T.Text -> Maybe b -> Maybe b)
                       -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
