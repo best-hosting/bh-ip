@@ -267,7 +267,8 @@ runCmd ts cmd = do
         Nothing -> liftIO (print "huy")  >> cmd ts
         Just c  -> liftIO (print "cont") >> lift (c ts)
 
--- FIXME: Rewrite login to sendTelnetCmd, etc.
+-- FIXME: Rewrite login to sendTelnetCmd, etc. Use prompt to enter Username
+-- and Password with sendAndParseTelnetCmd .
 loginCmd :: T.Text -> TelnetCtx a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
     con  <- asks telnetConn
