@@ -164,7 +164,7 @@ sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
 sendAndParseTelnetCmd :: TelnetParser b -> T.Text -> T.Text -> TelnetCtx a b T.Text
-sendAndParseTelnetCmd f cmd t0 = liftIO (print "Huy blye") >>
+sendAndParseTelnetCmd f cmd t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
     shiftW (\(k, ts) -> do
         con  <- asks telnetConn
         when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
@@ -188,7 +188,9 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
           liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = T.empty}, ()))
           liftIO $ print $ "Command echo complete"
           saveResume k
-          lift (k ts)
+          -- Remove echo-ed command from input, because it's already parsed.
+          let (_, ts') = T.breakOnEnd cmd echoCmd
+          lift (k ts')
         else liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
 parsePrompt :: T.Text -> TelnetCtx a b T.Text
@@ -224,6 +226,7 @@ isParserEnded _             = False
 
 parseTelnetCmdOut2 :: TelnetParser b -> T.Text -> TelnetCtx a b T.Text
 parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
+    liftIO $ print $ "Start parsing: " <> ts
     stRef <- asks telnetRef
     st    <- liftIO (readIORef stRef)
     let r = f ts (telnetResult st)
