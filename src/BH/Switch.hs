@@ -164,15 +164,19 @@ sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 -- FIXME: Rename to just 'sendAndParse'
 sendAndParseTelnetCmd :: TelnetParser b -> T.Text -> T.Text -> TelnetCtx a b T.Text
 sendAndParseTelnetCmd f cmd t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
+    parsePrompt t0 >>=
     shiftW (\(k, ts) -> do
-        con  <- asks telnetConn
-        when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
-          liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
-          saveResume k
-      ) t0 >>=
+        if ts == "#"
+          then do
+            con  <- asks telnetConn
+            liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
+            saveResume k
+          else do
+            liftIO $ print $ "Prompt parsing incomplete: " <> ts
+            error "Abort"
+      ) >>=
     parseEcho cmd >>=
-    parseTelnetCmdOut f >>=
-    parsePrompt
+    parseTelnetCmdOut f
 
 -- | Parse cmd echo-ed back.
 parseEcho :: T.Text -> T.Text -> TelnetCtx a b T.Text
