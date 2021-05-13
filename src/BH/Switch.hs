@@ -228,13 +228,12 @@ parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
     st    <- liftIO (readIORef stRef)
     let r = f ts (telnetResult st)
     liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = parserResult r}, ()))
-    --when (isParserEnded r) $ saveResume k >> lift (k ts)
     if isParserEnded r
       then do
-        let huy = unparsedText r
-        liftIO $ print $ "Finish parsing with " <> T.unpack huy
+        let rem = unparsedText r
+        liftIO $ print $ "Finish parsing with " <> T.unpack rem
         saveResume k
-        lift $ k (unparsedText r)
+        lift $ k rem
       else liftIO $ print "Retry parsing.."
 
 sendTelnetExit :: T.Text -> TelnetCtx a b ()
