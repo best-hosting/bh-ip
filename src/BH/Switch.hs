@@ -94,7 +94,8 @@ data SwPort         = SwPort Int
 data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
-type TelnetCmd a b = T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
+type TelnetCtx a b = ContT () (ReaderT (CmdReader a b) IO)
+type TelnetCmd a b = T.Text -> TelnetCtx a b ()
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
@@ -123,11 +124,11 @@ telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 -- That been said, the 'config save' operation is different: it does not have
 -- a query. Though, if i consider all this not as queries/response, but just
 -- like input/program/output, then..
-data CmdReader a b = CmdReader { switchInfo4 :: SwInfo
-                             , telnetConn :: TL.TelnetPtr
-                             , telnetIn :: a
-                             , telnetRef :: IORef (TelnetState a b)
-                             }
+data CmdReader a b = CmdReader  { switchInfo4   :: SwInfo
+                                , telnetConn    :: TL.TelnetPtr
+                                , telnetIn      :: a
+                                , telnetRef     :: IORef (TelnetState a b)
+                                }
 
 
 type PortMacMap     = M.Map PortId (Maybe [MacAddr])
@@ -155,11 +156,11 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
-sendTelnetCmd :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+sendTelnetCmd :: T.Text -> T.Text -> TelnetCtx a b T.Text
 sendTelnetCmd = sendAndParseTelnetCmd (flip const)
 
 -- FIXME: Rename to just 'sendAndParse'
-sendAndParseTelnetCmd :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+sendAndParseTelnetCmd :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> T.Text -> TelnetCtx a b T.Text
 sendAndParseTelnetCmd f cmd t0 =
     shiftW (\(k, ts) -> do
         con  <- asks telnetConn
@@ -172,7 +173,7 @@ sendAndParseTelnetCmd f cmd t0 =
     parsePrompt
 
 -- | Parse cmd echo-ed back.
-parseEcho :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parseEcho :: T.Text -> T.Text -> TelnetCtx a b T.Text
 parseEcho cmd = shiftW $ \(k, ts) -> do
       tRef <- asks telnetRef
       r <- liftIO (readIORef tRef)
@@ -187,15 +188,14 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
           lift (k ts)
         else liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
-parsePrompt :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parsePrompt :: T.Text -> TelnetCtx a b T.Text
 parsePrompt ts = do
       tRef <- asks telnetRef
       r <- liftIO (readIORef tRef)
       parseEcho (telnetPrompt r) ts
 
 -- | Gather result and then proceed to next command immediately.
-parseTelnetCmdOut :: (T.Text -> Maybe b -> Maybe b)
-                      -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parseTelnetCmdOut :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> TelnetCtx a b T.Text
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     liftIO $ print "Go parsing"
     if "#" `T.isSuffixOf` ts
@@ -218,7 +218,7 @@ isParserEnded _         = False
                       -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
     tRef <- asks telnetRef
-    r0 <- liftIO (readIORef tRef)
+    stg <- liftIO (readIORef tRef)
     liftIO $ print "Go parsing"
     let r = f ts (telnetResult r0)
     liftIO $ atomicModifyIORef tRef (\x -> (x{telnetResult = f (telnetResult x)}, ()))
@@ -238,7 +238,7 @@ parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
         modifyResult (f ts)
         liftIO $ print "Retry parsing.."-}
 
-sendTelnetExit :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
+sendTelnetExit :: T.Text -> TelnetCtx a b ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
 
 saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
@@ -264,9 +264,7 @@ finishCmd = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just (\_ -> pure ())}, ()))
 
-runCmd :: T.Text
-          -> (TelnetCmd a b)
-          -> ContT () (ReaderT (CmdReader a b) IO) ()
+runCmd :: T.Text -> (TelnetCmd a b) -> TelnetCtx a b ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -280,7 +278,7 @@ runCmd ts cmd = do
         Just c  -> liftIO (print "cont") >> lift (c ts)
 
 -- FIXME: Rewrite login to sendTelnetCmd, etc.
-loginCmd :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+loginCmd :: T.Text -> TelnetCtx a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
     con  <- asks telnetConn
     -- shiftT stops execution, if supplied continuation is _not_ called. I
