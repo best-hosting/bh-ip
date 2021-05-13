@@ -31,7 +31,6 @@ module BH.Switch
     , sendAndParseTelnetCmd
     , sendTelnetExit
     , parseTelnetCmdOut
-    , parseTelnetCmdOut2
     , TelnetParser
     , ParserResult (..)
     )
@@ -172,7 +171,7 @@ sendAndParseTelnetCmd f cmd t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
           saveResume k
       ) t0 >>=
     parseEcho cmd >>=
-    parseTelnetCmdOut2 f >>=
+    parseTelnetCmdOut f >>=
     parsePrompt
 
 -- | Parse cmd echo-ed back.
@@ -200,20 +199,6 @@ parsePrompt ts = do
     r <- liftIO (readIORef tRef)
     parseEcho (telnetPrompt r) ts
 
--- | Gather result and then proceed to next command immediately.
-parseTelnetCmdOut :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> TelnetCtx a b T.Text
-parseTelnetCmdOut f = undefined
-
-{-    liftIO $ print "Go parsing"
-    if "#" `T.isSuffixOf` ts
-      then do
-        modifyResult (f ts)
-        saveResume k
-        lift (k ts)
-      else do
-        modifyResult (f ts)
-        liftIO $ print "Retry parsing.."-}
-
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
 
 data ParserResult b = Final   {parserResult :: Maybe b, unparsedText :: T.Text}
@@ -224,8 +209,8 @@ isParserEnded :: ParserResult b -> Bool
 isParserEnded (Final _ _)   = True
 isParserEnded _             = False
 
-parseTelnetCmdOut2 :: TelnetParser b -> T.Text -> TelnetCtx a b T.Text
-parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
+parseTelnetCmdOut :: TelnetParser b -> T.Text -> TelnetCtx a b T.Text
+parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     liftIO $ print $ "Start parsing: " <> ts
     stRef <- asks telnetRef
     st    <- liftIO (readIORef stRef)

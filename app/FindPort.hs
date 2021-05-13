@@ -62,7 +62,7 @@ findPort ts0 = do
                      in  if null xs then Partial mempty else Final (pure (M.singleton sn xs)) (last $ T.lines ts)
     pure ts0 >>=
       sendTelnetCmd ("show mac address-table address " <> T.pack (show mac)) >>=
-      parseTelnetCmdOut2 parse >>=
+      parseTelnetCmdOut parse >>=
       sendTelnetExit
 
 main :: IO ()
