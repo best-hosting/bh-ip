@@ -224,20 +224,11 @@ isParserEnded _             = False
 
 parseTelnetCmdOut2 :: TelnetParser b -> T.Text -> TelnetCtx a b T.Text
 parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
-    liftIO $ print "Go parsing 222:"
-    liftIO $ print ts
-    liftIO $ print "3333333"
     stRef <- asks telnetRef
     st    <- liftIO (readIORef stRef)
     let r = f ts (telnetResult st)
     liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = parserResult r}, ()))
     --when (isParserEnded r) $ saveResume k >> lift (k ts)
-    if "end\n" `T.isInfixOf` ts
-      then do
-        liftIO $ print "hunya:"
-        liftIO $ mapM_ print (T.lines ts)
-        error "Nihuya"
-      else return ()
     if isParserEnded r
       then do
         let huy = unparsedText r

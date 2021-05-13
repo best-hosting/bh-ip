@@ -46,17 +46,16 @@ saveSwitch ts0 = pure ts0 >>=
     sendAndParseTelnetCmd parseCf "show running" >>=
     sendTelnetExit
 
+-- | Parse cisco config. It uses "\r\n" line-ending. And config ends at 'end'
+-- string. The part of input after end string is returned as unparsed text.
 parseCf :: TelnetParser T.Text
-parseCf ts0 z
-  | "end" `elem` tl
-                = let (c, y : ys) = span (/= "end") tl
-                  in  Final { parserResult = z <> pure (T.unlines c <> y)
-                            , unparsedText = (T.unlines ys)
-                            }
-  | otherwise   =   Partial { parserResult = z <> pure ts}
-  where
-    ts = T.filter (/= '\r') ts0
-    tl = T.lines ts
+parseCf ts z    = let endCf  = "\nend\r\n"
+                  in  case T.splitOn endCf ts of
+                        [c]     -> Partial  { parserResult = z <> pure ts}
+                        [c, y]  -> Final    { parserResult = z <> pure (c <> endCf)
+                                            , unparsedText = y
+                                            }
+                        _ -> error "Impossible.."
 
 main :: IO ()
 main    = do
