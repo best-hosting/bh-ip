@@ -59,10 +59,10 @@ findPort ts0 = do
     mac <- asks telnetIn
     sn  <- asks (swName . switchInfo4)
     let parse ts _ = let xs = parseShowMacAddrTable ts
-                     in  if null xs then mempty else pure (M.singleton sn xs)
+                     in  if null xs then Partial mempty else Final (pure (M.singleton sn xs)) (last $ T.lines ts)
     pure ts0 >>=
       sendTelnetCmd ("show mac address-table address " <> T.pack (show mac)) >>=
-      parseTelnetCmdOut parse >>=
+      parseTelnetCmdOut2 parse >>=
       sendTelnetExit
 
 main :: IO ()

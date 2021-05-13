@@ -55,7 +55,7 @@ go :: PortId -> T.Text -> ContT () (ReaderT (CmdReader [PortId] (M.Map PortId [M
 go pid@PortId{port = SwPort pn} ts = do
     portSpec <- asks (defaultPortSpec . switchInfo4)
     let parse xs mz = let ys = parseShowMacAddrTable xs
-                      in  if null ys then mz else Just (M.singleton pid ys) <> mz
+                      in  if null ys then Partial mz else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
     sendAndParseTelnetCmd parse
       ("show mac address-table interface " <> portSpec <> T.pack (show pn)) ts
 

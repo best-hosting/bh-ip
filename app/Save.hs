@@ -36,13 +36,27 @@ import Text.HTML.TagSoup
 import BH.Switch
 
 
+huy :: T.Text
+huy  = "KSgikLyDlv RW 10\r\nsnmp-server community Faefoh8i RW 30\r\nsnmp-server location Stack\r\nsnmp-server tftp-server-list 31\r\n!\r\nline con 0\r\nline vty 0 4\r\n login local\r\n length 0\r\nline vty 5 15\r\n login local\r\n!\r\nntp clock-period 17180119\r\nntp server 213.108.252.1\r\n!\r\nend\r\n\r\nspacenet-sw-1#"
+
 saveSwitch :: TelnetCmd () T.Text
 saveSwitch ts0 = pure ts0 >>=
     sendTelnetCmd "write" >>=
     sendTelnetCmd "terminal length 0" >>=
-    sendTelnetCmd "show running" >>=
-    parseTelnetCmdOut (flip (<>) . pure) >>=
+    sendAndParseTelnetCmd parseCf "show running" >>=
     sendTelnetExit
+
+parseCf :: TelnetParser T.Text
+parseCf ts0 z
+  | "end" `elem` tl
+                = let (c, y : ys) = span (/= "end") tl
+                  in  Final { parserResult = z <> pure (T.unlines c <> y)
+                            , unparsedText = (T.unlines ys)
+                            }
+  | otherwise   =   Partial { parserResult = z <> pure ts}
+  where
+    ts = T.filter (/= '\r') ts0
+    tl = T.lines ts
 
 main :: IO ()
 main    = do

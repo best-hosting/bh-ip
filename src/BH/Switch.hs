@@ -31,6 +31,8 @@ module BH.Switch
     , sendAndParseTelnetCmd
     , sendTelnetExit
     , parseTelnetCmdOut
+    , parseTelnetCmdOut2
+    , TelnetParser
     , ParserResult (..)
     )
   where
@@ -96,6 +98,7 @@ data PortId         = PortId {portSw :: SwName, port :: SwPort}
 
 type TelnetCtx a b = ContT () (ReaderT (CmdReader a b) IO)
 type TelnetCmd a b = T.Text -> TelnetCtx a b ()
+
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
@@ -157,11 +160,11 @@ shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
 sendTelnetCmd :: T.Text -> T.Text -> TelnetCtx a b T.Text
-sendTelnetCmd = sendAndParseTelnetCmd (flip const)
+sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
-sendAndParseTelnetCmd :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> T.Text -> TelnetCtx a b T.Text
-sendAndParseTelnetCmd f cmd t0 =
+sendAndParseTelnetCmd :: TelnetParser b -> T.Text -> T.Text -> TelnetCtx a b T.Text
+sendAndParseTelnetCmd f cmd t0 = liftIO (print "Huy blye") >>
     shiftW (\(k, ts) -> do
         con  <- asks telnetConn
         when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
@@ -169,7 +172,7 @@ sendAndParseTelnetCmd f cmd t0 =
           saveResume k
       ) t0 >>=
     parseEcho cmd >>=
-    parseTelnetCmdOut f >>=
+    parseTelnetCmdOut2 f >>=
     parsePrompt
 
 -- | Parse cmd echo-ed back.
@@ -178,8 +181,8 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
       tRef <- asks telnetRef
       r <- liftIO (readIORef tRef)
       let echoCmd = telnetEcho r <> ts
-      liftIO $ print $ "Command echo-ed back: " <> echoCmd
       liftIO $ print $ "Original was: " <> cmd
+      liftIO $ print $ "Command echo-ed back: " <> echoCmd
       if cmd `T.isInfixOf` echoCmd
         then do
           liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = T.empty}, ()))
@@ -190,53 +193,58 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
 
 parsePrompt :: T.Text -> TelnetCtx a b T.Text
 parsePrompt ts = do
-      tRef <- asks telnetRef
-      r <- liftIO (readIORef tRef)
-      parseEcho (telnetPrompt r) ts
+    liftIO $ print "Parse prompt"
+    tRef <- asks telnetRef
+    r <- liftIO (readIORef tRef)
+    parseEcho (telnetPrompt r) ts
 
 -- | Gather result and then proceed to next command immediately.
 parseTelnetCmdOut :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> TelnetCtx a b T.Text
-parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
-    liftIO $ print "Go parsing"
+parseTelnetCmdOut f = undefined
+
+{-    liftIO $ print "Go parsing"
     if "#" `T.isSuffixOf` ts
       then do
         modifyResult (f ts)
-        saveResume k
-        lift (k ts)
-      else do
-        modifyResult (f ts)
-        liftIO $ print "Retry parsing.."
-
-data ParserResult b = Final {parserResult :: b, unparsedText :: T.Text}
-                    | Partial {parserResult :: b}
-
-isParserEnded :: ParserResult b -> Bool
-isParserEnded (Final _ _) = True
-isParserEnded _         = False
-
-{-parseTelnetCmdOut2 :: (T.Text -> ParserResult b -> ParserResult b)
-                      -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
-parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
-    tRef <- asks telnetRef
-    stg <- liftIO (readIORef tRef)
-    liftIO $ print "Go parsing"
-    let r = f ts (telnetResult r0)
-    liftIO $ atomicModifyIORef tRef (\x -> (x{telnetResult = f (telnetResult x)}, ()))
-    if isParserEnded r
-      then
-      else
-    case f ts of
-      Final (z, ts') ->
-      Partial z -> 
-    if "#" `T.isSuffixOf` ts
-      then do
-        let  (f ts)
-        liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = f (telnetResult r)}, ()))
         saveResume k
         lift (k ts)
       else do
         modifyResult (f ts)
         liftIO $ print "Retry parsing.."-}
+
+type TelnetParser b = T.Text -> Maybe b -> ParserResult b
+
+data ParserResult b = Final   {parserResult :: Maybe b, unparsedText :: T.Text}
+                    | Partial {parserResult :: Maybe b}
+  deriving (Show)
+
+isParserEnded :: ParserResult b -> Bool
+isParserEnded (Final _ _)   = True
+isParserEnded _             = False
+
+parseTelnetCmdOut2 :: TelnetParser b -> T.Text -> TelnetCtx a b T.Text
+parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
+    liftIO $ print "Go parsing 222:"
+    liftIO $ print ts
+    liftIO $ print "3333333"
+    stRef <- asks telnetRef
+    st    <- liftIO (readIORef stRef)
+    let r = f ts (telnetResult st)
+    liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = parserResult r}, ()))
+    --when (isParserEnded r) $ saveResume k >> lift (k ts)
+    if "end\n" `T.isInfixOf` ts
+      then do
+        liftIO $ print "hunya:"
+        liftIO $ mapM_ print (T.lines ts)
+        error "Nihuya"
+      else return ()
+    if isParserEnded r
+      then do
+        let huy = unparsedText r
+        liftIO $ print $ "Finish parsing with " <> T.unpack huy
+        saveResume k
+        lift $ k (unparsedText r)
+      else liftIO $ print "Retry parsing.."
 
 sendTelnetExit :: T.Text -> TelnetCtx a b ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
