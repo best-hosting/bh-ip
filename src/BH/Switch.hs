@@ -15,9 +15,7 @@ module BH.Switch
     , PortMacMap
     , MacPortMap
     , SwConfig
-    , TelnetRef4 (..)
     , TelnetCmd
-    , telnetRef4
     , CmdReader (..)
     , MacIpMap
     , PortMap
@@ -33,6 +31,7 @@ module BH.Switch
     , sendAndParseTelnetCmd
     , sendTelnetExit
     , parseTelnetCmdOut
+    , ParserResult (..)
     )
   where
 
@@ -96,25 +95,25 @@ data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
 type TelnetCmd a b = T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
-data TelnetRef4 a b  = TelnetRef4
-                        { tFinal  :: Maybe b
-                        , tResume :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
-                        , tInt :: Int
-                        , tEcho :: T.Text
-                        , tPrompt :: T.Text
-                        }
-
-defTelnetRef4 :: TelnetRef4 a b
-defTelnetRef4 = TelnetRef4  { tResume = Nothing
-                            , tFinal = Nothing
-                            , tInt = 0
-                            , tEcho = T.empty
-                            , tPrompt = T.empty
+data TelnetState a b    = TelnetState
+                            { telnetResult  :: Maybe b
+                            , telnetResume  :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
+                            , tInt :: Int
+                            , telnetEcho    :: T.Text
+                            , telnetPrompt  :: T.Text
                             }
 
-telnetRef4 :: IORef (TelnetRef4 a b)
-{-# NOINLINE telnetRef4 #-}
-telnetRef4  = unsafePerformIO (newIORef defTelnetRef4)
+defTelnetState :: TelnetState a b
+defTelnetState  = TelnetState { telnetResume = Nothing
+                              , telnetResult = Nothing
+                              , tInt = 0
+                              , telnetEcho   = T.empty
+                              , telnetPrompt = T.empty
+                              }
+
+telnetStateRef :: IORef (TelnetState a b)
+{-# NOINLINE telnetStateRef #-}
+telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
 -- FIXME: Query, result and program (telnet commands) are all bound together.
 -- I.e. if i query by IP, i definitely need 'findPort' and result will be
@@ -125,9 +124,9 @@ telnetRef4  = unsafePerformIO (newIORef defTelnetRef4)
 -- a query. Though, if i consider all this not as queries/response, but just
 -- like input/program/output, then..
 data CmdReader a b = CmdReader { switchInfo4 :: SwInfo
-                             , tCon :: TL.TelnetPtr
+                             , telnetConn :: TL.TelnetPtr
                              , telnetIn :: a
-                             , telRef :: IORef (TelnetRef4 a b)
+                             , telnetRef :: IORef (TelnetState a b)
                              }
 
 
@@ -163,7 +162,7 @@ sendTelnetCmd = sendAndParseTelnetCmd (flip const)
 sendAndParseTelnetCmd :: (T.Text -> Maybe b -> Maybe b) -> T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 sendAndParseTelnetCmd f cmd t0 =
     shiftW (\(k, ts) -> do
-        con  <- asks tCon
+        con  <- asks telnetConn
         when ("#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts) $ do
           liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
           saveResume k
@@ -175,24 +174,24 @@ sendAndParseTelnetCmd f cmd t0 =
 -- | Parse cmd echo-ed back.
 parseEcho :: T.Text -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 parseEcho cmd = shiftW $ \(k, ts) -> do
-      tRef <- asks telRef
+      tRef <- asks telnetRef
       r <- liftIO (readIORef tRef)
-      let echoCmd = tEcho r <> ts
+      let echoCmd = telnetEcho r <> ts
       liftIO $ print $ "Command echo-ed back: " <> echoCmd
       liftIO $ print $ "Original was: " <> cmd
       if cmd `T.isInfixOf` echoCmd
         then do
-          liftIO $ atomicModifyIORef tRef (\x -> (x{tEcho = T.empty}, ()))
+          liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = T.empty}, ()))
           liftIO $ print $ "Command echo complete"
           saveResume k
           lift (k ts)
-        else liftIO $ atomicModifyIORef tRef (\x -> (x{tEcho = echoCmd}, ()))
+        else liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
 parsePrompt :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 parsePrompt ts = do
-      tRef <- asks telRef
+      tRef <- asks telnetRef
       r <- liftIO (readIORef tRef)
-      parseEcho (tPrompt r) ts
+      parseEcho (telnetPrompt r) ts
 
 -- | Gather result and then proceed to next command immediately.
 parseTelnetCmdOut :: (T.Text -> Maybe b -> Maybe b)
@@ -208,39 +207,70 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
         modifyResult (f ts)
         liftIO $ print "Retry parsing.."
 
+data ParserResult b = Final {parserResult :: b, unparsedText :: T.Text}
+                    | Partial {parserResult :: b}
+
+isParserEnded :: ParserResult b -> Bool
+isParserEnded (Final _ _) = True
+isParserEnded _         = False
+
+{-parseTelnetCmdOut2 :: (T.Text -> ParserResult b -> ParserResult b)
+                      -> T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
+parseTelnetCmdOut2 f = shiftW $ \(k, ts) -> do
+    tRef <- asks telnetRef
+    r0 <- liftIO (readIORef tRef)
+    liftIO $ print "Go parsing"
+    let r = f ts (telnetResult r0)
+    liftIO $ atomicModifyIORef tRef (\x -> (x{telnetResult = f (telnetResult x)}, ()))
+    if isParserEnded r
+      then
+      else
+    case f ts of
+      Final (z, ts') ->
+      Partial z -> 
+    if "#" `T.isSuffixOf` ts
+      then do
+        let  (f ts)
+        liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = f (telnetResult r)}, ()))
+        saveResume k
+        lift (k ts)
+      else do
+        modifyResult (f ts)
+        liftIO $ print "Retry parsing.."-}
+
 sendTelnetExit :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
 
 saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
               -> ContT () (ReaderT (CmdReader a b) m) ()
 saveResume k = do
-    tRef <- asks telRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just k}, ()))
+    tRef <- asks telnetRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just k}, ()))
 
 -- | Modify result. If there's not result yet, initialize it with empty value.
 modifyResult :: MonadIO m => (Maybe b -> Maybe b) -> ContT () (ReaderT (CmdReader a b) m) ()
 modifyResult f = do
-    tRef <- asks telRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = f (tFinal r)}, ()))
+    tRef <- asks telnetRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = f (telnetResult r)}, ()))
 
 saveResult :: MonadIO m => b -> ContT () (ReaderT (CmdReader a b) m) ()
 saveResult x = do
-    tRef <- asks telRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{tFinal = Just x}, ()))
+    tRef <- asks telnetRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = Just x}, ()))
 
 -- FIXME: Do i need this?
 finishCmd :: MonadIO m => ContT () (ReaderT (CmdReader a b) m) ()
 finishCmd = do
-    tRef <- asks telRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{tResume = Just (\_ -> pure ())}, ()))
+    tRef <- asks telnetRef
+    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just (\_ -> pure ())}, ()))
 
 runCmd :: T.Text
           -> (TelnetCmd a b)
           -> ContT () (ReaderT (CmdReader a b) IO) ()
 runCmd ts cmd = do
-    tRef <- asks telRef
+    tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
-    let mCont = tResume r0
+    let mCont = telnetResume r0
         n0 = tInt r0
     liftIO $ print $ "f start: " ++ show n0
     liftIO $ atomicWriteIORef tRef r0{tInt = n0 + 1}
@@ -252,7 +282,7 @@ runCmd ts cmd = do
 -- FIXME: Rewrite login to sendTelnetCmd, etc.
 loginCmd :: T.Text -> ContT () (ReaderT (CmdReader a b) IO) T.Text
 loginCmd ts0 = shiftT $ \finish -> do
-    con  <- asks tCon
+    con  <- asks telnetConn
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
@@ -270,12 +300,12 @@ loginCmd ts0 = shiftT $ \finish -> do
         ) >>=
       shiftW (\(k, ts) -> do
           when (">" `T.isSuffixOf` ts) $ do
-            tRef <- asks telRef
+            tRef <- asks telnetRef
             r <- liftIO (readIORef tRef)
             -- There should be at least one non-empty line, since we've
             -- chacked this above.
             let prompt = T.takeWhile (/= '>') $ last (T.lines ts)
-            liftIO $ atomicModifyIORef tRef (\x -> (x{tPrompt = prompt}, ()))
+            liftIO $ atomicModifyIORef tRef (\x -> (x{telnetPrompt = prompt}, ()))
             liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
             saveResume k
         ) >>=
@@ -310,11 +340,11 @@ run input telnetCmd sn = do
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
-        let cr = CmdReader {switchInfo4 = swInfo, telRef = telnetRef4, telnetIn = input}
-        atomicWriteIORef telnetRef4 defTelnetRef4
+        let cr = CmdReader {switchInfo4 = swInfo, telnetRef = telnetStateRef, telnetIn = input}
+        atomicWriteIORef telnetStateRef defTelnetState
         connect h "23" (\(s, _) -> handle cr s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
-    tFinal <$> liftIO (readIORef telnetRef4)
+    telnetResult <$> liftIO (readIORef telnetStateRef)
   where
     --handle :: CmdReader a -> Socket -> IO ()
     handle cr sock = do
@@ -335,7 +365,7 @@ telnetH cr telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
     print (L.map ord (B8.unpack b))
-    flip runReaderT cr{tCon = con} . evalContT $ (runCmd (T.decodeLatin1 b) telnetCmd)
+    flip runReaderT cr{telnetConn = con} . evalContT $ (runCmd (T.decodeLatin1 b) telnetCmd)
 telnetH _ _ s _ (TL.Send b)
   = do
     putStr ("S(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
