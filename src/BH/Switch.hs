@@ -145,6 +145,7 @@ type PortMap        = M.Map PortId [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
 
+-- FIXME: Rename to 'TelCmd'
 data CmdText    = CmdText {cmdText :: T.Text, cmdEcho :: Bool}
   deriving (Show)
 
@@ -169,7 +170,7 @@ sendAndParseTelnetCmd :: TelnetParser b -> CmdText -> TelnetCmd a b T.Text
 sendAndParseTelnetCmd f cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
-    sendParseWithPrompt (echoParser (telnetPrompt st)) f cmd t0
+    sendParseWithPrompt (echoPromptP (telnetPrompt st)) f cmd t0
 
 sendParseWithPrompt :: PromptParser () -> TelnetParser b -> CmdText -> TelnetCmd a b T.Text
 sendParseWithPrompt pp f (CmdText {cmdText = cmd, cmdEcho = ce}) t0 = 
@@ -180,11 +181,15 @@ sendParseWithPrompt pp f (CmdText {cmdText = cmd, cmdEcho = ce}) t0 =
         liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
         saveResume k
       ) >>=
-    parseEcho (echoParser cmd) >>=
+    (\ts ->
+        if ce
+          then parseEcho (echoPromptP cmd) ts
+          else return ts
+    ) >>=
     parseTelnetCmdOut f
 
-echoParser :: T.Text -> PromptParser ()
-echoParser txt ts
+echoPromptP :: T.Text -> PromptParser ()
+echoPromptP txt ts
   | txt `T.isInfixOf` ts = Final    { parserResult = Just ()
                                     , unparsedText_ = snd $ T.breakOnEnd txt ts
                                     }
@@ -282,47 +287,8 @@ runCmd ts cmd = do
         Nothing -> liftIO (print "huy")  >> cmd ts
         Just c  -> liftIO (print "cont") >> lift (c ts)
 
--- FIXME: Rewrite login to sendTelnetCmd, etc. Use prompt to enter Username
--- and Password with sendAndParseTelnetCmd .
-loginCmd :: TelnetCmd a b T.Text
-loginCmd ts0 = shiftT $ \finish -> do
-    con  <- asks telnetConn
-    -- shiftT stops execution, if supplied continuation is _not_ called. I
-    -- don't need any other "suspend mechanisms" apart from plain 'return'!
-    pure ts0 >>=
-      shiftW (\(k, ts) ->
-          when ("Username" `T.isInfixOf` ts || "User Name" `T.isInfixOf` ts) $ do
-            user <- asks (userName . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) ->
-          when ("Password" `T.isInfixOf` ts) $ do
-            user <- asks (password . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) -> do
-          when (">" `T.isSuffixOf` ts) $ do
-            tRef <- asks telnetRef
-            r <- liftIO (readIORef tRef)
-            -- There should be at least one non-empty line, since we've
-            -- chacked this above.
-            let prompt = T.takeWhile (/= '>') $ last (T.lines ts)
-            liftIO $ atomicModifyIORef tRef (\x -> (x{telnetPrompt = prompt}, ()))
-            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) ->
-          when ("Password" `T.isInfixOf` ts) $ do
-            enpw <- asks (enablePassword . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-            saveResume k
-        ) >>= \ts ->
-      when ("#" `T.isSuffixOf` ts) (finishCmd >> lift (finish ts))
-
-userNameParser :: PromptParser ()
-userNameParser ts
+userNamePromptP :: PromptParser ()
+userNamePromptP ts
   | "Username:" `T.isInfixOf` ts || "User Name:" `T.isInfixOf` ts
                         = Final   { parserResult = Just ()
                                   , unparsedText_ = rem
@@ -332,36 +298,33 @@ userNameParser ts
     rem | "Username:"  `T.isInfixOf` ts = snd $ T.breakOnEnd "Username:" ts
         | "User Name:" `T.isInfixOf` ts = snd $ T.breakOnEnd "User Name:" ts
 
-passwordParser :: PromptParser ()
-passwordParser ts
+passwordPromptP :: PromptParser ()
+passwordPromptP ts
   | "Password:" `T.isInfixOf` ts = Final    { parserResult = Just ()
                                             , unparsedText_ = snd $ T.breakOnEnd "Password:" ts
                                             }
   | otherwise                    = Partial  { parserResult = Just () }
 
-loginCmd2 :: TelnetCmd a b T.Text
-loginCmd2 ts0 = shiftT $ \finish -> do
+checkRootP :: TelnetParser b
+checkRootP ts m
+  | "#" `T.isSuffixOf` ts = Final   { parserResult = m
+                                    , unparsedText_ = ts
+                                    }
+  | otherwise             = Partial { parserResult = m }
+
+-- FIXME: Write function for setting prompt in TelnetState .
+loginCmd :: TelnetCmd a b T.Text
+loginCmd ts0 = shiftT $ \finish -> do
     con  <- asks telnetConn
     SwInfo  { userName = user
             , password = pw
+            , enablePassword = enPw
             } <- asks switchInfo4
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
-      sendParseWithPrompt userNameParser (flip Final) (defCmd user) >>=
-      --sendParseWithPrompt userNameParser (flip Final) (CmdText {cmdText = pw, cmdEcho = False}) >>=
-      shiftW (\(k, ts) ->
-          when ("Password" `T.isInfixOf` ts) $ do
-            user <- asks (password . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            saveResume k
-        ) >>=
-      shiftW (\(k, ts) ->
-          when ("Password" `T.isInfixOf` ts) $ do
-            user <- asks (password . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack user ++ "\n"
-            saveResume k
-        ) >>=
+      sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
+      sendParseWithPrompt passwordPromptP (flip Final) (CmdText {cmdText = pw, cmdEcho = False}) >>=
       shiftW (\(k, ts) -> do
           when (">" `T.isSuffixOf` ts) $ do
             tRef <- asks telnetRef
@@ -370,16 +333,12 @@ loginCmd2 ts0 = shiftT $ \finish -> do
             -- chacked this above.
             let prompt = T.takeWhile (/= '>') $ last (T.lines ts)
             liftIO $ atomicModifyIORef tRef (\x -> (x{telnetPrompt = prompt}, ()))
-            liftIO $ TL.telnetSend con . B8.pack $ "enable\n"
             saveResume k
+            lift (k ts)
         ) >>=
-      shiftW (\(k, ts) ->
-          when ("Password" `T.isInfixOf` ts) $ do
-            enpw <- asks (enablePassword . switchInfo4)
-            liftIO $ TL.telnetSend con . B8.pack $ T.unpack enpw ++ "\n"
-            saveResume k
-        ) >>= \ts ->
-      when ("#" `T.isSuffixOf` ts) (finishCmd >> lift (finish ts))
+      sendTelnetCmd (defCmd "enable") >>=
+      sendParseWithPrompt passwordPromptP checkRootP (CmdText {cmdText = enPw, cmdEcho = False}) >>=
+      lift . finish
 
 -- FIXME: Provide variants of run for running till result is found. Or running
 -- on all switches.
