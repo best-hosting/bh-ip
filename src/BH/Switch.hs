@@ -96,8 +96,7 @@ data SwPort         = SwPort Int
 data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
-type TelnetCtx a b = ContT () (ReaderT (CmdReader a b) IO)
-type TelnetCmd a b c = T.Text -> TelnetCtx a b c
+type TelnetCmd a b c = T.Text -> ContT () (ReaderT (CmdReader a b) IO) c
 
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
@@ -159,11 +158,11 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
-sendTelnetCmd :: CmdText -> T.Text -> TelnetCtx a b T.Text
+sendTelnetCmd :: CmdText -> TelnetCmd a b T.Text
 sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
-sendAndParseTelnetCmd :: TelnetParser b -> CmdText -> T.Text -> TelnetCtx a b T.Text
+sendAndParseTelnetCmd :: TelnetParser b -> CmdText -> TelnetCmd a b T.Text
 sendAndParseTelnetCmd f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
     parsePrompt t0 >>=
     shiftW (\(k, ts) -> do
@@ -180,7 +179,7 @@ sendAndParseTelnetCmd f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd:
     parseTelnetCmdOut f
 
 -- | Parse cmd echo-ed back.
-parseEcho :: T.Text -> T.Text -> TelnetCtx a b T.Text
+parseEcho :: T.Text -> TelnetCmd a b T.Text
 parseEcho cmd = shiftW $ \(k, ts) -> do
       tRef <- asks telnetRef
       r <- liftIO (readIORef tRef)
@@ -197,7 +196,7 @@ parseEcho cmd = shiftW $ \(k, ts) -> do
           lift (k ts')
         else liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
-parsePrompt :: T.Text -> TelnetCtx a b T.Text
+parsePrompt :: TelnetCmd a b T.Text
 parsePrompt ts = do
     liftIO $ print "Parse prompt"
     tRef <- asks telnetRef
@@ -214,7 +213,7 @@ isParserEnded :: ParserResult b -> Bool
 isParserEnded (Final _ _)   = True
 isParserEnded _             = False
 
-parseTelnetCmdOut :: TelnetParser b -> T.Text -> TelnetCtx a b T.Text
+parseTelnetCmdOut :: TelnetParser b -> TelnetCmd a b T.Text
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     liftIO $ print $ "Start parsing: " <> ts
     stRef <- asks telnetRef
@@ -229,7 +228,7 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
         lift $ k rem
       else liftIO $ print "Retry parsing.."
 
-sendTelnetExit :: T.Text -> TelnetCtx a b ()
+sendTelnetExit :: TelnetCmd a b ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd (CmdText "exit")
 
 saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
@@ -255,7 +254,7 @@ finishCmd = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just (\_ -> pure ())}, ()))
 
-runCmd :: T.Text -> (TelnetCmd a b ()) -> TelnetCtx a b ()
+runCmd :: T.Text -> (TelnetCmd a b ()) -> ContT () (ReaderT (CmdReader a b) IO) ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -270,7 +269,7 @@ runCmd ts cmd = do
 
 -- FIXME: Rewrite login to sendTelnetCmd, etc. Use prompt to enter Username
 -- and Password with sendAndParseTelnetCmd .
-loginCmd :: T.Text -> TelnetCtx a b T.Text
+loginCmd :: TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
     con  <- asks telnetConn
     -- shiftT stops execution, if supplied continuation is _not_ called. I
