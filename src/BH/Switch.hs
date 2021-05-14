@@ -171,7 +171,7 @@ sendAndParseTelnetCmd f cmd t0 = do
 -- FIXME: Rename to just 'sendAndParse'
 sendParseWithPrompt :: T.Text -> TelnetParser b -> CmdText -> TelnetCmd a b T.Text
 sendParseWithPrompt promptTxt f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
-    parseEcho2 (echoParser promptTxt) t0 >>=
+    parseEcho (echoParser promptTxt) t0 >>=
     shiftW (\(k, ts) -> do
         if ts == "#"
           then do
@@ -182,7 +182,7 @@ sendParseWithPrompt promptTxt f (CmdText cmd) t0 = liftIO (print "sendAndParseTe
             liftIO $ print $ "Prompt parsing incomplete: " <> ts
             error "Abort"
       ) >>=
-    parseEcho2 (echoParser cmd) >>=
+    parseEcho (echoParser cmd) >>=
     parseTelnetCmdOut f
 
 echoParser :: T.Text -> T.Text -> ParserResult ()
@@ -192,8 +192,8 @@ echoParser txt ts
                                     }
   | otherwise            = Partial  { parserResult = Just () }
 
-parseEcho2 :: (T.Text -> ParserResult ()) -> TelnetCmd a b T.Text
-parseEcho2 p = shiftW $ \(k, ts) -> do
+parseEcho :: (T.Text -> ParserResult ()) -> TelnetCmd a b T.Text
+parseEcho p = shiftW $ \(k, ts) -> do
       stRef <- asks telnetRef
       st <- liftIO (readIORef stRef)
       let echoCmd = telnetEcho st <> ts
@@ -205,8 +205,6 @@ parseEcho2 p = shiftW $ \(k, ts) -> do
           saveResume k
           let rem = fromMaybe T.empty (unparsedText r)
           liftIO $ print $ "Finished reading back with: " <> rem
-          -- Remove echo-ed command from input, because it's already parsed.
-          --let (_, ts') = T.breakOnEnd cmd echoCmd
           lift (k rem)
         else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
