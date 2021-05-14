@@ -54,7 +54,7 @@ parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
   (n, _) : _ -> Right (SwPort n)
   _          -> Left "Huy"
 
-findPort :: TelnetCmd MacAddr (M.Map SwName [SwPort])
+findPort :: TelnetCmd MacAddr (M.Map SwName [SwPort]) ()
 findPort ts0 = do
     mac <- asks telnetIn
     sn  <- asks (swName . switchInfo4)

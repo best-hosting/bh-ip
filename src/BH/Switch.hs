@@ -97,7 +97,7 @@ data PortId         = PortId {portSw :: SwName, port :: SwPort}
   deriving (Eq, Ord, Show)
 
 type TelnetCtx a b = ContT () (ReaderT (CmdReader a b) IO)
-type TelnetCmd a b = T.Text -> TelnetCtx a b ()
+type TelnetCmd a b c = T.Text -> TelnetCtx a b c
 
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
@@ -255,7 +255,7 @@ finishCmd = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just (\_ -> pure ())}, ()))
 
-runCmd :: T.Text -> (TelnetCmd a b) -> TelnetCtx a b ()
+runCmd :: T.Text -> (TelnetCmd a b ()) -> TelnetCtx a b ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -309,7 +309,7 @@ loginCmd ts0 = shiftT $ \finish -> do
 
 -- FIXME: Provide variants of run for running till result is found. Or running
 -- on all switches.
-runTill :: (Monoid b, Show b) => a -> TelnetCmd a b -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 runTill input telnetCmd p = do
     sws <- asks M.keys
     foldM go Nothing sws
@@ -319,12 +319,12 @@ runTill input telnetCmd p = do
       | fromMaybe False (p <$> zs) = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
       | otherwise                  = run input telnetCmd sn
 
-runOn :: a -> TelnetCmd a b -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runOn :: a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =
     foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
 
 -- | Run on one switch.
-run :: a -> TelnetCmd a b -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run :: a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 run input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
@@ -350,7 +350,7 @@ run input telnetCmd sn = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-telnetH :: CmdReader a b -> (TelnetCmd a b) -> Socket -> TL.EventHandler
+telnetH :: CmdReader a b -> (TelnetCmd a b ()) -> Socket -> TL.EventHandler
 telnetH cr telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"

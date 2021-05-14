@@ -45,7 +45,7 @@ parseShowMacAddrTable = foldr go [] . T.lines
         _            -> zs
 
 -- FIXME: defaultPortSpec should be part of PortId ?
-getMacs2 :: TelnetCmd [PortId] (M.Map PortId [MacAddr])
+getMacs2 :: TelnetCmd [PortId] (M.Map PortId [MacAddr]) ()
 getMacs2 ts0 = do
     curSn <- asks (swName . switchInfo4)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
