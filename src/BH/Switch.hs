@@ -33,6 +33,7 @@ module BH.Switch
     , parseTelnetCmdOut
     , TelnetParser
     , ParserResult (..)
+    , CmdText (..)
     )
   where
 
@@ -143,8 +144,8 @@ type PortMap        = M.Map PortId [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
 
-
-
+newtype CmdText    = CmdText {cmdText :: T.Text}
+  deriving (Show)
 
 
 
@@ -158,12 +159,12 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
-sendTelnetCmd :: T.Text -> T.Text -> TelnetCtx a b T.Text
+sendTelnetCmd :: CmdText -> T.Text -> TelnetCtx a b T.Text
 sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
-sendAndParseTelnetCmd :: TelnetParser b -> T.Text -> T.Text -> TelnetCtx a b T.Text
-sendAndParseTelnetCmd f cmd t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
+sendAndParseTelnetCmd :: TelnetParser b -> CmdText -> T.Text -> TelnetCtx a b T.Text
+sendAndParseTelnetCmd f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
     parsePrompt t0 >>=
     shiftW (\(k, ts) -> do
         if ts == "#"
@@ -229,7 +230,7 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
       else liftIO $ print "Retry parsing.."
 
 sendTelnetExit :: T.Text -> TelnetCtx a b ()
-sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd "exit"
+sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd (CmdText "exit")
 
 saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
               -> ContT () (ReaderT (CmdReader a b) m) ()

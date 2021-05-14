@@ -57,7 +57,7 @@ go pid@PortId{port = SwPort pn} ts = do
     let parse xs mz = let ys = parseShowMacAddrTable xs
                       in  if null ys then Partial mz else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
     sendAndParseTelnetCmd parse
-      ("show mac address-table interface " <> portSpec <> T.pack (show pn)) ts
+      (CmdText ("show mac address-table interface " <> portSpec <> T.pack (show pn))) ts
 
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
