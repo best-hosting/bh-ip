@@ -53,7 +53,7 @@ parseCf ts z    = let endCf  = "\nend\r\n"
                   in  case T.splitOn endCf ts of
                         [c]     -> Partial  { parserResult = z <> pure ts}
                         [c, y]  -> Final    { parserResult = z <> pure (c <> endCf)
-                                            , unparsedText = y
+                                            , unparsedText_ = y
                                             }
                         _ -> error "Impossible.."
 

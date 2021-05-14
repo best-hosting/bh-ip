@@ -33,6 +33,7 @@ module BH.Switch
     , parseTelnetCmdOut
     , TelnetParser
     , ParserResult (..)
+    , unparsedText
     , CmdText (..)
     )
   where
@@ -161,10 +162,16 @@ shiftW f x = shiftT (\k -> f (k, x))
 sendTelnetCmd :: CmdText -> TelnetCmd a b T.Text
 sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 
--- FIXME: Rename to just 'sendAndParse'
 sendAndParseTelnetCmd :: TelnetParser b -> CmdText -> TelnetCmd a b T.Text
-sendAndParseTelnetCmd f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
-    parsePrompt t0 >>=
+sendAndParseTelnetCmd f cmd t0 = do
+    tRef <- asks telnetRef
+    r <- liftIO (readIORef tRef)
+    sendParseWithPrompt (telnetPrompt r) f cmd t0
+
+-- FIXME: Rename to just 'sendAndParse'
+sendParseWithPrompt :: T.Text -> TelnetParser b -> CmdText -> TelnetCmd a b T.Text
+sendParseWithPrompt promptTxt f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd: ") >>
+    parseEcho2 (echoParser promptTxt) t0 >>=
     shiftW (\(k, ts) -> do
         if ts == "#"
           then do
@@ -175,43 +182,54 @@ sendAndParseTelnetCmd f (CmdText cmd) t0 = liftIO (print "sendAndParseTelnetCmd:
             liftIO $ print $ "Prompt parsing incomplete: " <> ts
             error "Abort"
       ) >>=
-    parseEcho cmd >>=
+    parseEcho2 (echoParser cmd) >>=
     parseTelnetCmdOut f
 
--- | Parse cmd echo-ed back.
-parseEcho :: T.Text -> TelnetCmd a b T.Text
-parseEcho cmd = shiftW $ \(k, ts) -> do
-      tRef <- asks telnetRef
-      r <- liftIO (readIORef tRef)
-      let echoCmd = telnetEcho r <> ts
-      liftIO $ print $ "Original was: " <> cmd
-      liftIO $ print $ "Command echo-ed back: " <> echoCmd
-      if cmd `T.isInfixOf` echoCmd
-        then do
-          liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = T.empty}, ()))
-          liftIO $ print $ "Command echo complete"
-          saveResume k
-          -- Remove echo-ed command from input, because it's already parsed.
-          let (_, ts') = T.breakOnEnd cmd echoCmd
-          lift (k ts')
-        else liftIO $ atomicModifyIORef tRef (\x -> (x{telnetEcho = echoCmd}, ()))
+echoParser :: T.Text -> T.Text -> ParserResult ()
+echoParser txt ts
+  | txt `T.isInfixOf` ts = Final    { parserResult = Just ()
+                                    , unparsedText_ = snd $ T.breakOnEnd txt ts
+                                    }
+  | otherwise            = Partial  { parserResult = Just () }
 
-parsePrompt :: TelnetCmd a b T.Text
-parsePrompt ts = do
-    liftIO $ print "Parse prompt"
-    tRef <- asks telnetRef
-    r <- liftIO (readIORef tRef)
-    parseEcho (telnetPrompt r) ts
+parseEcho2 :: (T.Text -> ParserResult ()) -> TelnetCmd a b T.Text
+parseEcho2 p = shiftW $ \(k, ts) -> do
+      stRef <- asks telnetRef
+      st <- liftIO (readIORef stRef)
+      let echoCmd = telnetEcho st <> ts
+          r = p echoCmd
+      liftIO $ print $ "Read back: " <> echoCmd
+      if isParserEnded r
+        then do
+          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = T.empty}, ()))
+          saveResume k
+          let rem = fromMaybe T.empty (unparsedText r)
+          liftIO $ print $ "Finished reading back with: " <> rem
+          -- Remove echo-ed command from input, because it's already parsed.
+          --let (_, ts') = T.breakOnEnd cmd echoCmd
+          lift (k rem)
+        else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
 
-data ParserResult b = Final   {parserResult :: Maybe b, unparsedText :: T.Text}
+-- I need 'Maybe' in 'parserResult' here to unbind parser state (finished or
+-- not) from actual result state (obtained or not). With 'Maybe' these are two
+-- independent properties, but without Maybe 'Final' result will indirectly
+-- assume, that some result is obtained. And this may not be the case, when
+-- command has no output and i just want to leave current result value (if
+-- any) as is and finish parsing (passing all text further as 'unparsedText'),
+-- but if 'Final' requires from me to provide some result, i'm stuck.
+data ParserResult b = Final   {parserResult :: Maybe b, unparsedText_ :: T.Text}
                     | Partial {parserResult :: Maybe b}
   deriving (Show)
 
 isParserEnded :: ParserResult b -> Bool
 isParserEnded (Final _ _)   = True
 isParserEnded _             = False
+
+unparsedText :: ParserResult b -> Maybe T.Text
+unparsedText Final {unparsedText_ = t} = Just t
+unparsedText _                         = Nothing
 
 parseTelnetCmdOut :: TelnetParser b -> TelnetCmd a b T.Text
 parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
@@ -222,8 +240,8 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
     liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = parserResult r}, ()))
     if isParserEnded r
       then do
-        let rem = unparsedText r
-        liftIO $ print $ "Finish parsing with " <> T.unpack rem
+        let rem = fromMaybe T.empty (unparsedText r)
+        liftIO $ print $ "Finished parsing with " <> rem
         saveResume k
         lift $ k rem
       else liftIO $ print "Retry parsing.."
