@@ -37,8 +37,8 @@ import BH.Switch
 
 
 saveSwitch :: TelnetCmd () T.Text ()
-saveSwitch ts0 = pure ts0 >>=
-    sendCmd (defCmd "write") >>=
+saveSwitch t0 =
+    sendCmd (defCmd "write") t0 >>=
     sendCmd (defCmd "terminal length 0") >>=
     sendAndParse parseCf (defCmd "show running") >>=
     sendExit

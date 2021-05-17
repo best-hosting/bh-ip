@@ -44,11 +44,11 @@ parseShowMacAddrTable = foldr go [] . T.lines
         (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
         _            -> zs
 
-getMacs2 :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
-getMacs2 ts0 = do
+getMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
+getMacs t0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
-    foldM (flip go) ts0 ps >>= sendExit
+    foldM (flip go) t0 ps >>= sendExit
   where
     go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
     go pid@SwPort{port = PortNum pn, portSpec = ps} ts =
@@ -194,7 +194,7 @@ main    = do
     print swports
     let sw = head . M.keys $ swports
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs2 (portSw sw)
+      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ print $ "Gathered ac map:"
