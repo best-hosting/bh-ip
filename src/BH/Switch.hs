@@ -23,7 +23,6 @@ module BH.Switch
     , saveResume
     , modifyResult
     , saveResult
-    , finishCmd
     , run
     , runOn
     , runTill
@@ -122,14 +121,6 @@ telnetStateRef :: IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
--- FIXME: Query, result and program (telnet commands) are all bound together.
--- I.e. if i query by IP, i definitely need 'findPort' and result will be
--- switch port. Etc. That means, i may group this triple: query type, result
--- type and actual function to execute after login into single class instance.
---
--- That been said, the 'config save' operation is different: it does not have
--- a query. Though, if i consider all this not as queries/response, but just
--- like input/program/output, then..
 data CmdReader a b = CmdReader  { switchInfo4   :: SwInfo
                                 , telnetConn    :: TL.TelnetPtr
                                 , telnetIn      :: a
@@ -270,12 +261,6 @@ saveResult x = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = Just x}, ()))
 
--- FIXME: Do i need this?
-finishCmd :: MonadIO m => ContT () (ReaderT (CmdReader a b) m) ()
-finishCmd = do
-    tRef <- asks telnetRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just (\_ -> pure ())}, ()))
-
 runCmd :: T.Text -> (TelnetCmd a b ()) -> ContT () (ReaderT (CmdReader a b) IO) ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
@@ -314,7 +299,6 @@ checkRootP ts m
                                     }
   | otherwise             = Partial { parserResult = m }
 
--- FIXME: Write function for setting prompt in TelnetState .
 loginCmd :: TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
     con  <- asks telnetConn
@@ -370,8 +354,6 @@ setPrompt pp t0 = do
           else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = promptTxt}, ()))
       )
 
--- FIXME: Provide variants of run for running till result is found. Or running
--- on all switches.
 runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 runTill input telnetCmd p = do
     sws <- asks M.keys
