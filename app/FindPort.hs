@@ -38,23 +38,23 @@ import BH.IP
 import BH.Switch
 
 
-parseShowMacAddrTable :: T.Text -> [SwPort]
+parseShowMacAddrTable :: T.Text -> [PortNum]
 parseShowMacAddrTable ts
   | "Mac Address Table" `T.isInfixOf` ts || "Mac Address" `T.isInfixOf` ts
               = foldr go [] (T.lines ts)
   | otherwise = []
   where
-    go :: T.Text -> [SwPort] -> [SwPort]
+    go :: T.Text -> [PortNum] -> [PortNum]
     go t zs = case (T.words t) of
         (_ : _ : _ : p : _) -> either (const zs) (: zs) (parsePort p)
         _               -> zs
 
-parsePort :: T.Text -> Either String SwPort
+parsePort :: T.Text -> Either String PortNum
 parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
-  (n, _) : _ -> Right (SwPort n)
+  (n, _) : _ -> Right (PortNum n)
   _          -> Left "Huy"
 
-findPort :: TelnetCmd MacAddr (M.Map SwName [SwPort]) ()
+findPort :: TelnetCmd MacAddr (M.Map SwName [PortNum]) ()
 findPort ts0 = do
     mac <- asks telnetIn
     sn  <- asks (swName . switchInfo4)

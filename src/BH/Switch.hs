@@ -10,8 +10,8 @@ module BH.Switch
     ( SwName (..)
     , SwInfo (..)
     , parseSwInfo
+    , PortNum (..)
     , SwPort (..)
-    , PortId (..)
     , PortMacMap
     , MacPortMap
     , SwConfig
@@ -91,12 +91,10 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             }
                 )
 
--- FIXME: Rename to PortNum .
-data SwPort         = SwPort Int
+data PortNum         = PortNum Int
   deriving (Eq, Ord, Show)
 
--- FIXME: Rename to SwPort .
-data PortId         = PortId {portSw :: SwName, port :: SwPort}
+data SwPort         = SwPort {portSw :: SwName, port :: PortNum}
   deriving (Eq, Ord, Show)
 
 type TelnetCmd a b c = T.Text -> ContT () (ReaderT (CmdReader a b) IO) c
@@ -128,13 +126,13 @@ data CmdReader a b = CmdReader  { switchInfo4   :: SwInfo
                                 }
 
 
-type PortMacMap     = M.Map PortId (Maybe [MacAddr])
+type PortMacMap     = M.Map SwPort (Maybe [MacAddr])
 
-type MacPortMap     = M.Map MacAddr (Maybe [PortId])
+type MacPortMap     = M.Map MacAddr (Maybe [SwPort])
 
 type MacIpMap       = M.Map MacAddr [IP]
 
-type PortMap        = M.Map PortId [(MacAddr, [IP])]
+type PortMap        = M.Map SwPort [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
 

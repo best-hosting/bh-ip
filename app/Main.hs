@@ -44,15 +44,15 @@ parseShowMacAddrTable = foldr go [] . T.lines
         (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
         _            -> zs
 
--- FIXME: defaultPortSpec should be part of PortId ?
-getMacs2 :: TelnetCmd [PortId] (M.Map PortId [MacAddr]) ()
+-- FIXME: defaultPortSpec should be part of SwPort ?
+getMacs2 :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 getMacs2 ts0 = do
     curSn <- asks (swName . switchInfo4)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) ts0 ps >>= sendTelnetExit
 
-go :: PortId -> T.Text -> ContT () (ReaderT (CmdReader [PortId] (M.Map PortId [MacAddr])) IO) T.Text
-go pid@PortId{port = SwPort pn} ts = do
+go :: SwPort -> T.Text -> ContT () (ReaderT (CmdReader [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
+go pid@SwPort{port = PortNum pn} ts = do
     portSpec <- asks (defaultPortSpec . switchInfo4)
     let parse xs mz = let ys = parseShowMacAddrTable xs
                       in  if null ys then Partial mz else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
@@ -211,7 +211,7 @@ parseArgs = foldr go M.empty
     go :: String -> PortMacMap -> PortMacMap
     go xs z = let (sn, '/' : sp) = span (/= '/') xs
               in  M.insert
-                    (PortId {portSw = SwName (T.pack sn), port = SwPort (read sp)})
+                    (SwPort {portSw = SwName (T.pack sn), port = PortNum (read sp)})
                     Nothing
                     z
 
@@ -224,7 +224,7 @@ getIPs portMac macIp = foldr go [] portMac
     goMacs :: MacAddr -> [IP] -> [IP]
     goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
 
-macsToIPs :: MacIpMap -> M.Map PortId [MacAddr] -> M.Map PortId [IP]
+macsToIPs :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
 macsToIPs macIp = M.map (foldr go [])
   where
     go :: MacAddr -> [IP] -> [IP]
