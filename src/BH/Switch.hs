@@ -21,8 +21,6 @@ module BH.Switch
     , PortMap
     , shiftW
     , saveResume
-    , modifyResult
-    , saveResult
     , run
     , runOn
     , runTill
@@ -245,17 +243,6 @@ saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
 saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just k}, ()))
-
--- | Modify result. If there's not result yet, initialize it with empty value.
-modifyResult :: MonadIO m => (Maybe b -> Maybe b) -> ContT () (ReaderT (TelnetInfo a b) m) ()
-modifyResult f = do
-    tRef <- asks telnetRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = f (telnetResult r)}, ()))
-
-saveResult :: MonadIO m => b -> ContT () (ReaderT (TelnetInfo a b) m) ()
-saveResult x = do
-    tRef <- asks telnetRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = Just x}, ()))
 
 runCmd :: T.Text -> (TelnetCmd a b ()) -> ContT () (ReaderT (TelnetInfo a b) IO) ()
 runCmd ts cmd = do
