@@ -17,8 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver:
-  url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/15/3.yaml
+resolver: lts-17.11
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -41,7 +40,7 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 extra-deps:
-  - libtelnet-0.1.0.0@sha256:f9b136d4bc3209b173c08bb414781787fa8fc6d0abae88d8031fad238fb0554a,2247
+  - libtelnet-0.1.0.1@sha256:b06c32dc00caf737101e0a127c46de155077f9992b8cec312e0d564e6d3a8f8e,2166
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
