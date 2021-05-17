@@ -26,9 +26,9 @@ module BH.Switch
     , run
     , runOn
     , runTill
-    , sendTelnetCmd
+    , sendCmd
     , sendAndParse
-    , sendTelnetExit
+    , sendExit
     , parseTelnetCmdOut
     , TelnetParser
     , ParserResult (..)
@@ -152,8 +152,8 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
-sendTelnetCmd :: TelCmd -> TelnetCmd a b T.Text
-sendTelnetCmd = sendAndParse (flip Final)
+sendCmd :: TelCmd -> TelnetCmd a b T.Text
+sendCmd = sendAndParse (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
 sendAndParse :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
@@ -238,8 +238,8 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
         lift $ k rem
       else liftIO $ print "Retry parsing.."
 
-sendTelnetExit :: TelnetCmd a b ()
-sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd (defCmd "exit")
+sendExit :: TelnetCmd a b ()
+sendExit = (\_ -> pure ()) <=< sendCmd (defCmd "exit")
 
 saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
               -> ContT () (ReaderT (TelnetInfo a b) m) ()
@@ -309,7 +309,7 @@ loginCmd ts0 = shiftT $ \finish -> do
       sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
       sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
       setPrompt telnetPromptP >>=
-      sendTelnetCmd (defCmd "enable") >>=
+      sendCmd (defCmd "enable") >>=
       sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
 

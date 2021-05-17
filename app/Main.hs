@@ -48,7 +48,7 @@ getMacs2 :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 getMacs2 ts0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
-    foldM (flip go) ts0 ps >>= sendTelnetExit
+    foldM (flip go) ts0 ps >>= sendExit
   where
     go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
     go pid@SwPort{port = PortNum pn, portSpec = ps} ts = do

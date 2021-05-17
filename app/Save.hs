@@ -41,10 +41,10 @@ huy  = "KSgikLyDlv RW 10\r\nsnmp-server community Faefoh8i RW 30\r\nsnmp-server 
 
 saveSwitch :: TelnetCmd () T.Text ()
 saveSwitch ts0 = pure ts0 >>=
-    sendTelnetCmd (defCmd "write") >>=
-    sendTelnetCmd (defCmd "terminal length 0") >>=
+    sendCmd (defCmd "write") >>=
+    sendCmd (defCmd "terminal length 0") >>=
     sendAndParse parseCf (defCmd "show running") >>=
-    sendTelnetExit
+    sendExit
 
 -- | Parse cisco config. It uses "\r\n" line-ending. And config ends at 'end'
 -- string. The part of input after end string is returned as unparsed text.
