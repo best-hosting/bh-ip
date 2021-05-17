@@ -57,6 +57,8 @@ findPort :: TelnetCmd MacAddr (M.Map SwName [PortNum]) ()
 findPort t0 = do
     mac <- asks telnetIn
     sn  <- asks (swName . switchInfo)
+    -- FIXME: Continue, if no mac was found. Current version will hang up due
+    -- to 'Partial' result.
     let parse ts _ = let xs = parseShowMacAddrTable ts
                      in  if null xs
                             then Partial mempty

@@ -38,6 +38,11 @@ module BH.Switch
     )
   where
 
+-- FIXME: Split some functions to BH.Telnet .
+-- FIXME: Merge parsing functions for show mac address table. Make them return
+-- complete result, disregarding of request. And then requestor should choose,
+-- what he wants.
+
 import qualified Data.Text as T
 
 import           Control.Monad.Loops
