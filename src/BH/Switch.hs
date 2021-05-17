@@ -119,7 +119,7 @@ telnetStateRef :: IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
-data CmdReader a b = CmdReader  { switchInfo4   :: SwInfo
+data CmdReader a b = CmdReader  { switchInfo    :: SwInfo
                                 , telnetConn    :: TL.TelnetPtr
                                 , telnetIn      :: a
                                 , telnetRef     :: IORef (TelnetState a b)
@@ -302,7 +302,7 @@ loginCmd ts0 = shiftT $ \finish -> do
     SwInfo  { userName = user
             , password = pw
             , enablePassword = enPw
-            } <- asks switchInfo4
+            } <- asks switchInfo
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
@@ -372,7 +372,7 @@ run input telnetCmd sn = do
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
-        let cr = CmdReader {switchInfo4 = swInfo, telnetRef = telnetStateRef, telnetIn = input}
+        let cr = CmdReader {switchInfo = swInfo, telnetRef = telnetStateRef, telnetIn = input}
         atomicWriteIORef telnetStateRef defTelnetState
         connect h "23" (\(s, _) -> handle cr s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"

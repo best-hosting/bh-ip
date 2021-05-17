@@ -57,7 +57,7 @@ parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
 findPort :: TelnetCmd MacAddr (M.Map SwName [PortNum]) ()
 findPort ts0 = do
     mac <- asks telnetIn
-    sn  <- asks (swName . switchInfo4)
+    sn  <- asks (swName . switchInfo)
     let parse ts _ = let xs = parseShowMacAddrTable ts
                      in  if null xs then Partial mempty else Final (pure (M.singleton sn xs)) (last $ T.lines ts)
     pure ts0 >>=

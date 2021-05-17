@@ -47,13 +47,13 @@ parseShowMacAddrTable = foldr go [] . T.lines
 -- FIXME: defaultPortSpec should be part of SwPort ?
 getMacs2 :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 getMacs2 ts0 = do
-    curSn <- asks (swName . switchInfo4)
+    curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) ts0 ps >>= sendTelnetExit
 
 go :: SwPort -> T.Text -> ContT () (ReaderT (CmdReader [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
 go pid@SwPort{port = PortNum pn} ts = do
-    portSpec <- asks (defaultPortSpec . switchInfo4)
+    portSpec <- asks (defaultPortSpec . switchInfo)
     let parse xs mz = let ys = parseShowMacAddrTable xs
                       in  if null ys then Partial mz else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
     sendAndParseTelnetCmd parse
