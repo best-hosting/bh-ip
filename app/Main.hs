@@ -44,20 +44,21 @@ parseShowMacAddrTable = foldr go [] . T.lines
         (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
         _            -> zs
 
--- FIXME: defaultPortSpec should be part of SwPort ?
 getMacs2 :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 getMacs2 ts0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) ts0 ps >>= sendTelnetExit
-
-go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
-go pid@SwPort{port = PortNum pn} ts = do
-    portSpec <- asks (defaultPortSpec . switchInfo)
-    let parse xs mz = let ys = parseShowMacAddrTable xs
-                      in  if null ys then Partial mz else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
-    sendAndParseTelnetCmd parse
-      (defCmd ("show mac address-table interface " <> portSpec <> T.pack (show pn))) ts
+  where
+    go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
+    go pid@SwPort{port = PortNum pn, portSpec = ps} ts = do
+        sendAndParseTelnetCmd parse
+          (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
+      where
+        parse xs mz = let ys = parseShowMacAddrTable xs
+                      in  if null ys
+                            then Partial mz
+                            else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
 
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
@@ -189,7 +190,7 @@ main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
-    swports <- parseArgs <$> getArgs
+    swports <- parseArgs swInfo <$> getArgs
     print swports
     let sw = head . M.keys $ swports
     res <- runExceptT $ do
@@ -205,13 +206,15 @@ main    = do
       Right () -> return ()
       Left err -> print err
 
-parseArgs :: [String] -> PortMacMap
-parseArgs = foldr go M.empty
+parseArgs :: M.Map SwName SwInfo -> [String] -> PortMacMap
+parseArgs swInfo = foldr go M.empty
   where
     go :: String -> PortMacMap -> PortMacMap
     go xs z = let (sn, '/' : sp) = span (/= '/') xs
+                  swn = SwName (T.pack sn)
+                  ps = maybe "huy" defaultPortSpec (M.lookup swn swInfo)
               in  M.insert
-                    (SwPort {portSw = SwName (T.pack sn), port = PortNum (read sp)})
+                    (SwPort {portSw = swn, portSpec = ps, port = PortNum (read sp)})
                     Nothing
                     z
 

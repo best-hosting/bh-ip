@@ -94,7 +94,7 @@ parseSwInfo   = M.fromList . map go .  T.lines
 data PortNum         = PortNum Int
   deriving (Eq, Ord, Show)
 
-data SwPort         = SwPort {portSw :: SwName, port :: PortNum}
+data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: PortNum}
   deriving (Eq, Ord, Show)
 
 type TelnetCmd a b c = T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
