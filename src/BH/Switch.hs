@@ -33,7 +33,7 @@ module BH.Switch
     , TelnetParser
     , ParserResult (..)
     , unparsedText
-    , CmdText (..)
+    , TelCmd (..)
     , defCmd
     , telnetPromptP
     , setPrompt
@@ -136,12 +136,11 @@ type PortMap        = M.Map SwPort [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
 
--- FIXME: Rename to 'TelCmd'
-data CmdText    = CmdText {cmdText :: T.Text, cmdEcho :: Bool}
+data TelCmd    = TelCmd {cmdText :: T.Text, cmdEcho :: Bool}
   deriving (Show)
 
-defCmd :: T.Text -> CmdText
-defCmd t = CmdText {cmdText = t, cmdEcho = True}
+defCmd :: T.Text -> TelCmd
+defCmd t = TelCmd {cmdText = t, cmdEcho = True}
 
 
 
@@ -153,18 +152,18 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
-sendTelnetCmd :: CmdText -> TelnetCmd a b T.Text
+sendTelnetCmd :: TelCmd -> TelnetCmd a b T.Text
 sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
-sendAndParseTelnetCmd :: TelnetParser b -> CmdText -> TelnetCmd a b T.Text
+sendAndParseTelnetCmd :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParseTelnetCmd f cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
     sendParseWithPrompt (echoPromptP (telnetPrompt st)) f cmd t0
 
-sendParseWithPrompt :: PromptParser () -> TelnetParser b -> CmdText -> TelnetCmd a b T.Text
-sendParseWithPrompt pp f (CmdText {cmdText = cmd, cmdEcho = ce}) t0 = 
+sendParseWithPrompt :: PromptParser () -> TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
+sendParseWithPrompt pp f (TelCmd {cmdText = cmd, cmdEcho = ce}) t0 = 
     liftIO (print "sendParseWithPrompt: ") >>
     parseEcho pp t0 >>=
     shiftW (\(k, ts) -> do
@@ -308,10 +307,10 @@ loginCmd ts0 = shiftT $ \finish -> do
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
       sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
-      sendParseWithPrompt passwordPromptP (flip Final) (CmdText {cmdText = pw, cmdEcho = False}) >>=
+      sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
       setPrompt telnetPromptP >>=
       sendTelnetCmd (defCmd "enable") >>=
-      sendParseWithPrompt passwordPromptP checkRootP (CmdText {cmdText = enPw, cmdEcho = False}) >>=
+      sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
 
 telnetPromptP :: PromptParser T.Text
