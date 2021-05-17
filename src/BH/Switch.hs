@@ -27,7 +27,7 @@ module BH.Switch
     , sendCmd
     , sendAndParse
     , sendExit
-    , parseTelnetCmdOut
+    , parseCmd
     , TelnetParser
     , ParserResult (..)
     , unparsedText
@@ -173,7 +173,7 @@ sendParseWithPrompt pp f (TelCmd {cmdText = cmd, cmdEcho = ce}) t0 =
           then parseEcho (echoPromptP cmd) ts
           else return ts
     ) >>=
-    parseTelnetCmdOut f
+    parseCmd f
 
 echoPromptP :: T.Text -> PromptParser ()
 echoPromptP txt ts
@@ -220,8 +220,8 @@ unparsedText :: ParserResult b -> Maybe T.Text
 unparsedText Final {unparsedText_ = t} = Just t
 unparsedText _                         = Nothing
 
-parseTelnetCmdOut :: TelnetParser b -> TelnetCmd a b T.Text
-parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
+parseCmd :: TelnetParser b -> TelnetCmd a b T.Text
+parseCmd f = shiftW $ \(k, ts) -> do
     liftIO $ print $ "Start parsing: " <> ts
     stRef <- asks telnetRef
     st    <- liftIO (readIORef stRef)
@@ -306,7 +306,7 @@ telnetPromptP ts
                           -- Do not consume any input at all. Prompt itself
                           -- may be needed for following 'sendX' function,
                           -- which will verify it. Text before prompt, well..
-                          -- in rare cases, where 'parseTelnetCmdOut' will
+                          -- in rare cases, where 'parseCmd' will
                           -- follow 'setPrompt', it should also be preserved.
                           , unparsedText_ = ts
                           }

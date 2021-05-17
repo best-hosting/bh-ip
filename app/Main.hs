@@ -51,7 +51,7 @@ getMacs2 ts0 = do
     foldM (flip go) ts0 ps >>= sendExit
   where
     go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
-    go pid@SwPort{port = PortNum pn, portSpec = ps} ts = do
+    go pid@SwPort{port = PortNum pn, portSpec = ps} ts =
         sendAndParse parse
           (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
       where
