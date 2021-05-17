@@ -27,7 +27,7 @@ module BH.Switch
     , runOn
     , runTill
     , sendTelnetCmd
-    , sendAndParseTelnetCmd
+    , sendAndParse
     , sendTelnetExit
     , parseTelnetCmdOut
     , TelnetParser
@@ -153,11 +153,11 @@ shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
 sendTelnetCmd :: TelCmd -> TelnetCmd a b T.Text
-sendTelnetCmd = sendAndParseTelnetCmd (flip Final)
+sendTelnetCmd = sendAndParse (flip Final)
 
 -- FIXME: Rename to just 'sendAndParse'
-sendAndParseTelnetCmd :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
-sendAndParseTelnetCmd f cmd t0 = do
+sendAndParse :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
+sendAndParse f cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
     sendParseWithPrompt (echoPromptP (telnetPrompt st)) f cmd t0

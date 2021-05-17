@@ -52,7 +52,7 @@ getMacs2 ts0 = do
   where
     go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
     go pid@SwPort{port = PortNum pn, portSpec = ps} ts = do
-        sendAndParseTelnetCmd parse
+        sendAndParse parse
           (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
       where
         parse xs mz = let ys = parseShowMacAddrTable xs

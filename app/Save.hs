@@ -43,7 +43,7 @@ saveSwitch :: TelnetCmd () T.Text ()
 saveSwitch ts0 = pure ts0 >>=
     sendTelnetCmd (defCmd "write") >>=
     sendTelnetCmd (defCmd "terminal length 0") >>=
-    sendAndParseTelnetCmd parseCf (defCmd "show running") >>=
+    sendAndParse parseCf (defCmd "show running") >>=
     sendTelnetExit
 
 -- | Parse cisco config. It uses "\r\n" line-ending. And config ends at 'end'
