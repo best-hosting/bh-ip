@@ -51,7 +51,7 @@ getMacs2 ts0 = do
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) ts0 ps >>= sendTelnetExit
 
-go :: SwPort -> T.Text -> ContT () (ReaderT (CmdReader [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
+go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
 go pid@SwPort{port = PortNum pn} ts = do
     portSpec <- asks (defaultPortSpec . switchInfo)
     let parse xs mz = let ys = parseShowMacAddrTable xs

@@ -16,7 +16,7 @@ module BH.Switch
     , MacPortMap
     , SwConfig
     , TelnetCmd
-    , CmdReader (..)
+    , TelnetInfo (..)
     , MacIpMap
     , PortMap
     , shiftW
@@ -97,11 +97,11 @@ data PortNum         = PortNum Int
 data SwPort         = SwPort {portSw :: SwName, port :: PortNum}
   deriving (Eq, Ord, Show)
 
-type TelnetCmd a b c = T.Text -> ContT () (ReaderT (CmdReader a b) IO) c
+type TelnetCmd a b c = T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
-                            , telnetResume  :: Maybe (T.Text -> ReaderT (CmdReader a b) IO ())
+                            , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
                             , telnetEcho    :: T.Text
                             , telnetPrompt  :: T.Text
@@ -119,7 +119,7 @@ telnetStateRef :: IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
-data CmdReader a b = CmdReader  { switchInfo    :: SwInfo
+data TelnetInfo a b = TelnetInfo  { switchInfo    :: SwInfo
                                 , telnetConn    :: TL.TelnetPtr
                                 , telnetIn      :: a
                                 , telnetRef     :: IORef (TelnetState a b)
@@ -241,24 +241,24 @@ parseTelnetCmdOut f = shiftW $ \(k, ts) -> do
 sendTelnetExit :: TelnetCmd a b ()
 sendTelnetExit = (\_ -> pure ()) <=< sendTelnetCmd (defCmd "exit")
 
-saveResume :: MonadIO m => (T.Text -> ReaderT (CmdReader a b) IO ())
-              -> ContT () (ReaderT (CmdReader a b) m) ()
+saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
+              -> ContT () (ReaderT (TelnetInfo a b) m) ()
 saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just k}, ()))
 
 -- | Modify result. If there's not result yet, initialize it with empty value.
-modifyResult :: MonadIO m => (Maybe b -> Maybe b) -> ContT () (ReaderT (CmdReader a b) m) ()
+modifyResult :: MonadIO m => (Maybe b -> Maybe b) -> ContT () (ReaderT (TelnetInfo a b) m) ()
 modifyResult f = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = f (telnetResult r)}, ()))
 
-saveResult :: MonadIO m => b -> ContT () (ReaderT (CmdReader a b) m) ()
+saveResult :: MonadIO m => b -> ContT () (ReaderT (TelnetInfo a b) m) ()
 saveResult x = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResult = Just x}, ()))
 
-runCmd :: T.Text -> (TelnetCmd a b ()) -> ContT () (ReaderT (CmdReader a b) IO) ()
+runCmd :: T.Text -> (TelnetCmd a b ()) -> ContT () (ReaderT (TelnetInfo a b) IO) ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -372,13 +372,13 @@ run input telnetCmd sn = do
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
-        let cr = CmdReader {switchInfo = swInfo, telnetRef = telnetStateRef, telnetIn = input}
+        let cr = TelnetInfo {switchInfo = swInfo, telnetRef = telnetStateRef, telnetIn = input}
         atomicWriteIORef telnetStateRef defTelnetState
         connect h "23" (\(s, _) -> handle cr s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
     telnetResult <$> liftIO (readIORef telnetStateRef)
   where
-    --handle :: CmdReader a -> Socket -> IO ()
+    --handle :: TelnetInfo a -> Socket -> IO ()
     handle cr sock = do
         telnet <- TL.telnetInit telnetOpts [] (telnetH cr (telnetCmd <=< loginCmd) sock)
         whileJust_ (recv sock 4096) $ \bs -> do
@@ -392,7 +392,7 @@ run input telnetCmd sn = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-telnetH :: CmdReader a b -> (TelnetCmd a b ()) -> Socket -> TL.EventHandler
+telnetH :: TelnetInfo a b -> (TelnetCmd a b ()) -> Socket -> TL.EventHandler
 telnetH cr telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
