@@ -48,11 +48,10 @@ parseShowMacAddrTable ts
     go t zs = case (T.words t) of
         (_ : _ : _ : p : _) -> either (const zs) (: zs) (parsePort p)
         _               -> zs
-
-parsePort :: T.Text -> Either String PortNum
-parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
-  (n, _) : _ -> Right (PortNum n)
-  _          -> Left "Huy"
+    parsePort :: T.Text -> Either String PortNum
+    parsePort t = case reads . drop 1 . dropWhile (/= '/') . T.unpack $ t of
+      (n, _) : _ -> Right (PortNum n)
+      _          -> Left "Huy"
 
 findPort :: TelnetCmd MacAddr (M.Map SwName [PortNum]) ()
 findPort t0 = do
