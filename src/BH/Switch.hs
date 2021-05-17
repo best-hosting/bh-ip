@@ -155,7 +155,6 @@ shiftW f x = shiftT (\k -> f (k, x))
 sendCmd :: TelCmd -> TelnetCmd a b T.Text
 sendCmd = sendAndParse (flip Final)
 
--- FIXME: Rename to just 'sendAndParse'
 sendAndParse :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParse f cmd t0 = do
     stRef <- asks telnetRef
