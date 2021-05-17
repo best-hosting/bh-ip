@@ -36,6 +36,8 @@ module BH.Switch
     , unparsedText
     , CmdText (..)
     , defCmd
+    , telnetPromptP
+    , setPrompt
     )
   where
 
@@ -196,11 +198,11 @@ echoPromptP txt ts
   | otherwise            = Partial  { parserResult = Just () }
 
 parseEcho :: (T.Text -> ParserResult ()) -> TelnetCmd a b T.Text
-parseEcho p = shiftW $ \(k, ts) -> do
+parseEcho pp = shiftW $ \(k, ts) -> do
       stRef <- asks telnetRef
       st <- liftIO (readIORef stRef)
       let echoCmd = telnetEcho st <> ts
-          r = p echoCmd
+          r = pp echoCmd
       liftIO $ print $ "Read back: " <> echoCmd
       if isParserEnded r
         then do
@@ -212,7 +214,7 @@ parseEcho p = shiftW $ \(k, ts) -> do
         else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
-type PromptParser b = T.Text -> ParserResult ()
+type PromptParser b = T.Text -> ParserResult b
 
 -- I need 'Maybe' in 'parserResult' here to unbind parser state (finished or
 -- not) from actual result state (obtained or not). With 'Maybe' these are two
@@ -325,20 +327,48 @@ loginCmd ts0 = shiftT $ \finish -> do
     pure ts0 >>=
       sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
       sendParseWithPrompt passwordPromptP (flip Final) (CmdText {cmdText = pw, cmdEcho = False}) >>=
-      shiftW (\(k, ts) -> do
-          when (">" `T.isSuffixOf` ts) $ do
-            tRef <- asks telnetRef
-            r <- liftIO (readIORef tRef)
-            -- There should be at least one non-empty line, since we've
-            -- chacked this above.
-            let prompt = T.takeWhile (/= '>') $ last (T.lines ts)
-            liftIO $ atomicModifyIORef tRef (\x -> (x{telnetPrompt = prompt}, ()))
-            saveResume k
-            lift (k ts)
-        ) >>=
+      setPrompt telnetPromptP >>=
       sendTelnetCmd (defCmd "enable") >>=
       sendParseWithPrompt passwordPromptP checkRootP (CmdText {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
+
+telnetPromptP :: PromptParser T.Text
+telnetPromptP ts
+  | "#" `T.isSuffixOf` ts || ">" `T.isSuffixOf` ts
+                = Final   { parserResult  = Just prompt
+                          -- Do not consume any input at all. Prompt itself
+                          -- may be needed for following 'sendX' function,
+                          -- which will verify it. Text before prompt, well..
+                          -- in rare cases, where 'parseTelnetCmdOut' will
+                          -- follow 'setPrompt', it should also be preserved.
+                          , unparsedText_ = ts
+                          }
+  | otherwise   = Partial { parserResult = Just T.empty }
+  where
+    prompt = T.init . last . T.lines $ ts
+
+setPrompt :: PromptParser T.Text -> TelnetCmd a b T.Text
+setPrompt pp t0 = do
+    liftIO (print "setPrompt start.")
+    stRef <- asks telnetRef
+    liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = T.empty}, ()))
+    shiftW (\(k, ts) -> saveResume k >> lift (k ts)) t0 >>=
+      shiftW (\(k, ts) -> do
+        st <- liftIO (readIORef stRef)
+        let promptTxt = telnetPrompt st <> ts
+            r = pp promptTxt
+        liftIO $ print $ "Current prompt: " <> promptTxt
+        if isParserEnded r
+          then do
+            let rem = fromMaybe T.empty (unparsedText r)
+                res = fromMaybe T.empty (parserResult r)
+            liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = res}, ()))
+            saveResume k
+            liftIO $ print $ "Set prompt to: '" <> res <> "'"
+            liftIO $ print $ "Finished prompt parsing with: '" <> rem <> "'"
+            lift (k rem)
+          else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = promptTxt}, ()))
+      )
 
 -- FIXME: Provide variants of run for running till result is found. Or running
 -- on all switches.

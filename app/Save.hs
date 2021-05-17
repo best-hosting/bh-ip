@@ -44,6 +44,9 @@ saveSwitch ts0 = pure ts0 >>=
     sendTelnetCmd (defCmd "write") >>=
     sendTelnetCmd (defCmd "terminal length 0") >>=
     sendAndParseTelnetCmd parseCf (defCmd "show running") >>=
+    --sendTelnetCmd (defCmd "show running") >>=
+    setPrompt telnetPromptP >>=
+    --parseTelnetCmdOut parseCf >>=
     sendTelnetExit
 
 -- | Parse cisco config. It uses "\r\n" line-ending. And config ends at 'end'
