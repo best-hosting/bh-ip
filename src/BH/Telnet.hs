@@ -99,7 +99,7 @@ sendAndParse f cmd t0 = do
     sendParseWithPrompt (echoPromptP (telnetPrompt st)) f cmd t0
 
 sendParseWithPrompt :: PromptParser () -> TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
-sendParseWithPrompt pp f (TelCmd {cmdText = cmd, cmdEcho = ce}) t0 = 
+sendParseWithPrompt pp f TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
     liftIO (putStrLn "sendParseWithPrompt: ") >>
     parseEcho pp t0 >>=
     shiftW (\(k, _) -> do
@@ -183,7 +183,7 @@ saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just k}, ()))
 
-runCmd :: T.Text -> (TelnetCmd a b ()) -> ContT () (ReaderT (TelnetInfo a b) IO) ()
+runCmd :: T.Text -> TelnetCmd a b () -> ContT () (ReaderT (TelnetInfo a b) IO) ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -282,8 +282,8 @@ runTill input telnetCmd p = do
   where
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
     go zs sn
-      | fromMaybe False (p <$> zs) = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
-      | otherwise                  = run input telnetCmd sn
+      | maybe False p zs = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
+      | otherwise        = run input telnetCmd sn
 
 runOn :: a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =
@@ -321,12 +321,12 @@ run input telnetCmd sn = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-telnetH :: (TL.TelnetPtr -> TelnetInfo a b) -> (TelnetCmd a b ()) -> Socket -> TL.EventHandler
+telnetH :: (TL.TelnetPtr -> TelnetInfo a b) -> TelnetCmd a b () -> Socket -> TL.EventHandler
 telnetH ti telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
     print (L.map ord (B8.unpack b))
-    flip runReaderT (ti con) . evalContT $ (runCmd (T.decodeLatin1 b) telnetCmd)
+    flip runReaderT (ti con) . evalContT $ runCmd (T.decodeLatin1 b) telnetCmd
 telnetH _ _ s _ (TL.Send b)
   = do
     putStr ("S(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"

@@ -54,7 +54,7 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             }
                 )
 
-data PortNum         = PortNum Int
+newtype PortNum     = PortNum Int
   deriving (Eq, Ord, Show)
 
 data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: PortNum}

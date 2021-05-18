@@ -25,7 +25,7 @@ parseShowMacAddrTable :: T.Text -> [MacAddr]
 parseShowMacAddrTable = foldr go [] . T.lines
   where
     go :: T.Text -> [MacAddr] -> [MacAddr]
-    go t zs = case (T.words t) of
+    go t zs = case T.words t of
         (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
         _            -> zs
 

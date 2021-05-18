@@ -23,7 +23,7 @@ parseShowMacAddrTable ts
   | otherwise = []
   where
     go :: T.Text -> [PortNum] -> [PortNum]
-    go t zs = case (T.words t) of
+    go t zs = case T.words t of
         (_ : _ : _ : p : _) -> either (const zs) (: zs) (parsePort p)
         _               -> zs
     parsePort :: T.Text -> Either String PortNum
