@@ -29,6 +29,7 @@ library
   exposed-modules:
       BH.IP
       BH.Switch
+      BH.Telnet
   other-modules:
       Paths_bh_ip
   hs-source-dirs:

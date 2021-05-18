@@ -34,6 +34,7 @@ import System.Directory
 import Text.HTML.TagSoup
 
 import BH.Switch
+import BH.Telnet
 
 
 saveSwitch :: TelnetCmd () T.Text ()

@@ -36,6 +36,7 @@ import Text.HTML.TagSoup
 
 import BH.IP
 import BH.Switch
+import BH.Telnet
 
 
 parseShowMacAddrTable :: T.Text -> [PortNum]
