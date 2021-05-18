@@ -37,12 +37,10 @@ import System.IO.Unsafe
 import Control.Monad.Trans.Cont
 import Control.Monad.Reader
 import Control.Monad.Trans.Except
-import Data.Foldable
 import Data.Maybe
 
 import qualified Network.Telnet.LibTelnet as TL
 
-import BH.IP
 import BH.Switch
 
 
@@ -68,11 +66,11 @@ telnetStateRef :: IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
-data TelnetInfo a b = TelnetInfo  { switchInfo    :: SwInfo
-                                , telnetConn    :: TL.TelnetPtr
-                                , telnetIn      :: a
-                                , telnetRef     :: IORef (TelnetState a b)
-                                }
+data TelnetInfo a b = TelnetInfo { switchInfo   :: SwInfo
+                                 , telnetConn   :: TL.TelnetPtr
+                                 , telnetIn     :: a
+                                 , telnetRef    :: IORef (TelnetState a b)
+                                 }
 
 
 data TelCmd    = TelCmd {cmdText :: T.Text, cmdEcho :: Bool}
@@ -102,9 +100,9 @@ sendAndParse f cmd t0 = do
 
 sendParseWithPrompt :: PromptParser () -> TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
 sendParseWithPrompt pp f (TelCmd {cmdText = cmd, cmdEcho = ce}) t0 = 
-    liftIO (print "sendParseWithPrompt: ") >>
+    liftIO (putStrLn "sendParseWithPrompt: ") >>
     parseEcho pp t0 >>=
-    shiftW (\(k, ts) -> do
+    shiftW (\(k, _) -> do
         con  <- asks telnetConn
         liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
         saveResume k
@@ -134,9 +132,9 @@ parseEcho pp = shiftW $ \(k, ts) -> do
         then do
           liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = T.empty}, ()))
           saveResume k
-          let rem = fromMaybe T.empty (unparsedText r)
-          liftIO $ print $ "Finished reading back with: '" <> rem <> "'"
-          lift (k rem)
+          let ys = fromMaybe T.empty (unparsedText r)
+          liftIO $ print $ "Finished reading back with: '" <> ys <> "'"
+          lift (k ys)
         else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = echoCmd}, ()))
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
@@ -170,11 +168,11 @@ parseCmd f = shiftW $ \(k, ts) -> do
     liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = parserResult r}, ()))
     if isParserEnded r
       then do
-        let rem = fromMaybe T.empty (unparsedText r)
-        liftIO $ print $ "Finished parsing with '" <> rem <> "'"
+        let ys = fromMaybe T.empty (unparsedText r)
+        liftIO $ print $ "Finished parsing with '" <> ys <> "'"
         saveResume k
-        lift $ k rem
-      else liftIO $ print "Retry parsing.."
+        lift $ k ys
+      else liftIO $ putStrLn "Retry parsing.."
 
 sendExit :: TelnetCmd a b ()
 sendExit = (\_ -> pure ()) <=< sendCmd (defCmd "exit")
@@ -193,21 +191,21 @@ runCmd ts cmd = do
         n0 = tInt r0
     liftIO $ print $ "f start: " ++ show n0
     liftIO $ atomicWriteIORef tRef r0{tInt = n0 + 1}
-    shiftT $ \end -> do
-      case mCont of
-        Nothing -> liftIO (print "huy")  >> cmd ts
-        Just c  -> liftIO (print "cont") >> lift (c ts)
+    case mCont of
+      Nothing -> liftIO (putStrLn "Start cmd.")  >> cmd ts
+      Just c  -> liftIO (putStrLn "Continue cmd.") >> lift (c ts)
 
 userNamePromptP :: PromptParser ()
 userNamePromptP ts
-  | "Username:" `T.isInfixOf` ts || "User Name:" `T.isInfixOf` ts
+  | "Username:" `T.isInfixOf` ts
                         = Final   { parserResult = Just ()
-                                  , unparsedText_ = rem
+                                  , unparsedText_ = snd $ T.breakOnEnd "Username:" ts
+                                  }
+  | "User Name:" `T.isInfixOf` ts
+                        = Final   { parserResult = Just ()
+                                  , unparsedText_ = snd $ T.breakOnEnd "User Name:" ts
                                   }
   | otherwise           = Partial { parserResult = Just () }
-  where
-    rem | "Username:"  `T.isInfixOf` ts = snd $ T.breakOnEnd "Username:" ts
-        | "User Name:" `T.isInfixOf` ts = snd $ T.breakOnEnd "User Name:" ts
 
 passwordPromptP :: PromptParser ()
 passwordPromptP ts
@@ -225,7 +223,6 @@ checkRootP ts m
 
 loginCmd :: TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
-    con  <- asks telnetConn
     SwInfo  { userName = user
             , password = pw
             , enablePassword = enPw
@@ -257,7 +254,7 @@ telnetPromptP ts
 
 setPrompt :: PromptParser T.Text -> TelnetCmd a b T.Text
 setPrompt pp t0 = do
-    liftIO (print "setPrompt start.")
+    liftIO $ putStrLn "setPrompt start."
     stRef <- asks telnetRef
     liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = T.empty}, ()))
     shiftW (\(k, ts) -> saveResume k >> lift (k ts)) t0 >>=
@@ -268,13 +265,13 @@ setPrompt pp t0 = do
         liftIO $ print $ "Current prompt: " <> promptTxt
         if isParserEnded r
           then do
-            let rem = fromMaybe T.empty (unparsedText r)
+            let ys = fromMaybe T.empty (unparsedText r)
                 res = fromMaybe T.empty (parserResult r)
             liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = res}, ()))
             saveResume k
             liftIO $ print $ "Set prompt to: '" <> res <> "'"
-            liftIO $ print $ "Finished prompt parsing with: '" <> rem <> "'"
-            lift (k rem)
+            liftIO $ print $ "Finished prompt parsing with: '" <> ys <> "'"
+            lift (k ys)
           else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = promptTxt}, ()))
       )
 
@@ -299,15 +296,20 @@ run input telnetCmd sn = do
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
-        let cr = TelnetInfo {switchInfo = swInfo, telnetRef = telnetStateRef, telnetIn = input}
+        let ti con = TelnetInfo
+                        { switchInfo = swInfo
+                        , telnetRef = telnetStateRef
+                        , telnetIn = input
+                        , telnetConn = con
+                        }
         atomicWriteIORef telnetStateRef defTelnetState
-        connect h "23" (\(s, _) -> handle cr s)
+        connect h "23" (\(s, _) -> handle ti s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
     telnetResult <$> liftIO (readIORef telnetStateRef)
   where
-    --handle :: TelnetInfo a -> Socket -> IO ()
-    handle cr sock = do
-        telnet <- TL.telnetInit telnetOpts [] (telnetH cr (telnetCmd <=< loginCmd) sock)
+    --handle :: (TL.TelnetPtr -> TelnetInfo a) -> Socket -> IO ()
+    handle ti sock = do
+        telnet <- TL.telnetInit telnetOpts [] (telnetH ti (telnetCmd <=< loginCmd) sock)
         whileJust_ (recv sock 4096) $ \bs -> do
             let bl = B8.length bs
             putStr $ "Socket (" ++ show bl ++ "): "
@@ -319,12 +321,12 @@ run input telnetCmd sn = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-telnetH :: TelnetInfo a b -> (TelnetCmd a b ()) -> Socket -> TL.EventHandler
-telnetH cr telnetCmd _ con (TL.Received b)
+telnetH :: (TL.TelnetPtr -> TelnetInfo a b) -> (TelnetCmd a b ()) -> Socket -> TL.EventHandler
+telnetH ti telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
     print (L.map ord (B8.unpack b))
-    flip runReaderT cr{telnetConn = con} . evalContT $ (runCmd (T.decodeLatin1 b) telnetCmd)
+    flip runReaderT (ti con) . evalContT $ (runCmd (T.decodeLatin1 b) telnetCmd)
 telnetH _ _ s _ (TL.Send b)
   = do
     putStr ("S(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
