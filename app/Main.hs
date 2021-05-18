@@ -2,34 +2,18 @@
 
 module Main where
 
-import           Control.Monad.Loops
-import qualified Data.ByteString.Char8 as B8
-import           Network.Simple.TCP
-import qualified Network.Telnet.LibTelnet as TL
-import qualified Network.Telnet.LibTelnet.Options as TL
-import qualified Data.List as L
-import Data.Char
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import Control.Monad.IO.Class
-import Data.IORef
 import qualified Data.Map as M
-import System.IO.Unsafe
 import System.Environment
 import Control.Monad.Trans.Cont
 import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Except
-import Control.Monad
 import Data.Maybe
-import Data.Foldable
 import qualified Shelly as Sh
 import Control.Concurrent
 import qualified Data.Yaml as Y
-import qualified Data.Aeson as A
-import qualified Data.Aeson.Encoding as A
 import System.Directory
 import Text.HTML.TagSoup
 
@@ -68,7 +52,7 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
   where
     go :: MacIpMap -> [T.Text] -> MacIpMap
     go zs (_ : _ : x : y : _) =
-        either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
+        either (const zs) (\(w, t) -> uncurry (M.insertWith addIp) (w, t) zs) $ do
           ip <- parseIP x
           ma <- parseMacAddr y
           return (ma, [ip])
@@ -95,7 +79,7 @@ queryLinuxArp host   = do
         return mi
     ipNeighCache :: ExceptT String IO MacIpMap
     ipNeighCache = ExceptT . Sh.shelly . Sh.silently $ do
-        liftIO $ print "Updating arp cache using `nping` and `ip neighbour`..."
+        liftIO $ putStrLn "Updating arp cache using `nping` and `ip neighbour`..."
         Sh.run_ "ssh"
                 (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
         liftIO $ threadDelay 5000000
@@ -112,10 +96,10 @@ queryLinuxArp host   = do
             ma <- parseMacAddr y
             return (M.insertWith addIp ma [ip] zs)
           | otherwise   = mzs
-        go mzs _        = Left "Unrecognized `ip neigh` output line."
+        go _ _          = Left "Unrecognized `ip neigh` output line."
     nmapCache :: ExceptT String IO MacIpMap
     nmapCache = do
-        liftIO $ print "Updating arp cache using `nmap`..."
+        liftIO $ putStrLn "Updating arp cache using `nmap`..."
         nxml <- liftIO . Sh.shelly . Sh.silently $ do
           Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
           Sh.run  "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
@@ -198,10 +182,10 @@ main    = do
       Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
-      liftIO $ print $ "Gathered ac map:"
+      liftIO $ putStrLn "Gathered ac map:"
       liftIO $ print mm
       arp1 <- queryLinuxArp "certbot"
-      liftIO $ print "Finally, ips..."
+      liftIO $ putStrLn "Finally, ips..."
       liftIO $ print (macsToIPs arp1 mm)
     case res of
       Right () -> return ()
