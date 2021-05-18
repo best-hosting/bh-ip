@@ -37,6 +37,9 @@ findPort t0 = do
     sn  <- asks (swName . switchInfo)
     -- FIXME: Continue, if no mac was found. Current version will hang up due
     -- to 'Partial' result.
+    -- I may parse 'Fa0/9' as complete type, like PortNum. But 'sw-1/9' parse
+    -- as SwName, then lookup default port spec and parse '9' as 'PortNum'
+    -- using default port spec.
     let parse ts _ = let xs = parseShowMacAddrTable ts
                      in  if null xs
                             then Partial mempty
