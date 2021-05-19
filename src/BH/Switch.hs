@@ -19,7 +19,8 @@ module BH.Switch
 -- what he wants.
 
 import qualified Data.Text as T
-
+import           Data.List
+import           Control.Applicative
 import           Network.Simple.TCP
 import qualified Data.Map as M
 
@@ -54,9 +55,20 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             }
                 )
 
+data Port     = Port {portPrefix :: T.Text, portNum :: Int}
+  deriving (Eq, Ord, Show)
+
+{---parsePort :: T.Text -> Either Port
+parsePort :: T.Text -> Maybe T.Text
+parsePort ts = do
+        join $ find (`T.stripPrefix` ts) ["FastEthernet", "Fa", "fa"] >> Just "FastEthernet"
+    <|> find (`T.stripPrefix` ts) ["GigabitEthernet", "Gi", "gi"] >> Just "GigabitEthernet"-}
+
 newtype PortNum     = PortNum Int
   deriving (Eq, Ord, Show)
 
+data SwPort2        = SwPort2 {portSw2 :: SwName, portSpec2 :: Port}
+  deriving (Eq, Ord, Show)
 data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: PortNum}
   deriving (Eq, Ord, Show)
 
