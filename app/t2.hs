@@ -3,11 +3,14 @@
 
 import Text.Megaparsec
 import Text.Megaparsec.Char
+import Text.Megaparsec.Debug
+import qualified Control.Monad.State.Strict as S
 import qualified Text.Megaparsec.Char.Lexer as L
 import qualified Data.Text as T
 import Data.Text (Text)
 import Data.Void
 import Control.Monad
+import Control.Monad.Identity
 
 main :: IO ()
 main = return ()
@@ -63,18 +66,18 @@ data Uri = Uri
 
 pUri :: Parser Uri
 pUri = do
-  uriScheme <- pScheme
+  uriScheme <- dbg "scheme" pScheme <?> "valid scheme"
   void (char ':')
-  uriAuthority <- optional . try $ do            -- (1)
+  uriAuthority <- optional $ do            -- (1)
     void (string "//")
-    authUser <- optional . try $ do              -- (2)
-      user <- T.pack <$> some alphaNumChar       -- (3)
+    authUser <- dbg "auth" . optional . try $ do              -- (2)
+      user <- T.pack <$> some alphaNumChar <?> "username"
       void (char ':')
-      password <- T.pack <$> some alphaNumChar
+      password <- T.pack <$> some alphaNumChar <?> "password"
       void (char '@')
       return (user, password)
-    authHost <- T.pack <$> some (alphaNumChar <|> char '.')
-    authPort <- optional (char ':' *> L.decimal) -- (4)
+    authHost <- (dbg "host" $ T.pack <$> some (alphaNumChar <|> char '.')) <?> "host"
+    authPort <- dbg "port" $ optional (char ':' *> (L.decimal <?> "port"))
     return Authority {..}                        -- (5)
   return Uri {..}                                -- (6)
 
@@ -83,4 +86,38 @@ alternatives = try foo <|> bar
 
 foo = (,) <$> char 'a' <*> char 'b'
 bar = (,) <$> char 'a' <*> char 'c'
+
+
+--type ParserS = ParsecT Void Text (S.State String)
+type ParserS = S.StateT String (ParsecT Void Text Identity)
+
+parser0 :: ParserS String
+parser0 = a <|> b
+  where
+    a = "foo" <$ S.put "branch A"
+    b = S.get <* S.put "branch B"
+
+parser1 :: ParserS String
+parser1 = a <|> b
+  where
+    a = "foo" <$ S.put "branch A" <* empty
+    b = S.get <* S.put "branch B"
+
+runS :: IO ()
+runS = do
+{-  let run p          = S.runState (runParserT p "" "") "initial"
+      (Right a0, s0) = run parser0
+      (Right a1, s1) = run parser1-}
+
+  let run p   = runIdentity $ runParserT (S.runStateT p "initial") "" ""
+      Right (a0, s0) = run parser0
+      Right (a1, s1) = run parser1
+
+  putStrLn  "Parser 0"
+  putStrLn ("Result:      " ++ show a0)
+  putStrLn ("Final state: " ++ show s0)
+
+  putStrLn  "Parser 1"
+  putStrLn ("Result:      " ++ show a1)
+  putStrLn ("Final state: " ++ show s1)
 
