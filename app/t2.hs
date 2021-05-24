@@ -121,3 +121,61 @@ runS = do
   putStrLn ("Result:      " ++ show a1)
   putStrLn ("Final state: " ++ show s1)
 
+sc :: Parser ()
+sc = L.space
+  space1                         -- (2)
+  (L.skipLineComment "//")       -- (3)
+  (L.skipBlockComment "/*" "*/") -- (4)
+
+lexeme :: Parser a -> Parser a
+lexeme = L.lexeme sc
+
+symbol :: Text -> Parser Text
+symbol = L.symbol sc
+
+charLiteral :: Parser Char
+charLiteral = between (char '\'') (char '\'') L.charLiteral
+
+stringLiteral :: Parser String
+stringLiteral = char '\"' *> manyTill L.charLiteral (char '\"')
+
+integer :: Parser Integer
+integer = lexeme L.decimal
+
+float :: Parser Double
+float = lexeme L.float
+
+signedInteger :: Parser Integer
+signedInteger = L.signed sc integer
+
+signedFloat :: Parser Double
+signedFloat = L.signed (pure ()) float
+
+pKeyword :: Text -> Parser Text
+pKeyword keyword = lexeme (string keyword <* notFollowedBy alphaNumChar)
+
+withPredicate1
+  :: (a -> Bool)       -- ^ The check to perform on parsed input
+  -> String            -- ^ Message to print when the check fails
+  -> Parser a          -- ^ Parser to run
+  -> Parser a          -- ^ Resulting parser that performs the check
+withPredicate1 f msg p = do
+  r <- lookAhead p
+  if f r
+    then p
+    else fail msg
+
+withPredicate2
+  :: (a -> Bool)       -- ^ The check to perform on parsed input
+  -> String            -- ^ Message to print when the check fails
+  -> Parser a          -- ^ Parser to run
+  -> Parser a          -- ^ Resulting parser that performs the check
+withPredicate2 f msg p = do
+  o <- getOffset
+  r <- p
+  if f r
+    then return r
+    else do
+      setOffset o
+      fail msg
+
