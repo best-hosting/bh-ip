@@ -1,9 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import Text.Megaparsec.Debug
+import Text.Megaparsec.Pos
 import qualified Control.Monad.State.Strict as S
 import qualified Text.Megaparsec.Char.Lexer as L
 import qualified Data.Text as T
@@ -11,6 +13,8 @@ import Data.Text (Text)
 import Data.Void
 import Control.Monad
 import Control.Monad.Identity
+import Control.Monad.Combinators.Expr
+import qualified Data.Char as C
 
 main :: IO ()
 main = return ()
@@ -178,4 +182,84 @@ withPredicate2 f msg p = do
     else do
       setOffset o
       fail msg
+
+data Expr
+  = Var String
+  | Int Int
+  | Negation Expr
+  | Sum      Expr Expr
+  | Subtr    Expr Expr
+  | Product  Expr Expr
+  | Division Expr Expr
+  deriving (Eq, Ord, Show)
+
+pVariable :: Parser Expr
+pVariable = Var <$> lexeme
+  ((:) <$> letterChar <*> many alphaNumChar <?> "variable")
+
+pInteger :: Parser Expr
+pInteger = Int <$> lexeme L.decimal
+
+
+parens :: Parser a -> Parser a
+parens = between (symbol "(") (symbol ")")
+
+pTerm :: Parser Expr
+pTerm = choice
+  [ pVariable
+  , pInteger
+  , parens pExpr
+  ]
+
+pExpr :: Parser Expr
+pExpr = makeExprParser pTerm operatorTable
+
+operatorTable :: [[Operator Parser Expr]]
+operatorTable =
+  [ [ prefix "-" Negation
+    , prefix "+" id
+    ]
+  , [ binary "*" Product
+    , binary "/" Division
+    ]
+  , [ binary "+" Sum
+    , binary "-" Subtr
+    ]
+  ]
+
+binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
+binary  name f = InfixL  (f <$ symbol name)
+
+
+prefix, postfix :: Text -> (Expr -> Expr) -> Operator Parser Expr
+prefix  name f = Prefix  (f <$ symbol name)
+postfix name f = Postfix (f <$ symbol name)
+
+
+
+lineComment :: Parser ()
+lineComment = L.skipLineComment "#"
+
+scn2 :: Parser ()
+--scn2 = L.space space1 lineComment empty
+scn2 = void $ dbg "scn2" $ (many (char ' ' <|> char '\t' <|> char '\n') <?> "scn2")
+
+sc2 :: Parser ()
+sc2 = L.space (void $ some (char ' ' <|> char '\t')) lineComment empty
+
+lexeme2 :: Parser a -> Parser a
+lexeme2 = L.lexeme sc2
+
+pItem :: Parser String
+pItem = dbg "pItem" (lexeme2 (some (alphaNumChar <|> char '-')) <?> "list item")
+
+pItemList :: Parser (String, [String]) -- header and list items
+pItemList = dbg "top" $ L.nonIndented scn2 pItemListBlock
+
+pItemListBlock :: Parser (String, [String])
+pItemListBlock = dbg "block" $ L.indentBlock scn2 p
+  where
+    p = do
+      header <- dbg "header" pItem
+      return (L.IndentMany Nothing (return . (header, )) (dbg "item" pItem))
 

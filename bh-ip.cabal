@@ -145,6 +145,7 @@ executable t2
     , megaparsec
     , text
     , case-insensitive
+    , parser-combinators
   default-language: Haskell2010
 
 test-suite bh-ip-test
