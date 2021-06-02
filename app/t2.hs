@@ -261,5 +261,24 @@ pItemListBlock = dbg "block" $ L.indentBlock scn2 p
   where
     p = do
       header <- dbg "header" pItem
+      --return (L.IndentMany Nothing (return . (header, )) (dbg "item" pItem))
       return (L.IndentMany Nothing (return . (header, )) (dbg "item" pItem))
 
+pItemListNested :: Parser (String, [(String, [String])])
+pItemListNested = L.nonIndented scn2 (L.indentBlock scn2 p)
+  where
+    p = do
+      header <- pItem
+      return (L.IndentSome Nothing (return . (header, )) pItemListBlock)
+
+pItemListNested2 :: Parser (String, [String])
+pItemListNested2 = L.nonIndented scn2 (L.indentBlock scn2 p)
+  where
+    p = do
+      header <- pItem
+      return (L.IndentSome Nothing (return . (header, )) pLineFold)
+
+pLineFold :: Parser String
+pLineFold = L.lineFold scn2 $ \sc' ->
+  let ps = some (alphaNumChar <|> char '-') `sepBy1` try sc'
+  in unwords <$> ps <* scn2 -- (1)
