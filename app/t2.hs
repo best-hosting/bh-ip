@@ -15,6 +15,8 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Combinators.Expr
 import qualified Data.Char as C
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Set as Set
 
 main :: IO ()
 main = return ()
@@ -282,3 +284,20 @@ pLineFold :: Parser String
 pLineFold = L.lineFold scn2 $ \sc' ->
   let ps = some (alphaNumChar <|> char '-') `sepBy1` try sc'
   in unwords <$> ps <* scn2 -- (1)
+
+unfortunateParser :: Parser ()
+unfortunateParser = failure (Just EndOfInput) (Set.fromList es)
+  where
+    es = [Tokens (NE.fromList "a"), Tokens (NE.fromList "b")]
+
+data Custom = NotKeyword Text
+  deriving (Eq, Show, Ord)
+
+instance ShowErrorComponent Custom where
+  showErrorComponent (NotKeyword txt) = T.unpack txt ++ " is not a keyword"
+
+type ParserC = Parsec Custom Text
+
+notKeyword :: Text -> ParserC a
+notKeyword = customFailure . NotKeyword
+
