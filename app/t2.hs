@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications  #-}
 
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -11,6 +12,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import qualified Data.Text as T
 import Data.Text (Text)
 import Data.Void
+import Data.List
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Combinators.Expr
@@ -301,3 +303,53 @@ type ParserC = Parsec Custom Text
 notKeyword :: Text -> ParserC a
 notKeyword = customFailure . NotKeyword
 
+data CustomO
+  = TrivialWithLocation
+    [String] -- position stack
+    (Maybe (ErrorItem Char))
+    (Set.Set (ErrorItem Char))
+  | FancyWithLocation
+    [String] -- position stack
+    (ErrorFancy Void) -- Void, because we do not want to allow to nest Customs
+  deriving (Eq, Ord, Show)
+
+instance ShowErrorComponent CustomO where
+  showErrorComponent (TrivialWithLocation stack us es) =
+    parseErrorTextPretty (TrivialError @Text @Void undefined us es)
+      ++ showPosStack stack
+  showErrorComponent (FancyWithLocation stack cs) =
+    parseErrorTextPretty (FancyError @Text undefined (Set.singleton cs))
+      ++ showPosStack stack
+
+showPosStack :: [String] -> String
+showPosStack = intercalate ", " . fmap ("in " ++)
+
+type ParserO = Parsec CustomO Text
+
+inside :: String -> ParserO a -> ParserO a
+inside location p = do
+  r <- observing p
+  case r of
+    Left (TrivialError _ us es) ->
+      fancyFailure . Set.singleton . ErrorCustom $
+        TrivialWithLocation [location] us es
+    Left (FancyError _ xs) -> do
+      let f :: ErrorFancy CustomO -> ErrorFancy CustomO
+          f (ErrorFail msg) = ErrorCustom $
+            FancyWithLocation [location] (ErrorFail msg)
+          f (ErrorIndentation ord rlvl alvl) = ErrorCustom $
+            FancyWithLocation [location] (ErrorIndentation ord rlvl alvl)
+          f (ErrorCustom (TrivialWithLocation ps us es)) = ErrorCustom $
+            TrivialWithLocation (location:ps) us es
+          f (ErrorCustom (FancyWithLocation ps cs)) = ErrorCustom $
+            FancyWithLocation (location:ps) cs
+      fancyFailure (Set.map f xs)
+    Right x -> return x
+
+myParser :: ParserO String
+myParser = some (char 'a') *> some (char 'b')
+
+runParserO :: IO ()
+runParserO = do
+  parseTest (inside "foo" myParser) "aaacc"
+  parseTest (inside "foo" $ inside "bar" myParser) "aaacc"
