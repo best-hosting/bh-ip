@@ -346,6 +346,25 @@ inside location p = do
       fancyFailure (Set.map f xs)
     Right x -> return x
 
+inside' :: String -> ParserO a -> ParserO a
+inside' location = do
+    region go
+  where
+    go :: ParseError T.Text CustomO -> ParseError T.Text CustomO
+    go (TrivialError p us es)   = FancyError p . Set.singleton . ErrorCustom
+                                    $ TrivialWithLocation [location] us es
+    go (FancyError p xs) = FancyError p (Set.map f xs)
+      where
+        f :: ErrorFancy CustomO -> ErrorFancy CustomO
+        f (ErrorFail msg) = ErrorCustom $
+              FancyWithLocation [location] (ErrorFail msg)
+        f (ErrorIndentation ord rlvl alvl) = ErrorCustom $
+              FancyWithLocation [location] (ErrorIndentation ord rlvl alvl)
+        f (ErrorCustom (TrivialWithLocation ps us es)) = ErrorCustom $
+              TrivialWithLocation (location:ps) us es
+        f (ErrorCustom (FancyWithLocation ps cs)) = ErrorCustom $
+              FancyWithLocation (location:ps) cs
+
 myParser :: ParserO String
 myParser = some (char 'a') *> some (char 'b')
 
@@ -353,3 +372,9 @@ runParserO :: IO ()
 runParserO = do
   parseTest (inside "foo" myParser) "aaacc"
   parseTest (inside "foo" $ inside "bar" myParser) "aaacc"
+
+runParserO' :: IO ()
+runParserO' = do
+  parseTest (inside' "foo" myParser) "aaacc"
+  parseTest (inside' "foo" $ inside' "bar" myParser) "aaacc"
+
