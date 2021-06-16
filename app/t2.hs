@@ -378,3 +378,40 @@ runParserO' = do
   parseTest (inside' "foo" myParser) "aaacc"
   parseTest (inside' "foo" $ inside' "bar" myParser) "aaacc"
 
+withPredicate3
+  :: (a -> Bool)       -- ^ The check to perform on parsed input
+  -> String            -- ^ Message to print when the check fails
+  -> Parser a          -- ^ Parser to run
+  -> Parser a          -- ^ Resulting parser that performs the check
+withPredicate3 f msg p = do
+  o <- getOffset
+  r <- p
+  if f r
+    then return r
+    else region (setErrorOffset o) (fail msg)
+
+withPredicate3'
+  :: (a -> Bool)       -- ^ The check to perform on parsed input
+  -> String            -- ^ Message to print when the check fails
+  -> Parser a          -- ^ Parser to run
+  -> Parser a          -- ^ Resulting parser that performs the check
+withPredicate3' f msg p = do
+  o <- getOffset
+  region (setErrorOffset o) $ do
+    r <- p
+    if f r
+      then return r
+      else fail msg
+
+withPredicate4
+  :: (a -> Bool)       -- ^ The check to perform on parsed input
+  -> String            -- ^ Message to print when the check fails
+  -> Parser a          -- ^ Parser to run
+  -> Parser a          -- ^ Resulting parser that performs the check
+withPredicate4 f msg p = do
+  o <- getOffset
+  r <- p
+  if f r
+    then return r
+    else parseError (FancyError o (Set.singleton (ErrorFail msg)))
+
