@@ -45,6 +45,7 @@ library
     , libtelnet
     , network-simple
     , monad-loops
+    , megaparsec
   default-language: Haskell2010
 
 executable bh-ip-exe

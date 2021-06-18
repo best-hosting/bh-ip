@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications  #-}
 
 module BH.Switch
     ( SwName (..)
@@ -20,9 +21,14 @@ module BH.Switch
 
 import qualified Data.Text as T
 import           Data.List
-import           Control.Applicative
 import           Network.Simple.TCP
 import qualified Data.Map as M
+
+import Text.Megaparsec
+import Text.Megaparsec.Char
+import Text.Megaparsec.Error
+import qualified Text.Megaparsec.Char.Lexer as L
+import Data.Void
 
 import BH.IP
 
@@ -81,4 +87,31 @@ type MacIpMap       = M.Map MacAddr [IP]
 type PortMap        = M.Map SwPort [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
+
+type Parser = Parsec Void T.Text
+
+
+t :: IO ()
+t = do
+    c <- readFile "1.tmp"
+    case runParser parseMacAddressTable "huy" (T.pack c) of
+      Left err -> putStrLn (errorBundlePretty err)
+      Right ts -> print ts
+
+data PortInfoEl = PortInfoEl { elVlan :: T.Text
+                             , elMac  :: T.Text
+                             , elPort :: T.Text
+                             }
+
+parseMacAddressTable :: Parser String
+parseMacAddressTable = do
+    let header =
+            space1 *> string "Mac Address Table" <* hspace <* newline
+            <* takeWhile1P (Just "dashes") (== '-') <* some newline
+            <* string "Vlan" <* hspace1 <* string "Mac Address" <* hspace1 <* string "Type" <* hspace1 <* string "Ports" <* hspace <* newline
+            <* takeWhile1P (Just "huynya vsyakaya") (`elem` ['-', ' ']) <* newline
+    header *> hspace1 *> (some digitChar <* hspace1)
+    *> (some (hexDigitChar <|> oneOf @[] ":.") <* hspace1)
+    *> (string "DYNAMIC" <* hspace1)
+    *> (foldr (\p r -> (++) <$> p <*> r) (pure [])  [some alphaNumChar, T.unpack <$> string "/", some digitChar] <* hspace) <* newline
 
