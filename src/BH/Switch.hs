@@ -29,6 +29,7 @@ import Text.Megaparsec.Char
 import Text.Megaparsec.Error
 import qualified Text.Megaparsec.Char.Lexer as L
 import Data.Void
+import Data.Char
 
 import BH.IP
 
@@ -94,7 +95,7 @@ type Parser = Parsec Void T.Text
 t :: IO ()
 t = do
     c <- readFile "1.tmp"
-    case runParser parseMacAddressTable "huy" (T.pack c) of
+    case runParser parseMacAddressTable2 "huy" (T.pack c) of
       Left err -> putStrLn (errorBundlePretty err)
       Right ts -> print ts
 
@@ -105,6 +106,62 @@ data PortInfoEl = PortInfoEl { elVlan :: T.Text
 
 parseMacAddressTable :: Parser String
 parseMacAddressTable = do
+    let header =
+            space1 *> string "Mac Address Table" <* hspace <* newline
+            <* takeWhile1P (Just "dashes") (== '-') <* some newline
+            <* string "Vlan" <* hspace1 <* string "Mac Address" <* hspace1 <* string "Type" <* hspace1 <* string "Ports" <* hspace <* newline
+            <* takeWhile1P (Just "huynya vsyakaya") (`elem` ['-', ' ']) <* newline
+    header *> hspace1 *> (some digitChar <* hspace1)
+    *> (some (hexDigitChar <|> oneOf @[] ":.") <* hspace1)
+    *> (string "DYNAMIC" <* hspace1)
+    *> (foldr (\p r -> (++) <$> p <*> r) (pure [])  [some alphaNumChar, T.unpack <$> string "/", some digitChar] <* hspace) <* newline
+
+sc :: Parser ()
+sc = L.space hspace1 empty empty
+
+scn :: Parser ()
+scn = L.space space1 empty empty
+
+lexeme :: Parser a -> Parser a
+lexeme  = L.lexeme sc
+
+symbol :: Tokens T.Text -> Parser (Tokens T.Text)
+symbol  = L.symbol sc
+
+topHeader :: Parser T.Text
+topHeader  = hspace1
+    *> symbol "Mac Address Table"
+    <* scn <* takeWhile1P (Just "top header dashes") (== '-') <* skipSome scn
+    <?> "top header"
+
+colHeader :: Parser T.Text
+colHeader =
+        symbol "Vlan"
+    <|> symbol "Mac Address"
+    <|> symbol "Type"
+    <|> symbol "Ports"
+    <?> "column header"
+
+fullHeader :: Parser [T.Text]
+fullHeader = optional topHeader
+    *> count 4 colHeader
+    <* takeWhile1P (Just "column header dashes") (`elem` ['-', ' ']) <* scn
+    <?> "full table header"
+
+parseVlan :: Parser Int
+parseVlan  = lexeme $ do
+    o <- getOffset
+    region (setErrorOffset o) . label "vlan number" $ do
+      v <- lexeme L.decimal
+      if v < 4096
+        then return v
+        else fail "Nihuya sebe vlan"
+
+parseMacAddress :: Parser T.Text
+parseMacAddress = lexeme $ takeWhile1P (Just "mac address") isHexDigit
+
+parseMacAddressTable2 :: Parser String
+parseMacAddressTable2 = do
     let header =
             space1 *> string "Mac Address Table" <* hspace <* newline
             <* takeWhile1P (Just "dashes") (== '-') <* some newline
