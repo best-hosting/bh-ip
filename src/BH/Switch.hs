@@ -99,10 +99,22 @@ t = do
       Left err -> putStrLn (errorBundlePretty err)
       Right ts -> print ts
 
-data PortInfoEl = PortInfoEl { elVlan :: T.Text
+data PortInfoEl = PortInfoEl { elVlan :: Int
                              , elMac  :: T.Text
-                             , elPort :: T.Text
+                             , elPort :: PortNum2
                              }
+  deriving (Show)
+
+defaultPortInfoEl :: PortInfoEl
+defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum2 {portSpeed = FastEthernet, portNumber = 0}}
+
+data PortNum2   = PortNum2  { portSpeed :: PortSpeed
+                            , portNumber :: Int
+                            }
+  deriving (Show)
+
+data PortSpeed  = FastEthernet | GigabitEthernet
+  deriving (Show)
 
 parseMacAddressTable :: Parser String
 parseMacAddressTable = do
@@ -142,6 +154,18 @@ colHeader =
     <|> symbol "Ports"
     <?> "column header"
 
+colParsers :: Parser (PortInfoEl -> Parser PortInfoEl)
+colParsers =
+        (symbol "Vlan" *> pure parseVlan')
+    <|> (symbol "Mac Address" *> pure parseMacAddress')
+    <|> (symbol "Type" *> pure (\p -> string "DYNAMIC" *> pure p))
+    <|> (symbol "Ports" *> pure parsePortNum')
+    <?> "column header"
+
+runParserList :: a -> [a -> Parser a] -> Parser a
+--runParserList z = foldr (\m z -> z >>= m) (pure z)
+runParserList z = foldl (\z m -> z >>= m) (pure z)
+
 fullHeader :: Parser [T.Text]
 fullHeader = optional topHeader
     *> count 4 colHeader
@@ -157,8 +181,25 @@ parseVlan  = lexeme $ do
         then return v
         else fail "Nihuya sebe vlan"
 
+parseVlan' :: PortInfoEl -> Parser PortInfoEl
+parseVlan' p = (\x -> p{elVlan = x}) <$> parseVlan
+
 parseMacAddress :: Parser T.Text
-parseMacAddress = lexeme $ takeWhile1P (Just "mac address") isHexDigit
+parseMacAddress = lexeme $ takeWhile1P (Just "mac address") ((||) <$> isHexDigit <*> (== '.'))
+
+parseMacAddress' :: PortInfoEl -> Parser PortInfoEl
+parseMacAddress' p = (\x -> p{elMac = x}) <$> parseMacAddress
+
+parsePortNum :: Parser PortNum2
+parsePortNum    = lexeme $ PortNum2
+    <$> (symbol "Fa0" *> pure FastEthernet <|> symbol "Gi0" *> pure GigabitEthernet)
+    <*> (symbol "/" *> L.decimal)
+
+parsePortNum' :: PortInfoEl -> Parser PortInfoEl
+parsePortNum' p = (\x -> p{elPort = x}) <$> parsePortNum
+
+parseRow :: Parser PortInfoEl
+parseRow    = PortInfoEl <$> parseVlan <*> parseMacAddress <*> parsePortNum
 
 parseMacAddressTable2 :: Parser String
 parseMacAddressTable2 = do
