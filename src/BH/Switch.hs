@@ -30,6 +30,8 @@ import Text.Megaparsec.Error
 import qualified Text.Megaparsec.Char.Lexer as L
 import Data.Void
 import Data.Char
+import Control.Applicative (Alternative)
+import Data.Function
 
 import BH.IP
 
@@ -161,6 +163,47 @@ colParsers =
     <|> (symbol "Type" *> pure (\p -> string "DYNAMIC" *> pure p))
     <|> (symbol "Ports" *> pure parsePortNum')
     <?> "column header"
+
+data NamedParser m a = NamedParser (String, m a)
+
+instance Functor m => Functor (NamedParser m) where
+    fmap f (NamedParser t) = NamedParser (fmap (f <$>) t)
+instance Applicative m => Applicative (NamedParser m) where
+    pure x = NamedParser ("", pure x)
+    NamedParser mf <*> NamedParser mx = NamedParser (fmap (<*>) mf <*> mx)
+instance Alternative m => Alternative (NamedParser m) where
+    empty = NamedParser (empty, empty)
+    --NamedParser (sx, mx) <|> NamedParser (sy, my) = NamedParser 
+
+{-colParsers'1 :: Parser [a -> Parser b] -> [Parser (a -> Parser b)] -> Parser [a -> Parser b]
+colParsers'1 rec xs
+  | null xs     = pure []
+  | otherwise   = do
+        m <- choice xs
+        rec (filter xs-}
+
+-- | Apply choice until nothing left. Each option may be choosed only _once_.
+--
+-- For that to work, each option must be accompanied with unique identifier
+-- and _the same_ identifier should be returned by option itself.
+uniqChoices :: (Eq i, Alternative m, Monad m) => [(i, m (i, b))] -> m [b]
+uniqChoices xs = fix go xs
+  where
+    go :: (Eq i, Alternative m, Monad m) =>
+            ([(i, m (i, b))] -> m [b]) -> [(i, m (i, b))] -> m [b]
+    go rec ps
+      | null ps     = pure []
+      | otherwise   = do
+            (n, p) <- choice (map snd ps)
+            let ys = filter ((/= n) . fst) ps
+            (p :) <$> rec (filter ((/= n) . fst) ps)
+
+vV :: Parser (String, T.Text)
+vV = symbol "Vlan" *> pure ("Vlan", "Parse vlan")
+vM :: Parser (String, T.Text)
+vM = symbol "Mac Address" *> pure ("Mac", "Parse mac")
+vP :: Parser (String, T.Text)
+vP = symbol "Port" *> pure ("Port", "Parse port")
 
 runParserList :: a -> [a -> Parser a] -> Parser a
 --runParserList z = foldr (\m z -> z >>= m) (pure z)
