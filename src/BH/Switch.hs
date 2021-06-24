@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TupleSections  #-}
 
 module BH.Switch
     ( SwName (..)
@@ -32,6 +33,7 @@ import Data.Void
 import Data.Char
 import Control.Applicative (Alternative)
 import Data.Function
+import Data.Foldable (asum)
 
 import BH.IP
 
@@ -198,12 +200,40 @@ uniqChoices xs = fix go xs
             let ys = filter ((/= n) . fst) ps
             (p :) <$> rec (filter ((/= n) . fst) ps)
 
+uniqChoice :: (Alternative m, Monad m) => [m a] -> m (a, [m a])
+uniqChoice ps = do
+    (n, p) <- asum $ zipWith (\n mx -> fmap (n,) mx) [1..] ps
+    return (p, foldr (\(i, x) zs -> if n == i then zs else x : zs) [] . zip [1..] $ ps)
+
+choiceUniq :: Alternative m => [m a] -> m (a, [m a])
+choiceUniq ps =
+    fmap (go <$>) . asum . zipWith (\n mx -> (, n) <$> mx) [1..] $ ps
+  where
+    --go :: Alternative m => Int -> [m a]
+    go n = foldr (\(i, x) zs -> if n == i then zs else x : zs) [] . zip [1..] $ ps
+
+choiceAllUniq :: (Alternative m, Monad m) => [m a] -> m [a]
+choiceAllUniq ps = fix go ps
+  where
+    go :: (Alternative m, Monad m) => ([m a] -> m [a]) -> [m a] -> m [a]
+    go rec ps
+      | null ps     = pure []
+      | otherwise   = choiceUniq ps >>= \(p, zs) -> (p :) <$> rec zs
+
+
 vV :: Parser (String, T.Text)
 vV = symbol "Vlan" *> pure ("Vlan", "Parse vlan")
 vM :: Parser (String, T.Text)
 vM = symbol "Mac Address" *> pure ("Mac", "Parse mac")
 vP :: Parser (String, T.Text)
 vP = symbol "Port" *> pure ("Port", "Parse port")
+
+vV' :: Parser T.Text
+vV' = symbol "Vlan" *> pure "Parse vlan"
+vM' :: Parser T.Text
+vM' = symbol "Mac Address" *> pure "Parse mac"
+vP' :: Parser T.Text
+vP' = symbol "Port" *> pure "Parse port"
 
 runParserList :: a -> [a -> Parser a] -> Parser a
 --runParserList z = foldr (\m z -> z >>= m) (pure z)
