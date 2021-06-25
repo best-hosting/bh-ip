@@ -28,12 +28,14 @@ import qualified Data.Map as M
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import Text.Megaparsec.Error
+import Text.Megaparsec.Debug
 import qualified Text.Megaparsec.Char.Lexer as L
 import Data.Void
 import Data.Char
 import Control.Applicative (Alternative)
 import Data.Function
 import Data.Foldable (asum)
+import Control.Monad
 
 import BH.IP
 
@@ -146,8 +148,9 @@ symbol  = L.symbol sc
 
 topHeader :: Parser T.Text
 topHeader  = hspace1
-    *> symbol "Mac Address Table"
-    <* scn <* takeWhile1P (Just "top header dashes") (== '-') <* skipSome scn
+    *> symbol "Mac Address Table" <* eol
+    <* takeWhile1P (Just "top header dashes line") (== '-') <* eol
+    <* skipMany space1
     <?> "top header"
 
 colHeader :: Parser T.Text
@@ -166,59 +169,23 @@ colParsers =
     <|> (symbol "Ports" *> pure parsePortNum')
     <?> "column header"
 
-data NamedParser m a = NamedParser (String, m a)
-
-instance Functor m => Functor (NamedParser m) where
-    fmap f (NamedParser t) = NamedParser (fmap (f <$>) t)
-instance Applicative m => Applicative (NamedParser m) where
-    pure x = NamedParser ("", pure x)
-    NamedParser mf <*> NamedParser mx = NamedParser (fmap (<*>) mf <*> mx)
-instance Alternative m => Alternative (NamedParser m) where
-    empty = NamedParser (empty, empty)
-    --NamedParser (sx, mx) <|> NamedParser (sy, my) = NamedParser 
-
-{-colParsers'1 :: Parser [a -> Parser b] -> [Parser (a -> Parser b)] -> Parser [a -> Parser b]
-colParsers'1 rec xs
-  | null xs     = pure []
-  | otherwise   = do
-        m <- choice xs
-        rec (filter xs-}
-
--- | Apply choice until nothing left. Each option may be choosed only _once_.
---
--- For that to work, each option must be accompanied with unique identifier
--- and _the same_ identifier should be returned by option itself.
-uniqChoices :: (Eq i, Alternative m, Monad m) => [(i, m (i, b))] -> m [b]
-uniqChoices xs = fix go xs
-  where
-    go :: (Eq i, Alternative m, Monad m) =>
-            ([(i, m (i, b))] -> m [b]) -> [(i, m (i, b))] -> m [b]
-    go rec ps
-      | null ps     = pure []
-      | otherwise   = do
-            (n, p) <- choice (map snd ps)
-            let ys = filter ((/= n) . fst) ps
-            (p :) <$> rec (filter ((/= n) . fst) ps)
-
-uniqChoice :: (Alternative m, Monad m) => [m a] -> m (a, [m a])
-uniqChoice ps = do
-    (n, p) <- asum $ zipWith (\n mx -> fmap (n,) mx) [1..] ps
-    return (p, foldr (\(i, x) zs -> if n == i then zs else x : zs) [] . zip [1..] $ ps)
-
-choiceUniq :: Alternative m => [m a] -> m (a, [m a])
-choiceUniq ps =
+-- | The same as 'choice', but returns list of _unmatched_ choices.  This may
+-- be used for implementing applying each choice only once.
+choiceOnce :: Alternative m => [m a] -> m (a, [m a])
+choiceOnce ps =
     fmap (go <$>) . asum . zipWith (\n mx -> (, n) <$> mx) [1..] $ ps
   where
     --go :: Alternative m => Int -> [m a]
     go n = foldr (\(i, x) zs -> if n == i then zs else x : zs) [] . zip [1..] $ ps
 
-choiceAllUniq :: (Alternative m, Monad m) => [m a] -> m [a]
-choiceAllUniq ps = fix go ps
+-- | Apply each choice only once until nothing left.
+choiceEachOnce :: (Alternative m, Monad m) => [m a] -> m [a]
+choiceEachOnce ps = fix go ps
   where
     go :: (Alternative m, Monad m) => ([m a] -> m [a]) -> [m a] -> m [a]
     go rec ps
       | null ps     = pure []
-      | otherwise   = choiceUniq ps >>= \(p, zs) -> (p :) <$> rec zs
+      | otherwise   = choiceOnce ps >>= \(p, zs) -> (p :) <$> rec zs
 
 
 vV :: Parser (String, T.Text)
@@ -236,14 +203,32 @@ vP' :: Parser T.Text
 vP' = symbol "Port" *> pure "Parse port"
 
 runParserList :: a -> [a -> Parser a] -> Parser a
---runParserList z = foldr (\m z -> z >>= m) (pure z)
-runParserList z = foldl (\z m -> z >>= m) (pure z)
+runParserList z = foldl (>>=) (pure z)
 
 fullHeader :: Parser [T.Text]
 fullHeader = optional topHeader
     *> count 4 colHeader
     <* takeWhile1P (Just "column header dashes") (`elem` ['-', ' ']) <* scn
     <?> "full table header"
+
+-- | Parse table header using supplied list of column header parsers. All columns
+-- are mandatory, though they can be used in any order. Return a list columns
+-- in column header parser results in _actual_ column order.
+--
+-- This can be used to build a table row parser, if each column header parser
+-- return corresponding column cell parser.
+parseHeader :: [Parser a] -> Parser [a]
+parseHeader cs =
+    let l = length cs
+        dashLine = lexeme $ takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
+    in  optional topHeader
+          *> choiceEachOnce cs <* eol
+          <* count l dashLine <* eol
+
+parseTable :: Parser [PortInfoEl]
+parseTable = do
+    rs <- parseHeader [parseVlan'2, parseMacAddress'2, parseType'2 , parsePortNum'2]
+    many $ hspace *> runParserList defaultPortInfoEl rs <* (void eol <|> eof)
 
 parseVlan :: Parser Int
 parseVlan  = lexeme $ do
@@ -257,11 +242,19 @@ parseVlan  = lexeme $ do
 parseVlan' :: PortInfoEl -> Parser PortInfoEl
 parseVlan' p = (\x -> p{elVlan = x}) <$> parseVlan
 
+parseVlan'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
+parseVlan'2 = symbol "Vlan" *> pure (\p -> (\x -> p{elVlan = x}) <$> parseVlan)
+                <?> "column header 'Vlan'"
+
 parseMacAddress :: Parser T.Text
 parseMacAddress = lexeme $ takeWhile1P (Just "mac address") ((||) <$> isHexDigit <*> (== '.'))
 
 parseMacAddress' :: PortInfoEl -> Parser PortInfoEl
 parseMacAddress' p = (\x -> p{elMac = x}) <$> parseMacAddress
+
+parseMacAddress'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
+parseMacAddress'2 = symbol "Mac Address" *> pure (\p -> (\x -> p{elMac = x}) <$> parseMacAddress)
+    <?> "column header 'Mac Address'"
 
 parsePortNum :: Parser PortNum2
 parsePortNum    = lexeme $ PortNum2
@@ -270,6 +263,13 @@ parsePortNum    = lexeme $ PortNum2
 
 parsePortNum' :: PortInfoEl -> Parser PortInfoEl
 parsePortNum' p = (\x -> p{elPort = x}) <$> parsePortNum
+
+parsePortNum'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
+parsePortNum'2 = symbol "Ports" *> pure (\p -> (\x -> p{elPort = x}) <$> parsePortNum)
+    <?> "column header 'Ports'"
+
+parseType'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
+parseType'2 = symbol "Type" *> pure (\p -> symbol "DYNAMIC" *> pure p) <?> "column header 'Type'"
 
 parseRow :: Parser PortInfoEl
 parseRow    = PortInfoEl <$> parseVlan <*> parseMacAddress <*> parsePortNum
