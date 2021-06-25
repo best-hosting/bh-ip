@@ -101,7 +101,7 @@ type Parser = Parsec Void T.Text
 t :: IO ()
 t = do
     c <- readFile "1.tmp"
-    case runParser parseMacAddressTable2 "huy" (T.pack c) of
+    case runParser parseMacAddrTable2 "huy" (T.pack c) of
       Left err -> putStrLn (errorBundlePretty err)
       Right ts -> print ts
 
@@ -146,29 +146,6 @@ lexeme  = L.lexeme sc
 symbol :: Tokens T.Text -> Parser (Tokens T.Text)
 symbol  = L.symbol sc
 
-topHeader :: Parser T.Text
-topHeader  = hspace1
-    *> symbol "Mac Address Table" <* eol
-    <* takeWhile1P (Just "top header dashes line") (== '-') <* eol
-    <* skipMany space1
-    <?> "top header"
-
-colHeader :: Parser T.Text
-colHeader =
-        symbol "Vlan"
-    <|> symbol "Mac Address"
-    <|> symbol "Type"
-    <|> symbol "Ports"
-    <?> "column header"
-
-colParsers :: Parser (PortInfoEl -> Parser PortInfoEl)
-colParsers =
-        (symbol "Vlan" *> pure parseVlan')
-    <|> (symbol "Mac Address" *> pure parseMacAddress')
-    <|> (symbol "Type" *> pure (\p -> string "DYNAMIC" *> pure p))
-    <|> (symbol "Ports" *> pure parsePortNum')
-    <?> "column header"
-
 -- | The same as 'choice', but returns list of _unmatched_ choices.  This may
 -- be used for implementing applying each choice only once.
 choiceOnce :: Alternative m => [m a] -> m (a, [m a])
@@ -188,13 +165,6 @@ choiceEachOnce ps = fix go ps
       | otherwise   = choiceOnce ps >>= \(p, zs) -> (p :) <$> rec zs
 
 
-vV :: Parser (String, T.Text)
-vV = symbol "Vlan" *> pure ("Vlan", "Parse vlan")
-vM :: Parser (String, T.Text)
-vM = symbol "Mac Address" *> pure ("Mac", "Parse mac")
-vP :: Parser (String, T.Text)
-vP = symbol "Port" *> pure ("Port", "Parse port")
-
 vV' :: Parser T.Text
 vV' = symbol "Vlan" *> pure "Parse vlan"
 vM' :: Parser T.Text
@@ -202,33 +172,28 @@ vM' = symbol "Mac Address" *> pure "Parse mac"
 vP' :: Parser T.Text
 vP' = symbol "Port" *> pure "Parse port"
 
-runParserList :: a -> [a -> Parser a] -> Parser a
-runParserList z = foldl (>>=) (pure z)
-
-fullHeader :: Parser [T.Text]
-fullHeader = optional topHeader
-    *> count 4 colHeader
-    <* takeWhile1P (Just "column header dashes") (`elem` ['-', ' ']) <* scn
-    <?> "full table header"
-
 -- | Parse table header using supplied list of column header parsers. All columns
 -- are mandatory, though they can be used in any order. Return a list columns
 -- in column header parser results in _actual_ column order.
 --
 -- This can be used to build a table row parser, if each column header parser
 -- return corresponding column cell parser.
-parseHeader :: [Parser a] -> Parser [a]
-parseHeader cs =
-    let l = length cs
+parseTableHeader :: [Parser a] -> Parser [a]
+parseTableHeader cols =
+    let l = length cols
         dashLine = lexeme $ takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
     in  optional topHeader
-          *> choiceEachOnce cs <* eol
+          *> choiceEachOnce cols <* eol
           <* count l dashLine <* eol
 
-parseTable :: Parser [PortInfoEl]
-parseTable = do
-    rs <- parseHeader [parseVlan'2, parseMacAddress'2, parseType'2 , parsePortNum'2]
-    many $ hspace *> runParserList defaultPortInfoEl rs <* (void eol <|> eof)
+-- | Parse table using supplied column /header/ parsers, which return
+-- corresponding row cell parser. Row value is build based on empty row value.
+parseTable :: a -> [Parser (a -> Parser a)] -> Parser [a]
+parseTable emptyRow cols = do
+    cellPs <- parseTableHeader cols
+    let rowP = hspace *> foldl (>>=) (pure emptyRow) cellPs <* (void eol <|> eof)
+    many rowP
+
 
 parseVlan :: Parser Int
 parseVlan  = lexeme $ do
@@ -239,50 +204,45 @@ parseVlan  = lexeme $ do
         then return v
         else fail "Nihuya sebe vlan"
 
-parseVlan' :: PortInfoEl -> Parser PortInfoEl
-parseVlan' p = (\x -> p{elVlan = x}) <$> parseVlan
-
-parseVlan'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
-parseVlan'2 = symbol "Vlan" *> pure (\p -> (\x -> p{elVlan = x}) <$> parseVlan)
-                <?> "column header 'Vlan'"
-
 parseMacAddress :: Parser T.Text
 parseMacAddress = lexeme $ takeWhile1P (Just "mac address") ((||) <$> isHexDigit <*> (== '.'))
-
-parseMacAddress' :: PortInfoEl -> Parser PortInfoEl
-parseMacAddress' p = (\x -> p{elMac = x}) <$> parseMacAddress
-
-parseMacAddress'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
-parseMacAddress'2 = symbol "Mac Address" *> pure (\p -> (\x -> p{elMac = x}) <$> parseMacAddress)
-    <?> "column header 'Mac Address'"
 
 parsePortNum :: Parser PortNum2
 parsePortNum    = lexeme $ PortNum2
     <$> (symbol "Fa0" *> pure FastEthernet <|> symbol "Gi0" *> pure GigabitEthernet)
     <*> (symbol "/" *> L.decimal)
 
-parsePortNum' :: PortInfoEl -> Parser PortInfoEl
-parsePortNum' p = (\x -> p{elPort = x}) <$> parsePortNum
+topHeader :: Parser T.Text
+topHeader  = hspace1
+    *> symbol "Mac Address Table" <* eol
+    <* takeWhile1P (Just "top header dashes line") (== '-') <* eol
+    <* skipMany space1
+    <?> "top header"
 
-parsePortNum'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
-parsePortNum'2 = symbol "Ports" *> pure (\p -> (\x -> p{elPort = x}) <$> parsePortNum)
-    <?> "column header 'Ports'"
+columnVlanP :: Parser (PortInfoEl -> Parser PortInfoEl)
+columnVlanP = symbol "Vlan" *> pure (\p -> (\x -> p{elVlan = x}) <$> parseVlan)
+                <?> "column header 'Vlan'"
 
-parseType'2 :: Parser (PortInfoEl -> Parser PortInfoEl)
-parseType'2 = symbol "Type" *> pure (\p -> symbol "DYNAMIC" *> pure p) <?> "column header 'Type'"
+columnMacAddressP :: Parser (PortInfoEl -> Parser PortInfoEl)
+columnMacAddressP = symbol "Mac Address" *> pure (\p -> (\x -> p{elMac = x}) <$> parseMacAddress)
+                      <?> "column header 'Mac Address'"
 
-parseRow :: Parser PortInfoEl
-parseRow    = PortInfoEl <$> parseVlan <*> parseMacAddress <*> parsePortNum
+columnPortNumP :: Parser (PortInfoEl -> Parser PortInfoEl)
+columnPortNumP = symbol "Ports" *> pure (\p -> (\x -> p{elPort = x}) <$> parsePortNum)
+                   <?> "column header 'Ports'"
 
-parseMacAddressTable2 :: Parser String
-parseMacAddressTable2 = do
-    let header =
-            space1 *> string "Mac Address Table" <* hspace <* newline
-            <* takeWhile1P (Just "dashes") (== '-') <* some newline
-            <* string "Vlan" <* hspace1 <* string "Mac Address" <* hspace1 <* string "Type" <* hspace1 <* string "Ports" <* hspace <* newline
-            <* takeWhile1P (Just "huynya vsyakaya") (`elem` ['-', ' ']) <* newline
-    header *> hspace1 *> (some digitChar <* hspace1)
-    *> (some (hexDigitChar <|> oneOf @[] ":.") <* hspace1)
-    *> (string "DYNAMIC" <* hspace1)
-    *> (foldr (\p r -> (++) <$> p <*> r) (pure [])  [some alphaNumChar, T.unpack <$> string "/", some digitChar] <* hspace) <* newline
+columnTypeP :: Parser (PortInfoEl -> Parser PortInfoEl)
+columnTypeP = symbol "Type" *> pure (\p -> symbol "DYNAMIC" *> pure p)
+                <?> "column header 'Type'"
+
+macAddrTableColumns :: [Parser (PortInfoEl -> Parser PortInfoEl)]
+macAddrTableColumns =
+    [ columnVlanP
+    , columnMacAddressP
+    , columnTypeP
+    , columnPortNumP
+    ]
+
+parseMacAddrTable2 :: Parser [PortInfoEl]
+parseMacAddrTable2 = parseTable defaultPortInfoEl macAddrTableColumns
 
