@@ -25,6 +25,7 @@ import           Data.List
 import           Network.Simple.TCP
 import qualified Data.Map as M
 
+import qualified Data.Attoparsec.Text as A
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import Text.Megaparsec.Error
