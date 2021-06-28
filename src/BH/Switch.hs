@@ -179,35 +179,6 @@ vM' = symbol "Mac Address" *> pure "Parse mac"
 vP' :: Parser T.Text
 vP' = symbol "Port" *> pure "Parse port"
 
-topHeader :: Parser T.Text
-topHeader  = hspace1
-    *> symbol "Mac Address Table" <* eol
-    <* takeWhile1P (Just "top header dashes line") (== '-') <* eol
-    <* skipMany space1
-    <?> "top header"
-
--- | Parse table header using supplied list of column header parsers. All columns
--- are mandatory, though they can be used in any order. Return a list columns
--- in column header parser results in _actual_ column order.
---
--- This can be used to build a table row parser, if each column header parser
--- return corresponding column cell parser.
-parseTableHeader :: [Parser a] -> Parser [a]
-parseTableHeader cols =
-    let l = length cols
-        dashLine = lexeme $ takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
-    in  optional topHeader
-          *> choiceEachOnce cols <* eol
-          <* count l dashLine <* eol
-
--- | Parse table using supplied column /header/ parsers, which return
--- corresponding row cell parser. Row value is build based on empty row value.
-parseTable :: a -> [Parser (a -> Parser a)] -> Parser [a]
-parseTable emptyRow cols = do
-    cellPs <- parseTableHeader cols
-    let rowP = hspace *> foldl (>>=) (pure emptyRow) cellPs <* (void eol <|> eof)
-    many rowP
-
 
 parseVlan :: Parser Int
 parseVlan  = lexeme $ do
@@ -250,9 +221,39 @@ macAddrTableColumns =
     , columnPortNumP
     ]
 
+topHeader :: Parser T.Text
+topHeader  = hspace1
+    *> symbol "Mac Address Table" <* eol
+    <* takeWhile1P (Just "top header dashes line") (== '-') <* eol
+    <* skipMany space1
+    <?> "top header"
+
+-- | Parse table header using supplied list of column header parsers. All columns
+-- are mandatory, though they can be used in any order. Return a list columns
+-- in column header parser results in _actual_ column order.
+--
+-- This can be used to build a table row parser, if each column header parser
+-- return corresponding column cell parser.
+parseTableHeader :: [Parser a] -> Parser [a]
+parseTableHeader cols =
+    let l = length cols
+        dashLine = lexeme $ takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
+    in  optional topHeader
+          *> choiceEachOnce cols <* eol
+          <* count l dashLine <* eol
+
+-- | Parse table using supplied column /header/ parsers, which return
+-- corresponding row cell parser. Row value is build based on empty row value.
+parseTable :: a -> [Parser (a -> Parser a)] -> Parser [a]
+parseTable emptyRow cols = do
+    cellPs <- parseTableHeader cols
+    let rowP = hspace *> foldl (>>=) (pure emptyRow) cellPs <* (void eol <|> eof)
+    many rowP
+
 parseMacAddrTable2 :: Parser [PortInfoEl]
 parseMacAddrTable2 = parseTable defaultPortInfoEl macAddrTableColumns
 
+-- | Another (simpler) mac table parsing variant.
 parseMacAddrTable3 :: Parser [PortInfoEl]
 parseMacAddrTable3 = do
     let dashLine = lexeme $ takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
