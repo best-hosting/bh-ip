@@ -53,7 +53,6 @@ data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
-                            , telnetEcho    :: T.Text
                             , telnetEchoResult :: Maybe (A.IResult T.Text T.Text)
                             , telnetPrompt  :: T.Text
                             }
@@ -62,7 +61,6 @@ defTelnetState :: TelnetState a b
 defTelnetState  = TelnetState { telnetResume = Nothing
                               , telnetResult = Nothing
                               , tInt = 0
-                              , telnetEcho   = T.empty
                               , telnetEchoResult = Nothing
                               -- ^ Input already read for checking command echo.
                               , telnetPrompt = T.empty
@@ -102,32 +100,15 @@ sendAndParse :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParse f cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
-    --sendParseWithPrompt (echoPromptP (telnetPrompt st)) f cmd t0
-    sendParseWithPrompt' ((A.endOfLine <|> pure ()) *> A.string (telnetPrompt st)) f cmd t0
+    -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed.
+    sendParseWithPrompt ((A.endOfLine <|> pure ()) *> A.string (telnetPrompt st)) f cmd t0
 
-sendParseWithPrompt :: PromptParser () -> TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
-sendParseWithPrompt pp f TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
-    liftIO (putStrLn "sendParseWithPrompt: ") >>
-    parseEcho pp t0 >>=
-    shiftW (\(k, _) -> do
-    con  <- asks telnetConn
-    liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
-    saveResume k
-    ) >>=
-    (\ts ->
-     if ce
-     --then parseEcho (echoPromptP cmd) ts
-          then parseEcho' cmd ts
-          else return ts
-    ) >>=
-    parseCmd f
-
-sendParseWithPrompt' :: A.Parser T.Text
+sendParseWithPrompt :: A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
-sendParseWithPrompt' pr f TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
+sendParseWithPrompt promptP f TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
     liftIO (putStrLn "sendParseWithPrompt: ") >>
-    parseEcho'2 pr t0 >>=
+    parseEcho promptP t0 >>=
     shiftW (\(k, _) -> do
         con  <- asks telnetConn
         liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
@@ -135,54 +116,27 @@ sendParseWithPrompt' pr f TelCmd {cmdText = cmd, cmdEcho = ce} t0 =
       ) >>=
     (\ts ->
         if ce
-          --then parseEcho (echoPromptP cmd) ts
-          then parseEcho' cmd ts
+          then parseEchoText cmd ts
           else return ts
     ) >>=
     parseCmd f
 
-echoPromptP :: T.Text -> PromptParser ()
-echoPromptP txt ts
-  | txt `T.isInfixOf` ts = Final    { parserResult = Just ()
-                                    , unparsedText_ = snd $ T.breakOnEnd txt ts
-                                    }
-  | otherwise            = Partial  { parserResult = Just () }
-
--- FIXME: Remove this. It's unneeded.
-echoPromptP' :: T.Text -> T.Text -> A.IResult T.Text ()
-echoPromptP' txt ts   = A.parse (void $ A.string txt) ts
-
-parseEcho :: (T.Text -> ParserResult ()) -> TelnetCmd a b T.Text
-parseEcho pp = shiftW $ \(k, ts) -> do
-      stRef <- asks telnetRef
-      st <- liftIO (readIORef stRef)
-      let echoCmd = telnetEcho st <> ts
-          r = pp echoCmd
-      liftIO $ print $ "Read back: " <> echoCmd
-      if isParserEnded r
-        then do
-          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = T.empty}, ()))
-          saveResume k
-          let ys = fromMaybe T.empty (unparsedText r)
-          liftIO $ print $ "Finished reading back with: '" <> ys <> "'"
-          lift (k ys)
-        else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEcho = echoCmd}, ()))
-
-parseEcho' :: T.Text -- ^ Text, which i expect to be echoed back.
+parseEchoText :: T.Text -- ^ Text, which i expect to be echoed back.
               -> TelnetCmd a b T.Text
-parseEcho' echoTx ts = do
-    liftIO $ print $ "Parsing echo cmd: '" <> echoTx <> "'"
-    parseEcho'2 (A.string echoTx) ts
+parseEchoText echoTxt ts = do
+    liftIO $ print $ "Parsing echo cmd: '" <> echoTxt <> "'"
+    parseEcho (A.string echoTxt) ts
 
-parseEcho'2 :: A.Parser T.Text -- ^ Text, which i expect to be echoed back.
+-- | More generic 'parseEchoText', which accepts arbitrary parser. But result
+-- is restricted to 'Text' and this function is intended just for a little
+-- more sophisticated command echo and cmd prompt parsing.
+parseEcho :: A.Parser T.Text -- ^ Parser for command output.
               -> TelnetCmd a b T.Text
-parseEcho'2 eP = shiftW $ \(k, ts) -> do
+parseEcho echoParser = shiftW $ \(k, ts) -> do
     liftIO $ print $ "Parse echo with parser"
     stRef <- asks telnetRef
     st    <- liftIO (readIORef stRef)
-    let echoParser :: T.Text -> A.Result T.Text
-        echoParser = maybe (A.parse eP) A.feed (telnetEchoResult st)
-    case echoParser ts of
+    case maybe (A.parse echoParser) A.feed (telnetEchoResult st) ts of
       r@(A.Partial _) -> do
         liftIO $ print "Partial result.."
         liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just r}, ()))
@@ -252,33 +206,14 @@ runCmd ts cmd = do
       Nothing -> liftIO (putStrLn "Start cmd.")  >> cmd ts
       Just c  -> liftIO (putStrLn "Continue cmd.") >> lift (c ts)
 
-userNamePromptP :: PromptParser ()
-userNamePromptP ts
-  | "Username:" `T.isInfixOf` ts
-                        = Final   { parserResult = Just ()
-                                  , unparsedText_ = snd $ T.breakOnEnd "Username:" ts
-                                  }
-  | "User Name:" `T.isInfixOf` ts
-                        = Final   { parserResult = Just ()
-                                  , unparsedText_ = snd $ T.breakOnEnd "User Name:" ts
-                                  }
-  | otherwise           = Partial { parserResult = Just () }
-
-passwordPromptP :: PromptParser ()
-passwordPromptP ts
-  | "Password:" `T.isInfixOf` ts = Final    { parserResult = Just ()
-                                            , unparsedText_ = snd $ T.breakOnEnd "Password:" ts
-                                            }
-  | otherwise                    = Partial  { parserResult = Just () }
-
-userNamePromptP' :: A.Parser T.Text
-userNamePromptP' =
+userNamePromptP :: A.Parser T.Text
+userNamePromptP =
     let nameP = A.string "Username:" <|> A.string "User name:"
     in  A.manyTill (A.takeTill A.isEndOfLine *> A.endOfLine) (A.lookAhead nameP)
         *> nameP
 
-passwordPromptP' :: A.Parser T.Text
-passwordPromptP' = (A.endOfLine <|> pure ()) *> A.string "Password:"
+passwordPromptP :: A.Parser T.Text
+passwordPromptP = (A.endOfLine <|> pure ()) *> A.string "Password:"
 
 checkRootP :: TelnetParser b
 checkRootP ts m
@@ -296,14 +231,11 @@ loginCmd ts0 = shiftT $ \finish -> do
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
-      --sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
-      sendParseWithPrompt' userNamePromptP' (flip Final) (defCmd user) >>=
-      --sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
-      sendParseWithPrompt' passwordPromptP' (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
+      sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
+      sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
       setPrompt telnetPromptP >>=
       sendCmd (defCmd "enable") >>=
-      --sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
-      sendParseWithPrompt' passwordPromptP' checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
+      sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
 
 telnetPromptP :: PromptParser T.Text
