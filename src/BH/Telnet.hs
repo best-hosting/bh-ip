@@ -42,6 +42,7 @@ import Control.Applicative
 
 import qualified Network.Telnet.LibTelnet as TL
 import qualified Data.Attoparsec.Text as A
+import qualified Data.Attoparsec.Combinator as A
 
 import BH.Switch
 
@@ -271,7 +272,10 @@ passwordPromptP ts
   | otherwise                    = Partial  { parserResult = Just () }
 
 userNamePromptP' :: A.Parser T.Text
-userNamePromptP' = (A.endOfLine <|> pure ()) *> (A.string "Username:" <|> A.string "User name:")
+userNamePromptP' =
+    let nameP = A.string "Username:" <|> A.string "User name:"
+    in  A.manyTill (A.takeTill A.isEndOfLine *> A.endOfLine) (A.lookAhead nameP)
+        *> nameP
 
 passwordPromptP' :: A.Parser T.Text
 passwordPromptP' = (A.endOfLine <|> pure ()) *> A.string "Password:"
@@ -295,7 +299,7 @@ loginCmd ts0 = shiftT $ \finish -> do
       --sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
       sendParseWithPrompt' userNamePromptP' (flip Final) (defCmd user) >>=
       --sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
-      sendParseWithPrompt' passwordPromptP' checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
+      sendParseWithPrompt' passwordPromptP' (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
       setPrompt telnetPromptP >>=
       sendCmd (defCmd "enable") >>=
       --sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
