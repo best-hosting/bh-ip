@@ -148,6 +148,8 @@ executable t2
     , text
     , case-insensitive
     , parser-combinators
+    , mtl
+    , containers
   default-language: Haskell2010
 
 test-suite bh-ip-test
