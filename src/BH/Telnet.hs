@@ -244,8 +244,8 @@ loginCmd ts0 = shiftT $ \finish -> do
     pure ts0 >>=
       sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
       sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
-      --setPrompt' telnetPromptP' >>=
-      setPrompt telnetPromptP >>=
+      setPrompt' telnetPromptP' >>=
+      --setPrompt telnetPromptP >>=
       sendCmd (defCmd "enable") >>=
       sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
@@ -306,19 +306,25 @@ setPrompt pp t0 = do
       )
 
 setPrompt' :: A.Parser T.Text -> TelnetCmd a b T.Text
-setPrompt' promptP t0 = do
-    liftIO $ putStrLn "setPrompt start."
-    st <- asks telnetRef
-    liftIO $ atomicModifyIORef st (\x -> (x{telnetPrompt = T.empty}, ()))
-    pure t0 >>=
-      shiftW (\(k, ts) -> do
-        saveResume k
-        prompt <- parseEcho promptP ts
-        st <- asks telnetRef
-        liftIO $ atomicModifyIORef st (\x -> (x{telnetPrompt = prompt}, ()))
-        liftIO $ print $ "tut: " <> prompt
-      ) >>=
-      shiftW (\(k, ts) -> saveResume k)
+setPrompt' promptP = go <=< resetPrompt
+  where
+    resetPrompt :: TelnetCmd a b T.Text
+    resetPrompt = shiftW $ \(k, ts) -> do
+      liftIO $ putStrLn "Reset old telnet prompt.."
+      stRef <- asks telnetRef
+      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = T.empty}, ()))
+    go :: TelnetCmd a b T.Text
+    go = shiftW $ \(k, ts) -> do
+      prompt <- parseEcho promptP ts
+      stRef <- asks telnetRef
+      st    <- liftIO (readIORef stRef)
+      case telnetEchoResult st of
+        Just (A.Done _ prompt) -> do
+          liftIO $ print $ "Set prompt to: " <> prompt
+          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = prompt}, ()))
+          saveResume k
+          lift (k ts)
+        otherwise -> error "Huh?"
 
 runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 runTill input telnetCmd p = do
