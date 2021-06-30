@@ -125,30 +125,37 @@ parseEchoText :: T.Text -- ^ Text, which i expect to be echoed back.
               -> TelnetCmd a b T.Text
 parseEchoText echoTxt ts = do
     liftIO $ print $ "Parsing echo text: '" <> echoTxt <> "'"
-    parseEcho (A.string echoTxt) ts
+    parseEcho (A.string echoTxt <* A.endOfLine) ts
 
 -- | More generic 'parseEchoText', which accepts arbitrary parser. But result
 -- is restricted to 'Text' and this function is intended just for a little
 -- more sophisticated command echo and cmd prompt parsing.
 parseEcho :: A.Parser T.Text -- ^ Parser for command output.
               -> TelnetCmd a b T.Text
-parseEcho echoParser = shiftW $ \(k, ts) -> do
-    liftIO $ print $ "Parse echo text with parser"
-    stRef <- asks telnetRef
-    st    <- liftIO (readIORef stRef)
-    case maybe (A.parse echoParser) A.feed (telnetEchoResult st) ts of
-      r@(A.Partial _) -> do
-        liftIO $ print "Partial result.."
-        liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just r}, ()))
-      A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
-      A.Done unparsedTxt r -> do
-        -- FIXME: Probably, i should leave result as is. And just be careful
-        -- to reset it before next run.
-        liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Nothing}, ()))
-        saveResume k
-        liftIO $ print $ "Parsed echoed cmd: '" <> r <> "'"
-        liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
-        lift (k unparsedTxt)
+parseEcho echoParser = go <=< resetResult
+  where
+    resetResult :: TelnetCmd a b T.Text
+    resetResult = shiftW $ \(k, ts) -> do
+      liftIO $ print $ "Reset echo parser result.."
+      stRef <- asks telnetRef
+      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Nothing}, ()))
+      saveResume k
+      lift (k ts)
+    go :: TelnetCmd a b T.Text
+    go = shiftW $ \(k, ts) -> do
+      liftIO $ print $ "Parse echo text with parser"
+      stRef <- asks telnetRef
+      st    <- liftIO (readIORef stRef)
+      case maybe (A.parse echoParser) A.feed (telnetEchoResult st) ts of
+        r@(A.Partial _) -> do
+          liftIO $ print "Partial result.."
+          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just r}, ()))
+        A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
+        A.Done unparsedTxt r -> do
+          liftIO $ print $ "Parsed echoed cmd: '" <> r <> "'"
+          liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
+          saveResume k
+          lift (k unparsedTxt)
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
 type PromptParser b = T.Text -> ParserResult b
@@ -237,7 +244,8 @@ loginCmd ts0 = shiftT $ \finish -> do
     pure ts0 >>=
       sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
       sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
-      setPrompt' telnetPromptP' >>=
+      --setPrompt' telnetPromptP' >>=
+      setPrompt telnetPromptP >>=
       sendCmd (defCmd "enable") >>=
       sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
