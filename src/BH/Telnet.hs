@@ -124,7 +124,7 @@ sendParseWithPrompt promptP f TelCmd {cmdText = cmd, cmdEcho = ce} t0 =
 parseEchoText :: T.Text -- ^ Text, which i expect to be echoed back.
               -> TelnetCmd a b T.Text
 parseEchoText echoTxt ts = do
-    liftIO $ print $ "Parsing echo cmd: '" <> echoTxt <> "'"
+    liftIO $ print $ "Parsing echo text: '" <> echoTxt <> "'"
     parseEcho (A.string echoTxt) ts
 
 -- | More generic 'parseEchoText', which accepts arbitrary parser. But result
@@ -133,7 +133,7 @@ parseEchoText echoTxt ts = do
 parseEcho :: A.Parser T.Text -- ^ Parser for command output.
               -> TelnetCmd a b T.Text
 parseEcho echoParser = shiftW $ \(k, ts) -> do
-    liftIO $ print $ "Parse echo with parser"
+    liftIO $ print $ "Parse echo text with parser"
     stRef <- asks telnetRef
     st    <- liftIO (readIORef stRef)
     case maybe (A.parse echoParser) A.feed (telnetEchoResult st) ts of
@@ -141,12 +141,12 @@ parseEcho echoParser = shiftW $ \(k, ts) -> do
         liftIO $ print "Partial result.."
         liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just r}, ()))
       A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
-      A.Done unparsedTx r -> do
+      A.Done unparsedTxt r -> do
         liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Nothing}, ()))
         saveResume k
         liftIO $ print $ "Parsed echoed cmd: '" <> r <> "'"
-        liftIO $ print $ "Unparsed text left: '" <> unparsedTx <> "'"
-        lift (k unparsedTx)
+        liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
+        lift (k unparsedTxt)
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
 type PromptParser b = T.Text -> ParserResult b
@@ -206,12 +206,14 @@ runCmd ts cmd = do
       Nothing -> liftIO (putStrLn "Start cmd.")  >> cmd ts
       Just c  -> liftIO (putStrLn "Continue cmd.") >> lift (c ts)
 
+-- | FIXME: Rename to userNameP
 userNamePromptP :: A.Parser T.Text
 userNamePromptP =
     let nameP = A.string "Username:" <|> A.string "User name:"
     in  A.manyTill (A.takeTill A.isEndOfLine *> A.endOfLine) (A.lookAhead nameP)
         *> nameP
 
+-- | FIXME: Rename to passwordP .
 passwordPromptP :: A.Parser T.Text
 passwordPromptP = (A.endOfLine <|> pure ()) *> A.string "Password:"
 
@@ -233,7 +235,7 @@ loginCmd ts0 = shiftT $ \finish -> do
     pure ts0 >>=
       sendParseWithPrompt userNamePromptP (flip Final) (defCmd user) >>=
       sendParseWithPrompt passwordPromptP (flip Final) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
-      setPrompt telnetPromptP >>=
+      setPrompt' telnetPromptP' >>=
       sendCmd (defCmd "enable") >>=
       sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
       lift . finish
@@ -252,6 +254,23 @@ telnetPromptP ts
   | otherwise   = Partial { parserResult = Just T.empty }
   where
     prompt = T.init . last . T.lines $ ts
+
+-- | Prompt parser, which is _not_ consuming prompt itself.
+telnetPromptP' :: A.Parser T.Text
+telnetPromptP' = go
+  where
+    notEndOfPrompt :: Char -> Bool
+    notEndOfPrompt = (&&) <$> (not . A.isEndOfLine) <*> (`notElem` ['#', '>'])
+    -- FIXME: Strictly speaking, i need '<* A.endOfInput' at the end. But then
+    -- to obtain 'Done' result i need to explicitly finalize parsing by
+    -- passing empty input. Without '<* A.endOfInput' i may match chars in the
+    -- middle.. So, to really fix this, i need to either signal somehow the
+    -- _last_ chunk of input or just restart entire cycle with empty input,
+    -- when input end is reached.
+    go :: A.Parser T.Text
+    --go  = A.lookAhead (A.takeWhile1 notEndOfPrompt <* (A.char '#' <|> A.char '>') <* A.endOfInput)
+    go  = A.lookAhead (A.takeWhile1 notEndOfPrompt <* (A.char '#' <|> A.char '>'))
+          <|> A.takeTill A.isEndOfLine *> A.endOfLine *> go
 
 setPrompt :: PromptParser T.Text -> TelnetCmd a b T.Text
 setPrompt pp t0 = do
@@ -275,6 +294,21 @@ setPrompt pp t0 = do
             lift (k ys)
           else liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = promptTxt}, ()))
       )
+
+setPrompt' :: A.Parser T.Text -> TelnetCmd a b T.Text
+setPrompt' promptP t0 = do
+    liftIO $ putStrLn "setPrompt start."
+    st <- asks telnetRef
+    liftIO $ atomicModifyIORef st (\x -> (x{telnetPrompt = T.empty}, ()))
+    pure t0 >>=
+      shiftW (\(k, ts) -> do
+        saveResume k
+        prompt <- parseEcho promptP ts
+        st <- asks telnetRef
+        liftIO $ atomicModifyIORef st (\x -> (x{telnetPrompt = prompt}, ()))
+        liftIO $ print $ "tut: " <> prompt
+      ) >>=
+      shiftW (\(k, ts) -> saveResume k)
 
 runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 runTill input telnetCmd p = do
