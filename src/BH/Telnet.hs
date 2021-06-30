@@ -142,6 +142,8 @@ parseEcho echoParser = shiftW $ \(k, ts) -> do
         liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just r}, ()))
       A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
       A.Done unparsedTxt r -> do
+        -- FIXME: Probably, i should leave result as is. And just be careful
+        -- to reset it before next run.
         liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Nothing}, ()))
         saveResume k
         liftIO $ print $ "Parsed echoed cmd: '" <> r <> "'"
