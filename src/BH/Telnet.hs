@@ -318,16 +318,16 @@ setPrompt' promptP = go <=< resetPrompt
     go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
       liftIO $ print $ "Start parsing new prompt.."
-      prompt <- parseEcho promptP ts
+      unparsedTxt <- parseEcho promptP ts
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
       case telnetEchoResult st of
         Just (A.Done _ prompt) -> do
           liftIO $ print $ "Set prompt to: " <> prompt
           liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = prompt}, ()))
-          saveResume k
-          lift (k ts)
         otherwise -> error "Huh?"
+      saveResume k
+      lift (k unparsedTxt)
 
 runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 runTill input telnetCmd p = do
