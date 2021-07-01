@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GADTs #-}
 
 module BH.Telnet
     ( TelCmd (..)
@@ -49,12 +50,16 @@ import BH.Switch
 
 type TelnetCmd a b c = T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
+data PResult a   = TextResult {getPResult :: A.IResult T.Text T.Text}
+                 | AnyResult  {getPResult :: A.IResult T.Text a}
+
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
                             , telnetEchoResult :: Maybe (A.IResult T.Text T.Text)
                             , telnetOutputResult :: Maybe (A.IResult T.Text b)
+                            , telnetPResult :: Maybe (PResult b)
                             , telnetPrompt  :: T.Text
                             }
 
@@ -229,6 +234,33 @@ parseOutput echoParser = go <=< resetResult
       st    <- liftIO (readIORef stRef)
       let res = maybe (A.parse echoParser) A.feed (telnetOutputResult st) ts
       liftIO $ atomicModifyIORef stRef (\x -> (x{telnetOutputResult = Just res}, ()))
+      case res of
+        A.Partial _ -> liftIO $ print "Partial result.."
+        A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
+        A.Done unparsedTxt _ -> do
+          liftIO $ print $ "Finished output parsing"
+          liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
+          saveResume k
+          lift (k unparsedTxt)
+
+parseOutput2 :: A.Parser c -- ^ Parser for command output.
+              -> TelnetCmd a b T.Text
+parseOutput2 echoParser = go <=< resetResult
+  where
+    --resetResult :: TelnetCmd a b T.Text
+    resetResult = shiftW $ \(k, ts) -> do
+      liftIO $ print $ "Reset OUTPUT parser result.."
+      stRef <- asks telnetRef
+      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPResult = Nothing}, ()))
+      saveResume k
+      lift (k ts)
+    --go :: TelnetCmd a b T.Text
+    go = shiftW $ \(k, ts) -> do
+      liftIO $ print $ "Parsing OUTPUT.."
+      stRef <- asks telnetRef
+      st    <- liftIO (readIORef stRef)
+      let res = maybe (A.parse echoParser) A.feed (getPResult <$> telnetPResult st) ts
+      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPResult = Just res}, ()))
       case res of
         A.Partial _ -> liftIO $ print "Partial result.."
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
