@@ -143,16 +143,16 @@ parseEcho echoParser = go <=< resetResult
       lift (k ts)
     go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Parse echo text with parser"
+      liftIO $ print $ "Parsing echo.."
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
+      let res = maybe (A.parse echoParser) A.feed (telnetEchoResult st) ts
+      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just res}, ()))
       case maybe (A.parse echoParser) A.feed (telnetEchoResult st) ts of
-        r@(A.Partial _) -> do
-          liftIO $ print "Partial result.."
-          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetEchoResult = Just r}, ()))
+        A.Partial _ -> liftIO $ print "Partial result.."
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
-        A.Done unparsedTxt r -> do
-          liftIO $ print $ "Parsed echoed cmd: '" <> r <> "'"
+        A.Done unparsedTxt parsedTxt -> do
+          liftIO $ print $ "Parsed echoed text: '" <> parsedTxt <> "'"
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
           saveResume k
           lift (k unparsedTxt)
@@ -313,8 +313,11 @@ setPrompt' promptP = go <=< resetPrompt
       liftIO $ putStrLn "Reset old telnet prompt.."
       stRef <- asks telnetRef
       liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = T.empty}, ()))
+      saveResume k
+      lift (k ts)
     go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
+      liftIO $ print $ "Start parsing new prompt.."
       prompt <- parseEcho promptP ts
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
