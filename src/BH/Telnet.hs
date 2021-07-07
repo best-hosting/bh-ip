@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 
 module BH.Telnet
     ( TelCmd (..)
@@ -45,23 +46,30 @@ import qualified Network.Telnet.LibTelnet as TL
 import qualified Data.Attoparsec.Text as A
 import qualified Data.Attoparsec.Combinator as A
 
+import BH.Common
 import BH.Switch
 
 
 type TelnetCmd a b c = T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
-data PResult a   = TextResult {getPResult :: A.IResult T.Text T.Text}
-                 | AnyResult  {getPResult :: A.IResult T.Text a}
+{-data PResult a   = TextResult {getPResult :: A.IResult T.Text T.Text}
+                 | AnyResult  {getPResult :: A.IResult T.Text a}-}
 
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
-                            , telnetEchoResult :: Maybe (A.IResult T.Text T.Text)
+                            , telnetEchoResult   :: Maybe (A.IResult T.Text T.Text)
                             , telnetOutputResult :: Maybe (A.IResult T.Text b)
-                            , telnetPResult :: Maybe (PResult b)
+                            --, telnetPResult :: Maybe (PResult b)
                             , telnetPrompt  :: T.Text
                             }
+
+telnetEchoResultL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text T.Text))
+telnetEchoResultL g z@TelnetState{telnetEchoResult = x} = (\x' -> z{telnetEchoResult = x'}) <$> g x
+
+telnetOutputResultL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text b))
+telnetOutputResultL g z@TelnetState{telnetOutputResult = x} = (\x' -> z{telnetOutputResult = x'}) <$> g x
 
 defTelnetState :: TelnetState a b
 defTelnetState  = TelnetState { telnetResume = Nothing
@@ -138,7 +146,8 @@ parseEchoText echoTxt ts = do
 -- more sophisticated command echo and cmd prompt parsing.
 parseEcho :: A.Parser T.Text -- ^ Parser for command output.
               -> TelnetCmd a b T.Text
-parseEcho echoParser = go <=< resetResult
+parseEcho = parseOutputL telnetEchoResultL
+{-parseEcho echoParser = go <=< resetResult
   where
     -- FIXME: Use 'shiftT', because 'resetResult' does not do anything with
     -- text.
@@ -163,7 +172,7 @@ parseEcho echoParser = go <=< resetResult
           liftIO $ print $ "Parsed echoed text: '" <> parsedTxt <> "'"
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
           saveResume k
-          lift (k unparsedTxt)
+          lift (k unparsedTxt)-}
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
 
@@ -207,7 +216,7 @@ parseCmd' f = shiftW $ \(k, ts) ->do
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
       let cmdParser = f (telnetResult st)
-      unparsedTxt <- shiftT (\h -> saveResume h >> lift (h ts)) >>= parseOutput cmdParser
+      unparsedTxt <- shiftT (\h -> saveResume h >> lift (h ts)) >>= parseOutputL telnetOutputResultL cmdParser
       case telnetOutputResult st of
         Just (A.Done _ res) -> do
           liftIO $ print $ "Saving telnet OUTPUT result"
@@ -216,24 +225,26 @@ parseCmd' f = shiftW $ \(k, ts) ->do
       saveResume k
       lift (k unparsedTxt)
 
-parseOutput :: A.Parser b -- ^ Parser for command output.
-              -> TelnetCmd a b T.Text
-parseOutput echoParser = go <=< resetResult
+parseOutputL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
+                -> A.Parser c -- ^ Parser for command output.
+                -> TelnetCmd a b T.Text
+parseOutputL l echoParser = go <=< resetResult
   where
     --resetResult :: TelnetCmd a b T.Text
     resetResult = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Reset OUTPUT parser result.."
+      liftIO $ print $ "Reset parser result.."
       stRef <- asks telnetRef
-      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetOutputResult = Nothing}, ()))
+      -- FIXME: Change atomicModifyIORef to atomicWriteIORef ?
+      liftIO $ atomicModifyIORef stRef (\s -> (setL l Nothing s, ()))
       saveResume k
       lift (k ts)
     --go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Parsing OUTPUT.."
+      liftIO $ print $ "Parsing.."
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
-      let res = maybe (A.parse echoParser) A.feed (telnetOutputResult st) ts
-      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetOutputResult = Just res}, ()))
+      let res = maybe (A.parse echoParser) A.feed (getL l st) ts
+      liftIO $ atomicModifyIORef stRef (\s -> (setL l (Just res) s, ()))
       case res of
         A.Partial _ -> liftIO $ print "Partial result.."
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
@@ -242,34 +253,6 @@ parseOutput echoParser = go <=< resetResult
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
           saveResume k
           lift (k unparsedTxt)
-
-parseOutput2 :: A.Parser c -- ^ Parser for command output.
-              -> TelnetCmd a b T.Text
-parseOutput2 echoParser = go <=< resetResult
-  where
-    --resetResult :: TelnetCmd a b T.Text
-    resetResult = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Reset OUTPUT parser result.."
-      stRef <- asks telnetRef
-      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPResult = Nothing}, ()))
-      saveResume k
-      lift (k ts)
-    --go :: TelnetCmd a b T.Text
-    go = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Parsing OUTPUT.."
-      stRef <- asks telnetRef
-      st    <- liftIO (readIORef stRef)
-      let res = maybe (A.parse echoParser) A.feed (getPResult <$> telnetPResult st) ts
-      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPResult = Just res}, ()))
-      case res of
-        A.Partial _ -> liftIO $ print "Partial result.."
-        A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
-        A.Done unparsedTxt _ -> do
-          liftIO $ print $ "Finished output parsing"
-          liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
-          saveResume k
-          lift (k unparsedTxt)
-
 
 sendExit :: TelnetCmd a b ()
 sendExit = (\_ -> pure ()) <=< sendCmd (defCmd "exit")
