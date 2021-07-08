@@ -13,6 +13,7 @@ module BH.Switch
     , SwConfig
     , MacIpMap
     , PortMap
+    , parseMacAddrTable
     )
   where
 
@@ -117,7 +118,7 @@ t2 = do
 tA :: IO ()
 tA = do
     c <- readFile "1.tmp"
-    case A.parse parseMacAddrTableA (T.pack c) of
+    case A.parse parseMacAddrTable (T.pack c) of
       A.Fail c xs ys -> do
         print "Huyita"
         print c
@@ -300,8 +301,8 @@ topHeaderA = A.takeWhile1 A.isHorizontalSpace
     <* A.skipSpace
     A.<?> "top header"
 
-parseMacAddrTableA :: A.Parser [PortInfoEl]
-parseMacAddrTableA = do
+parseMacAddrTable :: A.Parser [PortInfoEl]
+parseMacAddrTable = do
     optional topHeaderA
     portNumP <- symbolA "Vlan" *> symbolA "Mac Address"
       *> (      symbolA "Type"  *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> parsePortNumA)
@@ -311,4 +312,8 @@ parseMacAddrTableA = do
     many $ A.takeWhile A.isHorizontalSpace
       *> (PortInfoEl <$> parseVlanA <*> parseMacAddressA <*> portNumP)
       <* (void A.endOfLine <|> A.endOfInput)
+-- FIXME: end of input termination is probably wrong, because attoparsec may
+-- run on whole stream. Probably, it's better to terminate at prompt or smth
+-- similar. Or just at end of line. After all, prompt must always be after
+-- table and prompt itself won't match with 'many'.
 

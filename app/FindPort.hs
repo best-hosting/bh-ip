@@ -3,6 +3,7 @@
 
 module Main where
 
+import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Control.Monad.IO.Class
@@ -46,6 +47,33 @@ findPort t0 = do
                             else Final (pure (M.singleton sn xs)) (last $ T.lines ts)
     sendAndParse parse (defCmd $ "show mac address-table address " <> T.pack (show mac)) t0 >>=
       sendExit
+
+findPortA :: TelnetCmd MacAddr (M.Map SwName [PortNum]) ()
+findPortA t0 = do
+    mac <- asks telnetIn
+    sn  <- asks (swName . switchInfo)
+    -- FIXME: Continue, if no mac was found. Current version will hang up due
+    -- to 'Partial' result.
+    -- I may parse 'Fa0/9' as complete type, like PortNum. But 'sw-1/9' parse
+    -- as SwName, then lookup default port spec and parse '9' as 'PortNum'
+    -- using default port spec.
+    let parse mz = (fromMaybe [] mz :) parseMacAddrTable
+    let parse ts _ = let xs = A.parseOnly ts
+                     in  if null xs
+                            then Partial mempty
+                            else Final (pure (M.singleton sn xs)) (last $ T.lines ts)
+    sendAndParseA parseMacAddrTable (defCmd $ "show mac address-table address " <> T.pack (show mac)) t0 >>= sendExit
+    st    <- liftIO (readIORef stRef)
+    let res = maybe (A.parse p) A.feed (getL l st) ts
+    liftIO $ atomicModifyIORef stRef (\s -> (setL l (Just res) s, ()))
+    case res of
+      A.Partial _ -> liftIO $ print "Partial result.."
+      A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
+      A.Done unparsedTxt _ -> do
+        liftIO $ print $ "Finished output parsing"
+        liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
+        saveResume k
+        lift (k unparsedTxt)
 
 main :: IO ()
 main    = do

@@ -15,6 +15,7 @@ module BH.Telnet
     , sendCmd
     , parseCmd
     , sendAndParse
+    , sendAndParseA
     , sendExit
     , run
     , runOn
@@ -55,6 +56,7 @@ type TelnetCmd a b c = T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 {-data PResult a   = TextResult {getPResult :: A.IResult T.Text T.Text}
                  | AnyResult  {getPResult :: A.IResult T.Text a}-}
 
+-- FIXME: Use A.Result instead of A.IResult.
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
@@ -76,6 +78,7 @@ defTelnetState  = TelnetState { telnetResume = Nothing
                               , telnetResult = Nothing
                               , tInt = 0
                               , telnetEchoResult = Nothing
+                              , telnetOutputResult = Nothing
                               -- ^ Input already read for checking command echo.
                               , telnetPrompt = T.empty
                               }
@@ -117,6 +120,13 @@ sendAndParse f cmd t0 = do
     -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed.
     sendParseWithPrompt ((A.endOfLine <|> pure ()) *> A.string (telnetPrompt st)) f cmd t0
 
+sendAndParseA :: A.Parser b -> TelCmd -> TelnetCmd a b T.Text
+sendAndParseA p cmd t0 = do
+    stRef <- asks telnetRef
+    st <- liftIO (readIORef stRef)
+    -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed.
+    sendParseWithPromptA ((A.endOfLine <|> pure ()) *> A.string (telnetPrompt st)) p cmd t0
+
 sendParseWithPrompt :: A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
@@ -134,6 +144,24 @@ sendParseWithPrompt promptP f TelCmd {cmdText = cmd, cmdEcho = ce} t0 =
           else return ts
     ) >>=
     parseCmd f
+
+sendParseWithPromptA :: A.Parser T.Text
+                        -- ^ Cmd prompt parser.
+                        -> A.Parser b -> TelCmd -> TelnetCmd a b T.Text
+sendParseWithPromptA promptP p TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
+    liftIO (putStrLn "sendParseWithPrompt: ") >>
+    parseEcho promptP t0 >>=
+    shiftW (\(k, _) -> do
+        con  <- asks telnetConn
+        liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
+        saveResume k
+      ) >>=
+    (\ts ->
+        if ce
+          then parseEchoText cmd ts
+          else return ts
+    ) >>=
+    parseOutputL2 telnetOutputResultL p
 
 parseEchoText :: T.Text -- ^ Text, which i expect to be echoed back.
               -> TelnetCmd a b T.Text
@@ -175,6 +203,7 @@ parseEcho = parseOutputL telnetEchoResultL
           lift (k unparsedTxt)-}
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
+type TelnetParserA b = Maybe b -> A.Parser b
 
 -- I need 'Maybe' in 'parserResult' here to unbind parser state (finished or
 -- not) from actual result state (obtained or not). With 'Maybe' these are two
@@ -210,8 +239,8 @@ parseCmd f = shiftW $ \(k, ts) -> do
         lift $ k ys
       else liftIO $ putStrLn "Retry parsing.."
 
-parseCmd' :: (Maybe b -> A.Parser b) -> TelnetCmd a b T.Text
-parseCmd' f = shiftW $ \(k, ts) ->do
+parseCmd' :: (b -> Maybe b) -> A.Parser b -> TelnetCmd a b T.Text
+parseCmd' f p = shiftW $ \(k, ts) ->do
       liftIO $ print $ "Make cmd result parser.."
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
@@ -228,7 +257,7 @@ parseCmd' f = shiftW $ \(k, ts) ->do
 parseOutputL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
                 -> A.Parser c -- ^ Parser for command output.
                 -> TelnetCmd a b T.Text
-parseOutputL l echoParser = go <=< resetResult
+parseOutputL l p = go <=< resetResult
   where
     --resetResult :: TelnetCmd a b T.Text
     resetResult = shiftW $ \(k, ts) -> do
@@ -243,7 +272,7 @@ parseOutputL l echoParser = go <=< resetResult
       liftIO $ print $ "Parsing.."
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
-      let res = maybe (A.parse echoParser) A.feed (getL l st) ts
+      let res = maybe (A.parse p) A.feed (getL l st) ts
       liftIO $ atomicModifyIORef stRef (\s -> (setL l (Just res) s, ()))
       case res of
         A.Partial _ -> liftIO $ print "Partial result.."
