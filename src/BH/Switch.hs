@@ -113,6 +113,18 @@ t2 = do
       Left err -> putStrLn (errorBundlePretty err)
       Right ts -> print ts
 
+tA :: IO ()
+tA = do
+    c <- readFile "1.tmp"
+    case A.parse parseMacAddrTableA (T.pack c) of
+      A.Fail c xs ys -> do
+        print "Huyita"
+        print c
+        print xs
+        print ys
+      A.Partial _ -> print "Partial"
+      A.Done rs res -> print "Done" >> print res >> print rs
+
 data PortInfoEl = PortInfoEl { elVlan :: Int
                              , elMac  :: T.Text
                              , elPort :: PortNum2
@@ -268,44 +280,54 @@ parseMacAddrTable3 = do
       *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
       <* (void eol <|> eof)
 
-topHeader4 :: A.Parser T.Text
-topHeader4  = A.takeWhile1 A.isHorizontalSpace
+symbolA :: T.Text -> A.Parser T.Text
+symbolA   = lexemeA . A.string
+
+lexemeA :: A.Parser a -> A.Parser a
+lexemeA p = p <* A.takeWhile A.isHorizontalSpace
+
+parseVlanA :: A.Parser Int
+parseVlanA  = lexemeA $ do
+      v <- lexemeA A.decimal A.<?> "vlan number"
+      if v < 4096
+        then return v
+        else fail "Nihuya sebe vlan"
+
+-- FIXME: Rewrite with 'count'
+parseMacAddressA :: A.Parser T.Text
+parseMacAddressA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
+                   in  lexemeA (A.takeWhile1 isMacChars) A.<?> "mac address"
+
+parsePortNumA :: A.Parser PortNum2
+parsePortNumA    = lexemeA
+    $ ( PortNum2
+        <$> (symbolA "Fa0" *> pure FastEthernet <|> symbolA "Gi0" *> pure GigabitEthernet)
+        <*> (symbolA "/" *> A.decimal)
+        A.<?> "port number"
+      )
+
+-- | Dashes underlining header of _one_ column. Trailing spaces are consumed,
+-- but newline does _not_ .
+dashLineA :: A.Parser T.Text
+dashLineA = A.takeWhile1 (== '-') <* A.takeWhile A.isHorizontalSpace
+            A.<?> "column header dash lines for one column"
+
+topHeaderA :: A.Parser T.Text
+topHeaderA = A.takeWhile1 A.isHorizontalSpace
     *> A.string "Mac Address Table" <* A.endOfLine
-    <* dashLine4 <* A.endOfLine
+    <* dashLineA <* A.endOfLine
     <* A.skipSpace
     A.<?> "top header"
 
-dashLine4 :: A.Parser T.Text
-dashLine4 = lexemeA (A.takeWhile1 (== '-'))
-            A.<?> "column header dash lines for one column"
-
-symbolA :: T.Text -> A.Parser T.Text
-symbolA t = A.string t <* A.takeWhile1 A.isHorizontalSpace
-
-lexemeA :: A.Parser a -> A.Parser a
-lexemeA p = p <* A.takeWhile1 A.isHorizontalSpace
-
-parseMacAddrTable4 :: A.Parser [PortInfoEl]
-parseMacAddrTable4 = do
-    optional topHeader4
+parseMacAddrTableA :: A.Parser [PortInfoEl]
+parseMacAddrTableA = do
+    optional topHeaderA
     portNumP <- symbolA "Vlan" *> symbolA "Mac Address"
-      *> (  try (symbolA "Type"  *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> parsePortNum))
-            <|>  symbolA "Ports" *> symbolA "Type"  *> pure (parsePortNum <* symbolA "DYNAMIC")
+      *> (      symbolA "Type"  *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> parsePortNumA)
+            <|> symbolA "Ports" *> symbolA "Type"  *> pure (parsePortNumA <* symbolA "DYNAMIC")
          ) <* A.endOfLine
-      <* count 4 dashLine <* eol
-    many $ hspace
-      *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
-      <* (void eol <|> eof)
-    return []
-
-{-
-    optional topHeader
-    portNumP <- symbol "Vlan" *> symbol "Mac Address"
-      *> (  try (symbol "Type"  *> symbol "Ports" *> pure (symbol "DYNAMIC" *> parsePortNum))
-            <|>  symbol "Ports" *> symbol "Type"  *> pure (parsePortNum <* symbol "DYNAMIC")
-         ) <* eol
-      <* count 4 dashLine <* eol
-    many $ hspace
-      *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
-      <* (void eol <|> eof)-}
+      <* A.count 4 dashLineA <* A.endOfLine
+    many $ A.takeWhile A.isHorizontalSpace
+      *> (PortInfoEl <$> parseVlanA <*> parseMacAddressA <*> portNumP)
+      <* (void A.endOfLine <|> A.endOfInput)
 
