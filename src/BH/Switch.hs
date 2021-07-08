@@ -257,7 +257,7 @@ parseMacAddrTable2 = parseTable defaultPortInfoEl macAddrTableColumns
 -- | Another (simpler) mac table parsing variant.
 parseMacAddrTable3 :: Parser [PortInfoEl]
 parseMacAddrTable3 = do
-    let dashLine = lexeme $ takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
+    let dashLine = lexeme $ takeWhile1P (Just "column header dash lines for one column") (== '-')
     optional topHeader
     portNumP <- symbol "Vlan" *> symbol "Mac Address"
       *> (  try (symbol "Type"  *> symbol "Ports" *> pure (symbol "DYNAMIC" *> parsePortNum))
@@ -267,4 +267,45 @@ parseMacAddrTable3 = do
     many $ hspace
       *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
       <* (void eol <|> eof)
+
+topHeader4 :: A.Parser T.Text
+topHeader4  = A.takeWhile1 A.isHorizontalSpace
+    *> A.string "Mac Address Table" <* A.endOfLine
+    <* dashLine4 <* A.endOfLine
+    <* A.skipSpace
+    A.<?> "top header"
+
+dashLine4 :: A.Parser T.Text
+dashLine4 = lexemeA (A.takeWhile1 (== '-'))
+            A.<?> "column header dash lines for one column"
+
+symbolA :: T.Text -> A.Parser T.Text
+symbolA t = A.string t <* A.takeWhile1 A.isHorizontalSpace
+
+lexemeA :: A.Parser a -> A.Parser a
+lexemeA p = p <* A.takeWhile1 A.isHorizontalSpace
+
+parseMacAddrTable4 :: A.Parser [PortInfoEl]
+parseMacAddrTable4 = do
+    optional topHeader4
+    portNumP <- symbolA "Vlan" *> symbolA "Mac Address"
+      *> (  try (symbolA "Type"  *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> parsePortNum))
+            <|>  symbolA "Ports" *> symbolA "Type"  *> pure (parsePortNum <* symbolA "DYNAMIC")
+         ) <* A.endOfLine
+      <* count 4 dashLine <* eol
+    many $ hspace
+      *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
+      <* (void eol <|> eof)
+    return []
+
+{-
+    optional topHeader
+    portNumP <- symbol "Vlan" *> symbol "Mac Address"
+      *> (  try (symbol "Type"  *> symbol "Ports" *> pure (symbol "DYNAMIC" *> parsePortNum))
+            <|>  symbol "Ports" *> symbol "Type"  *> pure (parsePortNum <* symbol "DYNAMIC")
+         ) <* eol
+      <* count 4 dashLine <* eol
+    many $ hspace
+      *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
+      <* (void eol <|> eof)-}
 
