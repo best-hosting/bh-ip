@@ -31,7 +31,7 @@ import qualified Text.Megaparsec        as M
 import qualified Text.Megaparsec.Char   as M
 import qualified Text.Megaparsec.Error  as M
 import qualified Text.Megaparsec.Debug  as M
-import qualified Text.Megaparsec.Char.Lexer as L
+import qualified Text.Megaparsec.Char.Lexer as ML
 import Data.Void
 import Data.Char
 import Control.Applicative (Alternative)
@@ -103,14 +103,14 @@ type Parser = M.Parsec Void T.Text
 t :: IO ()
 t = do
     c <- readFile "1.tmp"
-    case M.runParser parseMacAddrTable2 "huy" (T.pack c) of
+    case M.runParser parseMacAddrTableM2 "huy" (T.pack c) of
       Left err -> putStrLn (M.errorBundlePretty err)
       Right ts -> print ts
 
 t2 :: IO ()
 t2 = do
     c <- readFile "1.tmp"
-    case M.runParser parseMacAddrTable3 "huy" (T.pack c) of
+    case M.runParser parseMacAddrTableM "huy" (T.pack c) of
       Left err -> putStrLn (M.errorBundlePretty err)
       Right ts -> print ts
 
@@ -143,29 +143,17 @@ data PortNum2   = PortNum2  { portSpeed :: PortSpeed
 data PortSpeed  = FastEthernet | GigabitEthernet
   deriving (Show)
 
-parseMacAddressTable :: Parser String
-parseMacAddressTable = do
-    let header =
-            M.space1 *> M.string "Mac Address Table" <* M.hspace <* M.newline
-            <* M.takeWhile1P (Just "dashes") (== '-') <* some M.newline
-            <* M.string "Vlan" <* M.hspace1 <* M.string "Mac Address" <* M.hspace1 <* M.string "Type" <* M.hspace1 <* M.string "Ports" <* M.hspace <* M.newline
-            <* M.takeWhile1P (Just "huynya vsyakaya") (`elem` ['-', ' ']) <* M.newline
-    header *> M.hspace1 *> (some M.digitChar <* M.hspace1)
-    *> (some (M.hexDigitChar <|> M.oneOf @[] ":.") <* M.hspace1)
-    *> (M.string "DYNAMIC" <* M.hspace1)
-    *> (foldr (\p r -> (++) <$> p <*> r) (pure [])  [some M.alphaNumChar, T.unpack <$> M.string "/", some M.digitChar] <* M.hspace) <* M.newline
-
 sc :: Parser ()
-sc = L.space M.hspace1 empty empty
+sc = ML.space M.hspace1 empty empty
 
 scn :: Parser ()
-scn = L.space M.space1 empty empty
+scn = ML.space M.space1 empty empty
 
-lexeme :: Parser a -> Parser a
-lexeme  = L.lexeme sc
+lexemeM :: Parser a -> Parser a
+lexemeM  = ML.lexeme sc
 
 symbol :: M.Tokens T.Text -> Parser (M.Tokens T.Text)
-symbol  = L.symbol sc
+symbol  = ML.symbol sc
 
 -- | The same as 'choice', but returns list of _unmatched_ choices.  This may
 -- be used for implementing applying each choice only once.
@@ -185,31 +173,22 @@ choiceEachOnce ps = fix go ps
       | null ps     = pure []
       | otherwise   = choiceOnce ps >>= \(p, zs) -> (p :) <$> rec zs
 
-
-vV' :: Parser T.Text
-vV' = symbol "Vlan" *> pure "Parse vlan"
-vM' :: Parser T.Text
-vM' = symbol "Mac Address" *> pure "Parse mac"
-vP' :: Parser T.Text
-vP' = symbol "Port" *> pure "Parse port"
-
-
 parseVlan :: Parser Int
-parseVlan  = lexeme $ do
+parseVlan  = lexemeM $ do
     o <- M.getOffset
     M.region (M.setErrorOffset o) . M.label "vlan number" $ do
-      v <- lexeme L.decimal
+      v <- lexemeM ML.decimal
       if v < 4096
         then return v
         else fail "Nihuya sebe vlan"
 
 parseMacAddress :: Parser T.Text
-parseMacAddress = lexeme $ M.takeWhile1P (Just "mac address") ((||) <$> isHexDigit <*> (== '.'))
+parseMacAddress = lexemeM $ M.takeWhile1P (Just "mac address") ((||) <$> isHexDigit <*> (== '.'))
 
 parsePortNum :: Parser PortNum2
-parsePortNum    = lexeme $ PortNum2
+parsePortNum    = lexemeM $ PortNum2
     <$> (symbol "Fa0" *> pure FastEthernet <|> symbol "Gi0" *> pure GigabitEthernet)
-    <*> (symbol "/" *> L.decimal)
+    <*> (symbol "/" *> ML.decimal)
 
 columnVlanP :: Parser (PortInfoEl -> Parser PortInfoEl)
 columnVlanP = symbol "Vlan" *> pure (\p -> (\x -> p{elVlan = x}) <$> parseVlan)
@@ -251,7 +230,7 @@ topHeader  = M.hspace1
 parseTableHeader :: [Parser a] -> Parser [a]
 parseTableHeader cols =
     let l = length cols
-        dashLine = lexeme $ M.takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
+        dashLine = lexemeM $ M.takeWhile1P (Just "column header dash lines for _each_ column") (== '-')
     in  optional topHeader
           *> choiceEachOnce cols <* M.eol
           <* M.count l dashLine <* M.eol
@@ -264,13 +243,13 @@ parseTable emptyRow cols = do
     let rowP = M.hspace *> foldl (>>=) (pure emptyRow) cellPs <* (void M.eol <|> M.eof)
     many rowP
 
-parseMacAddrTable2 :: Parser [PortInfoEl]
-parseMacAddrTable2 = parseTable defaultPortInfoEl macAddrTableColumns
+parseMacAddrTableM2 :: Parser [PortInfoEl]
+parseMacAddrTableM2 = parseTable defaultPortInfoEl macAddrTableColumns
 
 -- | Another (simpler) mac table parsing variant.
-parseMacAddrTable3 :: Parser [PortInfoEl]
-parseMacAddrTable3 = do
-    let dashLine = lexeme $ M.takeWhile1P (Just "column header dash lines for one column") (== '-')
+parseMacAddrTableM :: Parser [PortInfoEl]
+parseMacAddrTableM = do
+    let dashLine = lexemeM $ M.takeWhile1P (Just "column header dash lines for one column") (== '-')
     optional topHeader
     portNumP <- symbol "Vlan" *> symbol "Mac Address"
       *> (  M.try (symbol "Type"  *> symbol "Ports" *> pure (symbol "DYNAMIC" *> parsePortNum))
@@ -281,6 +260,7 @@ parseMacAddrTable3 = do
       *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
       <* (void M.eol <|> M.eof)
 
+-- Below are attoparsec version.
 symbolA :: T.Text -> A.Parser T.Text
 symbolA   = lexemeA . A.string
 
