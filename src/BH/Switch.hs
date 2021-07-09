@@ -13,6 +13,8 @@ module BH.Switch
     , SwConfig
     , MacIpMap
     , PortMap
+    , PortInfoEl (..)
+    , PortNum2 (..)
     , parseMacAddrTable
     )
   where

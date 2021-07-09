@@ -27,6 +27,7 @@ source-repository head
 
 library
   exposed-modules:
+      BH.Common
       BH.IP
       BH.Switch
       BH.Telnet
@@ -120,6 +121,7 @@ executable bh-find-port
     , aeson
     , directory
     , tagsoup
+    , attoparsec
   default-language: Haskell2010
 
 executable t

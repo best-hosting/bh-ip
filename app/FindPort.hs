@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Main where
 
@@ -11,6 +12,8 @@ import qualified Data.Map as M
 import System.Environment
 import Control.Monad.Reader
 import Control.Monad.Trans.Except
+import qualified Data.Attoparsec.Text as A
+import Control.Applicative
 
 import BH.IP
 import BH.Switch
@@ -57,23 +60,15 @@ findPortA t0 = do
     -- I may parse 'Fa0/9' as complete type, like PortNum. But 'sw-1/9' parse
     -- as SwName, then lookup default port spec and parse '9' as 'PortNum'
     -- using default port spec.
-    let parse mz = (fromMaybe [] mz :) parseMacAddrTable
-    let parse ts _ = let xs = A.parseOnly ts
-                     in  if null xs
-                            then Partial mempty
-                            else Final (pure (M.singleton sn xs)) (last $ T.lines ts)
-    sendAndParseA parseMacAddrTable (defCmd $ "show mac address-table address " <> T.pack (show mac)) t0 >>= sendExit
-    st    <- liftIO (readIORef stRef)
-    let res = maybe (A.parse p) A.feed (getL l st) ts
-    liftIO $ atomicModifyIORef stRef (\s -> (setL l (Just res) s, ()))
-    case res of
-      A.Partial _ -> liftIO $ print "Partial result.."
-      A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
-      A.Done unparsedTxt _ -> do
-        liftIO $ print $ "Finished output parsing"
-        liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
-        saveResume k
-        lift (k unparsedTxt)
+    sendAndParseA (parse sn, mergeResults)
+          (defCmd $ "show mac address-table address " <> T.pack (show mac))
+          t0
+      >>= sendExit
+  where
+    parse :: SwName -> A.Parser (M.Map SwName [PortNum])
+    parse sn = (\ps -> M.singleton sn (map (PortNum . portNumber . elPort) ps)) <$> parseMacAddrTable
+    mergeResults :: M.Map SwName [PortNum] -> Maybe (M.Map SwName [PortNum]) -> Maybe (M.Map SwName [PortNum])
+    mergeResults res oldRes = fmap (res <>) oldRes <|> (Just res)
 
 main :: IO ()
 main    = do
@@ -82,7 +77,7 @@ main    = do
     Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
     print mac
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ runTill mac findPort (const True)
+      mm <- flip runReaderT swInfo $ runTill mac findPortA (const True)
       liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()
