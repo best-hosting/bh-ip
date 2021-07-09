@@ -51,7 +51,7 @@ findPort t0 = do
     sendAndParse parse (defCmd $ "show mac address-table address " <> T.pack (show mac)) t0 >>=
       sendExit
 
-findPortA :: TelnetCmd MacAddr (M.Map SwName [PortNum]) ()
+findPortA :: TelnetCmd MacAddr (Maybe (M.Map SwName [PortNum])) ()
 findPortA t0 = do
     mac <- asks telnetIn
     sn  <- asks (swName . switchInfo)
@@ -60,15 +60,14 @@ findPortA t0 = do
     -- I may parse 'Fa0/9' as complete type, like PortNum. But 'sw-1/9' parse
     -- as SwName, then lookup default port spec and parse '9' as 'PortNum'
     -- using default port spec.
-    sendAndParseA (parse sn, mergeResults)
+    let parse :: [PortInfoEl] -> Maybe (M.Map SwName [PortNum])
+        parse ps = if null ps
+                     then Nothing
+                     else Just $ M.singleton sn (map (PortNum . portNumber . elPort) ps)
+    sendAndParseA (parse <$> parseMacAddrTable)
           (defCmd $ "show mac address-table address " <> T.pack (show mac))
           t0
       >>= sendExit
-  where
-    parse :: SwName -> A.Parser (M.Map SwName [PortNum])
-    parse sn = (\ps -> M.singleton sn (map (PortNum . portNumber . elPort) ps)) <$> parseMacAddrTable
-    mergeResults :: M.Map SwName [PortNum] -> Maybe (M.Map SwName [PortNum]) -> Maybe (M.Map SwName [PortNum])
-    mergeResults res oldRes = fmap (res <>) oldRes <|> (Just res)
 
 main :: IO ()
 main    = do
@@ -77,7 +76,8 @@ main    = do
     Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
     print mac
     res <- runExceptT $ do
-      mm <- flip runReaderT swInfo $ runTill mac findPortA (const True)
+      --mm <- flip runReaderT swInfo $ runTill mac findPort (const True)
+      mm <- flip runReaderT swInfo $ runTill2 mac findPortA isJust
       liftIO $ print $ "Found port:" ++ show mm
     case res of
       Right _ -> return ()

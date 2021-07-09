@@ -19,6 +19,8 @@ import Control.Monad.Combinators.Expr
 import qualified Data.Char as C
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
+import Data.IORef
+import System.IO.Unsafe
 
 main :: IO ()
 main = return ()
@@ -415,3 +417,29 @@ withPredicate4 f msg p = do
     then return r
     else parseError (FancyError o (Set.singleton (ErrorFail msg)))
 
+data T a = T a
+  deriving (Show)
+
+defT :: Monoid a => T a
+defT = T mempty
+
+tRef :: Monoid a => IORef (T a)
+tRef = unsafePerformIO (newIORef defT)
+
+{-f :: IO ()
+f = atomicWriteIORef tRef defT-}
+
+tRef2 :: T a -> IORef (T a)
+tRef2 s = unsafePerformIO (newIORef s)
+
+f2 :: Monoid a => T a -> IO ()
+f2 v = atomicWriteIORef (tRef2 v) v
+
+f4 :: Monoid a => T a -> IO (T a)
+f4 v = atomicModifyIORef (tRef2 v) (\_ -> (v, v))
+
+{-f5 :: Monoid a => IO (T a)
+f5 = atomicModifyIORef (tRef2 defT) (\_ -> (defT, defT))-}
+
+f3 :: Monoid a => T a -> ()
+f3 (T v) = let x = T (v <> mempty) in ()

@@ -18,8 +18,10 @@ module BH.Telnet
     , sendAndParseA
     , sendExit
     , run
+    , run2
     , runOn
     , runTill
+    , runTill2
     , telnetPromptP
     , setPrompt
     )
@@ -52,7 +54,7 @@ import BH.Common
 import BH.Switch
 
 
-type TelnetCmd a b c = (Typeable b, Show b) => T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
+type TelnetCmd a b c = (Show b, Monoid b) => T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
 {-data PResult a   = TextResult {getPResult :: A.IResult T.Text T.Text}
                  | AnyResult  {getPResult :: A.IResult T.Text a}-}
@@ -60,6 +62,7 @@ type TelnetCmd a b c = (Typeable b, Show b) => T.Text -> ContT () (ReaderT (Teln
 -- FIXME: Use A.Result instead of A.IResult.
 data TelnetState a b    = TelnetState
                             { telnetResult  :: Maybe b
+                            , telnetResult2 :: b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
                             , telnetEchoResult   :: Maybe (A.IResult T.Text T.Text)
@@ -74,9 +77,10 @@ telnetEchoResultL g z@TelnetState{telnetEchoResult = x} = (\x' -> z{telnetEchoRe
 telnetOutputResultL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text b))
 telnetOutputResultL g z@TelnetState{telnetOutputResult = x} = (\x' -> z{telnetOutputResult = x'}) <$> g x
 
-defTelnetState :: TelnetState a b
+defTelnetState :: Monoid b => TelnetState a b
 defTelnetState  = TelnetState { telnetResume = Nothing
                               , telnetResult = Nothing
+                              , telnetResult2 = mempty
                               , tInt = 0
                               , telnetEchoResult = Nothing
                               , telnetOutputResult = Nothing
@@ -84,9 +88,13 @@ defTelnetState  = TelnetState { telnetResume = Nothing
                               , telnetPrompt = T.empty
                               }
 
-telnetStateRef :: IORef (TelnetState a b)
+telnetStateRef :: Monoid b => IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
+
+telnetStateRef2 :: Monoid b => TelnetState a b -> IORef (TelnetState a b)
+{-# NOINLINE telnetStateRef2 #-}
+telnetStateRef2 v = unsafePerformIO (newIORef v)
 
 data TelnetInfo a b = TelnetInfo { switchInfo   :: SwInfo
                                  , telnetConn   :: TL.TelnetPtr
@@ -121,7 +129,7 @@ sendAndParse f cmd t0 = do
     -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed.
     sendParseWithPrompt (takeTillPromptP (telnetPrompt st)) f cmd t0
 
-sendAndParseA :: TelnetParserA b -> TelCmd -> TelnetCmd a b T.Text
+sendAndParseA :: A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParseA p cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
@@ -156,7 +164,7 @@ sendParseWithPrompt promptP f TelCmd {cmdText = cmd, cmdEcho = ce} t0 =
 
 sendParseWithPromptA :: A.Parser T.Text
                         -- ^ Cmd prompt parser.
-                        -> TelnetParserA b -> TelCmd -> TelnetCmd a b T.Text
+                        -> A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendParseWithPromptA promptP p TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
     liftIO (putStrLn "sendParseWithPrompt: parsing echo") >>
     parseEcho promptP t0 >>=
@@ -214,7 +222,6 @@ parseEcho = parseOutputL telnetEchoResultL
 
 type TelnetParser b = T.Text -> Maybe b -> ParserResult b
 -- FIXME: (A.Parser c, c -> Maybe b -> Maybe b) will be better..
-type TelnetParserA b = (A.Parser b, b -> Maybe b -> Maybe b)
 
 -- I need 'Maybe' in 'parserResult' here to unbind parser state (finished or
 -- not) from actual result state (obtained or not). With 'Maybe' these are two
@@ -250,8 +257,8 @@ parseCmd f = shiftW $ \(k, ts) -> do
         lift $ k ys
       else liftIO $ putStrLn "Retry parsing.."
 
-parseCmd' :: TelnetParserA b -> TelnetCmd a b T.Text
-parseCmd' (p, f) = shiftW $ \(k, ts) ->do
+parseCmd' :: A.Parser b -> TelnetCmd a b T.Text
+parseCmd' p = shiftW $ \(k, ts) ->do
       liftIO $ print $ "Make cmd result parser.."
       unparsedTxt <- shiftT (\h -> saveResume h >> lift (h ts)) >>= parseOutputL telnetOutputResultL p
       stRef <- asks telnetRef
@@ -259,12 +266,12 @@ parseCmd' (p, f) = shiftW $ \(k, ts) ->do
       case telnetOutputResult st of
         Just (A.Done _ res) -> do
           liftIO $ print "Merging telnet OUTPUT result" >> print res
-          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = f res (telnetResult st)}, ()))
+          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult2 = res <> telnetResult2 st}, ()))
         _ -> error "Huh blye?"
       saveResume k
       lift (k unparsedTxt)
 
-parseOutputL :: Typeable c => LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
+parseOutputL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
                 -> A.Parser c -- ^ Parser for command output.
                 -> TelnetCmd a b T.Text
 parseOutputL l p = go <=< resetResult
@@ -289,9 +296,6 @@ parseOutputL l p = go <=< resetResult
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
         A.Done unparsedTxt res -> do
           liftIO $ print $ "Finished output parsing"
-          liftIO $ case cast res :: Maybe [PortInfoEl] of
-            Just ps -> print "ports info " >> print ps
-            _ -> return ()
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
           saveResume k
           lift (k unparsedTxt)
@@ -307,7 +311,7 @@ saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just k}, ()))
 
-runCmd :: (Show b, Typeable b) => T.Text -> TelnetCmd a b () -> ContT () (ReaderT (TelnetInfo a b) IO) ()
+runCmd :: (Show b, Monoid b) => T.Text -> TelnetCmd a b () -> ContT () (ReaderT (TelnetInfo a b) IO) ()
 runCmd ts cmd = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -397,7 +401,7 @@ setPrompt promptP = go <=< resetPrompt
       saveResume k
       lift (k unparsedTxt)
 
-runTill :: (Monoid b, Show b, Typeable b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 runTill input telnetCmd p = do
     sws <- asks M.keys
     foldM go Nothing sws
@@ -407,12 +411,22 @@ runTill input telnetCmd p = do
       | maybe False p zs = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
       | otherwise        = run input telnetCmd sn
 
-runOn :: (Show b, Typeable b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runTill2 :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+runTill2 input telnetCmd p = do
+    sws <- asks M.keys
+    foldM go mempty sws
+  where
+    --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+    go z sn
+      | p z         = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
+      | otherwise   = run2 input telnetCmd sn
+
+runOn :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =
     foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
 
 -- | Run on one switch.
-run :: (Show b, Typeable b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
 run input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
@@ -443,7 +457,42 @@ run input telnetCmd sn = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-telnetH :: (Show b, Typeable b) => (TL.TelnetPtr -> TelnetInfo a b) -> TelnetCmd a b () -> Socket -> TL.EventHandler
+setTelnetRef :: Monoid b => TelnetState a b -> IO (TelnetState a b)
+setTelnetRef v = atomicModifyIORef (telnetStateRef2 v) (\_ -> (v, v))
+
+run2 :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+run2 input telnetCmd sn = do
+    mSwInfo <- asks (M.lookup sn)
+    case mSwInfo of
+      Just swInfo@SwInfo{hostName = h} -> liftIO $ do
+        print $ "Connect to " ++ show h
+        let ti con = TelnetInfo
+                        { switchInfo = swInfo
+                        , telnetRef = telnetStateRef
+                        , telnetIn = input
+                        , telnetConn = con
+                        }
+        --atomicWriteIORef telnetStateRef defTelnetState
+        setTelnetRef defTelnetState
+        connect h "23" (\(s, _) -> handle ti s)
+      Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
+    telnetResult2 <$> liftIO (readIORef telnetStateRef)
+  where
+    --handle :: (TL.TelnetPtr -> TelnetInfo a) -> Socket -> IO ()
+    handle ti sock = do
+        telnet <- TL.telnetInit telnetOpts [] (telnetH ti (telnetCmd <=< loginCmd) sock)
+        whileJust_ (recv sock 4096) $ \bs -> do
+            let bl = B8.length bs
+            putStr $ "Socket (" ++ show bl ++ "): "
+            B8.putStrLn bs
+            TL.telnetRecv telnet bs
+
+    telnetOpts :: [TL.OptionSpec]
+    telnetOpts  = [ TL.OptionSpec TL.optEcho True True
+                  --, TL.OptionSpec TL.optLineMode True True
+                  ]
+
+telnetH :: (Show b, Monoid b) => (TL.TelnetPtr -> TelnetInfo a b) -> TelnetCmd a b () -> Socket -> TL.EventHandler
 telnetH ti telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
