@@ -438,6 +438,9 @@ f2 v = atomicWriteIORef (tRef2 v) v
 f4 :: Monoid a => T a -> IO (T a)
 f4 v = atomicModifyIORef (tRef2 v) (\_ -> (v, v))
 
+f4' :: Monoid a => T a -> IO (T a)
+f4' v = atomicModifyIORef tRef (\_ -> (v, v))
+
 {-f5 :: Monoid a => IO (T a)
 f5 = atomicModifyIORef (tRef2 defT) (\_ -> (defT, defT))-}
 

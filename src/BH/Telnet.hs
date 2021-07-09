@@ -409,7 +409,7 @@ runTill input telnetCmd p = do
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
     go zs sn
       | maybe False p zs = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
-      | otherwise        = run input telnetCmd sn
+      | otherwise        = run defTelnetState input telnetCmd sn
 
 runTill2 :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
 runTill2 input telnetCmd p = do
@@ -419,15 +419,15 @@ runTill2 input telnetCmd p = do
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
     go z sn
       | p z         = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
-      | otherwise   = run2 input telnetCmd sn
+      | otherwise   = run2 defTelnetState input telnetCmd sn
 
 runOn :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =
-    foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
+    foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run defTelnetState input telnetCmd sn) M.empty
 
 -- | Run on one switch.
-run :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
-run input telnetCmd sn = do
+run :: (Show b, Monoid b) => TelnetState a b -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run defR input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
@@ -438,7 +438,7 @@ run input telnetCmd sn = do
                         , telnetIn = input
                         , telnetConn = con
                         }
-        atomicWriteIORef telnetStateRef defTelnetState
+        atomicWriteIORef telnetStateRef defR
         connect h "23" (\(s, _) -> handle ti s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
     telnetResult <$> liftIO (readIORef telnetStateRef)
@@ -460,8 +460,8 @@ run input telnetCmd sn = do
 setTelnetRef :: Monoid b => TelnetState a b -> IO (TelnetState a b)
 setTelnetRef v = atomicModifyIORef (telnetStateRef2 v) (\_ -> (v, v))
 
-run2 :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
-run2 input telnetCmd sn = do
+run2 :: (Show b, Monoid b) => TelnetState a b -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+run2 defR input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
@@ -473,7 +473,7 @@ run2 input telnetCmd sn = do
                         , telnetConn = con
                         }
         --atomicWriteIORef telnetStateRef defTelnetState
-        setTelnetRef defTelnetState
+        setTelnetRef defR
         connect h "23" (\(s, _) -> handle ti s)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
     telnetResult2 <$> liftIO (readIORef telnetStateRef)
