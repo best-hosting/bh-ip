@@ -21,6 +21,13 @@ saveSwitch t0 =
     sendAndParse parseCf (defCmd "show running") >>=
     sendExit
 
+saveSwitchA :: TelnetCmd () T.Text ()
+saveSwitchA t0 =
+    sendCmd (defCmd "write") t0 >>=
+    sendCmd (defCmd "terminal length 0") >>=
+    sendAndParseA parseCiscoConfig (defCmd "show running") >>=
+    sendExit
+
 -- | Parse cisco config. It uses "\r\n" line-ending. And config ends at 'end'
 -- string. The part of input after end string is returned as unparsed text.
 parseCf :: TelnetParser T.Text
@@ -40,8 +47,8 @@ main    = do
     print sns
     res <- runExceptT . flip runReaderT swInfo $
       if null sns
-        then runOn () saveSwitch (M.keys swInfo)
-        else runOn () saveSwitch sns
+        then runOn2 () saveSwitchA (M.keys swInfo)
+        else runOn2 () saveSwitchA sns
     case res of
       Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do

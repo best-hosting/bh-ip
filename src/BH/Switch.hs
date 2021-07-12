@@ -16,6 +16,7 @@ module BH.Switch
     , PortInfoEl (..)
     , PortNum2 (..)
     , parseMacAddrTable
+    , parseCiscoConfig
     )
   where
 
@@ -318,4 +319,18 @@ parseMacAddrTable = do
 -- run on whole stream. Probably, it's better to terminate at prompt or smth
 -- similar. Or just at end of line. After all, prompt must always be after
 -- table and prompt itself won't match with 'many'.
+
+infixr 4 <<>>
+(<<>>) :: (Applicative f, Monoid a) => f a -> f a -> f a
+(<<>>) = liftA2 (<>)
+
+parseCiscoConfig :: A.Parser T.Text
+parseCiscoConfig =
+    A.takeTill A.isEndOfLine
+      <<>> (   A.string "\r\nend\r\n"
+           <|> A.takeWhile1 A.isEndOfLine <<>> parseCiscoConfig
+           )
+  where
+    parseLine :: A.Parser T.Text
+    parseLine = A.takeTill A.isEndOfLine
 

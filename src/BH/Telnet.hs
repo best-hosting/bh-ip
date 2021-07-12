@@ -20,6 +20,7 @@ module BH.Telnet
     , run
     , run2
     , runOn
+    , runOn2
     , runTill
     , runTill2
     , telnetPromptP
@@ -167,7 +168,7 @@ sendParseWithPromptA :: A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendParseWithPromptA promptP p TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
-    liftIO (putStrLn "sendParseWithPrompt: parsing echo") >>
+    liftIO (putStrLn "sendParseWithPromptA: parsing echo") >>
     parseEcho promptP t0 >>=
     shiftW (\(k, _) -> do
         con  <- asks telnetConn
@@ -430,6 +431,10 @@ runTill2 input telnetCmd p = do
 runOn :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =
     foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
+
+runOn2 :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runOn2 input telnetCmd =
+    foldM (\zs sn -> (\x -> M.insert sn x zs) <$> run2 input telnetCmd sn) M.empty
 
 -- | Run on one switch.
 run :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
