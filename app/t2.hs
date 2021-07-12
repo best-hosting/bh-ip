@@ -435,14 +435,24 @@ tRef2 s = unsafePerformIO (newIORef s)
 f2 :: Monoid a => T a -> IO ()
 f2 v = atomicWriteIORef (tRef2 v) v
 
+f3 :: Monoid a => T a -> IO (T a)
+f3 v = atomicWriteIORef (tRef2 v) v >> return v
+
+f3' :: Monoid a => T a -> IO (T a)
+--f3' v = atomicModifyIORef tRef (\_ -> (v, v))
+f3' v = atomicWriteIORef tRef v >> return v
+
 f4 :: Monoid a => T a -> IO (T a)
-f4 v = atomicModifyIORef (tRef2 v) (\_ -> (v, v))
+f4 v = atomicModifyIORef tRef (\_ -> (v, v))
 
-f4' :: Monoid a => T a -> IO (T a)
-f4' v = atomicModifyIORef tRef (\_ -> (v, v))
+f5 :: Monoid a => IORef (T a) -> IO (T a)
+f5 r = atomicModifyIORef r (\v -> (v, v))
 
-{-f5 :: Monoid a => IO (T a)
-f5 = atomicModifyIORef (tRef2 defT) (\_ -> (defT, defT))-}
+{-f6 :: Monoid a => IO (T a)
+f6 = atomicModifyIORef tRef (\_ -> (defT, defT))-}
 
-f3 :: Monoid a => T a -> ()
-f3 (T v) = let x = T (v <> mempty) in ()
+f6 :: Monoid a => IO (T a)
+f6 = atomicModifyIORef tRef (\v -> (v, v))
+
+f2' :: Monoid a => T a -> ()
+f2' (T v) = let x = T (v <> mempty) in ()

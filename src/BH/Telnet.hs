@@ -88,7 +88,7 @@ defTelnetState  = TelnetState { telnetResume = Nothing
                               , telnetPrompt = T.empty
                               }
 
-telnetStateRef :: Monoid b => IORef (TelnetState a b)
+telnetStateRef :: (Show b, Monoid b) => IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
@@ -120,7 +120,8 @@ shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
 sendCmd :: TelCmd -> TelnetCmd a b T.Text
-sendCmd = sendAndParse (flip Final)
+--sendCmd = sendAndParse (flip Final)
+sendCmd = sendAndParseA (pure mempty)
 
 sendAndParse :: TelnetParser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParse f cmd t0 = do
@@ -268,6 +269,8 @@ parseCmd' p = shiftW $ \(k, ts) ->do
           liftIO $ print "Merging telnet OUTPUT result" >> print res
           liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult2 = res <> telnetResult2 st}, ()))
         _ -> error "Huh blye?"
+      st2    <- liftIO (readIORef stRef)
+      liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult2 st2)
       saveResume k
       lift (k unparsedTxt)
 
@@ -409,7 +412,7 @@ runTill input telnetCmd p = do
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
     go zs sn
       | maybe False p zs = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure zs
-      | otherwise        = run defTelnetState input telnetCmd sn
+      | otherwise        = run input telnetCmd sn
 
 runTill2 :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
 runTill2 input telnetCmd p = do
@@ -419,15 +422,24 @@ runTill2 input telnetCmd p = do
     --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
     go z sn
       | p z         = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
-      | otherwise   = run2 defTelnetState input telnetCmd sn
+      | otherwise   = do
+        r <- run2 input telnetCmd sn
+        liftIO $ print $ "From runTill2: " ++ show r
+        return r
 
 runOn :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
 runOn input telnetCmd =
-    foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run defTelnetState input telnetCmd sn) M.empty
+    foldM (\zs sn -> maybe zs (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
 
 -- | Run on one switch.
-run :: (Show b, Monoid b) => TelnetState a b -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
-run defR input telnetCmd sn = do
+run :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run input telnetCmd sn = run' defTelnetState input telnetCmd sn
+
+-- I need to pass default state as argument here to bind type variable 'b'
+-- used in default state to resulting 'b'. Otherwise, default state used in
+-- 'atomicWriteIORef' call won't typecheck.
+run' :: (Show b, Monoid b) => TelnetState a b -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+run' defR input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
@@ -457,26 +469,27 @@ run defR input telnetCmd sn = do
                   --, TL.OptionSpec TL.optLineMode True True
                   ]
 
-setTelnetRef :: Monoid b => TelnetState a b -> IO (TelnetState a b)
-setTelnetRef v = atomicModifyIORef (telnetStateRef2 v) (\_ -> (v, v))
+run2 :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+run2 input telnetCmd sn = run2' telnetStateRef input telnetCmd sn
 
-run2 :: (Show b, Monoid b) => TelnetState a b -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
-run2 defR input telnetCmd sn = do
+run2' :: (Show b, Monoid b) => IORef (TelnetState a b) -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+run2' tRef input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
       Just swInfo@SwInfo{hostName = h} -> liftIO $ do
         print $ "Connect to " ++ show h
         let ti con = TelnetInfo
                         { switchInfo = swInfo
-                        , telnetRef = telnetStateRef
+                        , telnetRef = tRef
                         , telnetIn = input
                         , telnetConn = con
                         }
-        --atomicWriteIORef telnetStateRef defTelnetState
-        setTelnetRef defR
+        atomicWriteIORef tRef defTelnetState
         connect h "23" (\(s, _) -> handle ti s)
+        st2    <- liftIO (readIORef tRef)
+        liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult2 st2)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
-    telnetResult2 <$> liftIO (readIORef telnetStateRef)
+    telnetResult2 <$> liftIO (readIORef tRef)
   where
     --handle :: (TL.TelnetPtr -> TelnetInfo a) -> Socket -> IO ()
     handle ti sock = do
