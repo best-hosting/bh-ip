@@ -20,10 +20,6 @@ module BH.Switch
     )
   where
 
--- FIXME: Merge parsing functions for show mac address table. Make them return
--- complete result, disregarding of request. And then requestor should choose,
--- what he wants.
-
 import qualified Data.Text as T
 import           Data.List
 import           Network.Simple.TCP
@@ -93,9 +89,10 @@ data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: Port
 
 type PortMacMap     = M.Map SwPort (Maybe [MacAddr])
 
-swName, (portNum, portSpeed), [(Mac, Vlan)]
-swName, portSpec :: PortNum2, [(Mac, Vlan)]
-Map : (swName, portSpec :: PortNum2) -> [(Mac, Vlan)]
+-- FIXME: New port and switch types:
+-- swName, (portNum, portSpeed), [(Mac, Vlan)]
+-- swName, portSpec :: PortNum2, [(Mac, Vlan)]
+-- Map : (swName, portSpec :: PortNum2) -> [(Mac, Vlan)]
 
 type MacPortMap     = M.Map MacAddr (Maybe [SwPort])
 
