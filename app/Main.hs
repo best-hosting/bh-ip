@@ -22,32 +22,8 @@ import BH.IP
 import BH.Switch
 import BH.Telnet
 
-parseShowMacAddrTable :: T.Text -> [MacAddr]
-parseShowMacAddrTable = foldr go [] . T.lines
-  where
-    go :: T.Text -> [MacAddr] -> [MacAddr]
-    go t zs = case T.words t of
-        (_ : x : _)  -> either (const zs) (: zs) (parseMacAddr x)
-        _            -> zs
-
-getMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
+getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
-    curSn <- asks (swName . switchInfo)
-    ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
-    foldM (flip go) t0 ps >>= sendExit
-  where
-    go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (M.Map SwPort [MacAddr])) IO) T.Text
-    go pid@SwPort{port = PortNum pn, portSpec = ps} ts =
-        sendAndParse parse
-          (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
-      where
-        parse xs mz = let ys = parseShowMacAddrTable xs
-                      in  if null ys
-                            then Partial mz
-                            else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
-
-getMacsA :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
-getMacsA t0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) t0 ps >>= sendExit
@@ -55,7 +31,7 @@ getMacsA t0 = do
     go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (Maybe (M.Map SwPort [MacAddr]))) IO) T.Text
     --go :: SwPort -> T.Text -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr]) T.Text
     go pid@SwPort{port = PortNum pn, portSpec = ps} ts =
-        sendAndParseA (parse <$> parseMacAddrTable)
+        sendAndParse (parse <$> parseMacAddrTable)
           (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
       where
         parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
@@ -197,7 +173,7 @@ main    = do
     print swports
     let sw = head . M.keys $ swports
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run2 (M.keys swports) getMacsA (portSw sw)
+      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ putStrLn "Gathered ac map:"
