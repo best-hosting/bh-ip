@@ -93,6 +93,10 @@ data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: Port
 
 type PortMacMap     = M.Map SwPort (Maybe [MacAddr])
 
+swName, (portNum, portSpeed), [(Mac, Vlan)]
+swName, portSpec :: PortNum2, [(Mac, Vlan)]
+Map : (swName, portSpec :: PortNum2) -> [(Mac, Vlan)]
+
 type MacPortMap     = M.Map MacAddr (Maybe [SwPort])
 
 type MacIpMap       = M.Map MacAddr [IP]
@@ -142,10 +146,10 @@ defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum2 {p
 data PortNum2   = PortNum2  { portSpeed :: PortSpeed
                             , portNumber :: Int
                             }
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 data PortSpeed  = FastEthernet | GigabitEthernet
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 sc :: Parser ()
 sc = ML.space M.hspace1 empty empty
