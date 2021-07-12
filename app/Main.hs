@@ -46,6 +46,23 @@ getMacs t0 = do
                             then Partial mz
                             else Final (Just (M.singleton pid ys) <> mz) (last $ T.lines ts)
 
+getMacsA :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
+getMacsA t0 = do
+    curSn <- asks (swName . switchInfo)
+    ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
+    foldM (flip go) t0 ps >>= sendExit
+  where
+    go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (Maybe (M.Map SwPort [MacAddr]))) IO) T.Text
+    --go :: SwPort -> T.Text -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr]) T.Text
+    go pid@SwPort{port = PortNum pn, portSpec = ps} ts =
+        sendAndParseA (parse <$> parseMacAddrTable)
+          (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
+      where
+        parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
+        parse xs = if null xs
+                      then Nothing
+                      else Just $ M.singleton pid (map (either error id . parseMacAddr . elMac) xs)
+
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host   = Sh.shelly . Sh.silently $
@@ -180,7 +197,7 @@ main    = do
     print swports
     let sw = head . M.keys $ swports
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
+      Just mm <- flip runReaderT swInfo $ run2 (M.keys swports) getMacsA (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ putStrLn "Gathered ac map:"

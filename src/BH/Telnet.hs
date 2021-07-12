@@ -484,6 +484,7 @@ run2' tRef input telnetCmd sn = do
                         , telnetIn = input
                         , telnetConn = con
                         }
+        -- FIXME: Should i reset telnet result between runs?
         atomicWriteIORef tRef defTelnetState
         connect h "23" (\(s, _) -> handle ti s)
         st2    <- liftIO (readIORef tRef)
