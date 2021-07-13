@@ -118,14 +118,16 @@ tA = do
       A.Partial _ -> print "Partial"
       A.Done rs res -> print "Done" >> print res >> print rs
 
-data PortInfoEl = PortInfoEl { elVlan :: Int
+newtype Vlan = Vlan Int
+  deriving (Show)
+data PortInfoEl = PortInfoEl { elVlan :: Vlan
                              , elMac  :: T.Text
                              , elPort :: PortNum
                              }
   deriving (Show)
 
 defaultPortInfoEl :: PortInfoEl
-defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
+defaultPortInfoEl = PortInfoEl {elVlan = Vlan 0, elMac = "0000", elPort = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
 data PortNum  = PortNum { portSpeed  :: PortSpeed
                         , portSlot   :: Int
@@ -171,13 +173,13 @@ choiceEachOnce ps = fix go ps
       | null ps     = pure []
       | otherwise   = choiceOnce ps >>= \(p, zs) -> (p :) <$> rec zs
 
-parseVlan :: Parser Int
+parseVlan :: Parser Vlan
 parseVlan  = lexemeM $ do
     o <- M.getOffset
     M.region (M.setErrorOffset o) . M.label "vlan number" $ do
       v <- lexemeM ML.decimal
       if v < 4096
-        then return v
+        then return (Vlan v)
         else fail "Nihuya sebe vlan"
 
 parseMacAddress :: Parser T.Text
@@ -266,11 +268,11 @@ symbolA   = lexemeA . A.string
 lexemeA :: A.Parser a -> A.Parser a
 lexemeA p = p <* A.takeWhile A.isHorizontalSpace
 
-parseVlanA :: A.Parser Int
+parseVlanA :: A.Parser Vlan
 parseVlanA  = lexemeA $ do
       v <- lexemeA A.decimal A.<?> "vlan number"
       if v < 4096
-        then return v
+        then return (Vlan v)
         else fail "Nihuya sebe vlan"
 
 -- FIXME: Rewrite with 'count'
