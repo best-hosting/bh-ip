@@ -7,18 +7,14 @@ module BH.Switch
     ( SwName (..)
     , SwInfo (..)
     , parseSwInfo
-    , PortNum (..)
     , SwPort (..)
-    , SwPort2 (..)
     , PortMacMap
-    , PortMacMap2
     , MacPortMap
     , SwConfig
     , MacIpMap
-    , PortMap
     , PortInfoEl (..)
-    , PortNum2 (..)
-    , printPortNum2
+    , PortNum (..)
+    , ciscoPortNum
     , PortSpeed (..)
     , parseMacAddrTable
     , parseCiscoConfig
@@ -84,28 +80,21 @@ parsePort ts = do
         join $ find (`T.stripPrefix` ts) ["FastEthernet", "Fa", "fa"] >> Just "FastEthernet"
     <|> find (`T.stripPrefix` ts) ["GigabitEthernet", "Gi", "gi"] >> Just "GigabitEthernet"-}
 
-newtype PortNum     = PortNum Int
+data SwPort        = SwPort {portSw2 :: SwName, portSpec2 :: PortNum}
   deriving (Eq, Ord, Show)
 
-data SwPort2        = SwPort2 {portSw2 :: SwName, portSpec2 :: PortNum2}
-  deriving (Eq, Ord, Show)
-data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: PortNum}
-  deriving (Eq, Ord, Show)
-
-type PortMacMap     = M.Map SwPort (Maybe [MacAddr])
-type PortMacMap2    = M.Map SwPort2 (Maybe [MacAddr])
+type PortMacMap    = M.Map SwPort (Maybe [MacAddr])
 
 -- FIXME: New port and switch types:
 -- swName, (portNum, portSpeed), [(Mac, Vlan)]
--- swName, portSpec :: PortNum2, [(Mac, Vlan)]
--- Map : (swName, portSpec :: PortNum2) -> [(Mac, Vlan)]
+-- swName, portSpec :: PortNum, [(Mac, Vlan)]
+-- Map : (swName, portSpec :: PortNum) -> [(Mac, Vlan)]
 
 type MacPortMap     = M.Map MacAddr (Maybe [SwPort])
 
 type MacIpMap       = M.Map MacAddr [IP]
 
-type PortMap        = M.Map SwPort [(MacAddr, [IP])]
-type PortMap2       = M.Map SwPort2 [(MacAddr, [IP])]
+type PortMap       = M.Map SwPort [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
 
@@ -140,22 +129,23 @@ tA = do
 
 data PortInfoEl = PortInfoEl { elVlan :: Int
                              , elMac  :: T.Text
-                             , elPort :: PortNum2
+                             , elPort :: PortNum
                              }
   deriving (Show)
 
 defaultPortInfoEl :: PortInfoEl
-defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum2 {portSpeed = FastEthernet, portGroup = 0, portNumber = 0}}
+defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
-data PortNum2   = PortNum2  { portSpeed  :: PortSpeed
-                            , portGroup  :: Int
-                            , portNumber :: Int
-                            }
+data PortNum  = PortNum { portSpeed  :: PortSpeed
+                        , portSlot   :: Int
+                        , portNumber :: Int
+                        }
   deriving (Eq, Ord, Show)
 
-printPortNum2 :: PortNum2 -> T.Text
-printPortNum2 PortNum2{..} =
-    T.pack $ show portSpeed <> " " <> show portGroup <> "/" <> show portNumber
+-- | Print 'PortNum' in a format understand by cisco.
+ciscoPortNum :: PortNum -> T.Text
+ciscoPortNum PortNum{..} =
+    T.pack $ show portSpeed <> " " <> show portSlot <> "/" <> show portNumber
 
 data PortSpeed  = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Show)
@@ -202,8 +192,8 @@ parseVlan  = lexemeM $ do
 parseMacAddress :: Parser T.Text
 parseMacAddress = lexemeM $ M.takeWhile1P (Just "mac address") ((||) <$> isHexDigit <*> (== '.'))
 
-parsePortNum :: Parser PortNum2
-parsePortNum    = lexemeM $ PortNum2
+parsePortNum :: Parser PortNum
+parsePortNum    = lexemeM $ PortNum
     <$> (symbol "Fa" *> pure FastEthernet <|> symbol "Gi" *> pure GigabitEthernet)
     <*> ML.decimal
     <*> (symbol "/" *> ML.decimal)
@@ -297,9 +287,9 @@ parseMacAddressA :: A.Parser T.Text
 parseMacAddressA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
                    in  lexemeA (A.takeWhile1 isMacChars) A.<?> "mac address"
 
-parsePortNumA :: A.Parser PortNum2
+parsePortNumA :: A.Parser PortNum
 parsePortNumA    = lexemeA
-    $ ( PortNum2
+    $ ( PortNum
         <$> (symbolA "Fa" *> pure FastEthernet <|> symbolA "Gi" *> pure GigabitEthernet)
         <*> A.decimal
         <*> (symbolA "/" *> A.decimal)

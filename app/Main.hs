@@ -22,37 +22,20 @@ import BH.IP
 import BH.Switch
 import BH.Telnet
 
-getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
-getMacs t0 = do
-    curSn <- asks (swName . switchInfo)
-    ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
-    foldM (flip go) t0 ps >>= sendExit
-  where
-    go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (Maybe (M.Map SwPort [MacAddr]))) IO) T.Text
-    --go :: SwPort -> T.Text -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr]) T.Text
-    go pid@SwPort{port = PortNum pn, portSpec = ps} ts =
-        sendAndParse (parse <$> parseMacAddrTable)
-          (defCmd ("show mac address-table interface " <> ps <> T.pack (show pn))) ts
-      where
-        parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
-        parse xs = if null xs
-                      then Nothing
-                      else Just $ M.singleton pid (map (either error id . parseMacAddr . elMac) xs)
-
-getMacs2 :: TelnetCmd [SwPort2] (Maybe (M.Map SwPort2 [MacAddr])) ()
+getMacs2 :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs2 t0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw2) . telnetIn)
     foldM (flip go) t0 ps >>= sendExit
   where
-    go :: SwPort2 -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort2] (Maybe (M.Map SwPort2 [MacAddr]))) IO) T.Text
+    go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (Maybe (M.Map SwPort [MacAddr]))) IO) T.Text
     -- FIXME: func type.
-    --go :: SwPort2 -> T.Text -> TelnetCmd [SwPort2] (Maybe (M.Map SwPort2 [MacAddr]) T.Text
-    go pid@SwPort2{portSpec2 = pn} ts =
+    --go :: SwPort -> T.Text -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr]) T.Text
+    go pid@SwPort{portSpec2 = pn} ts =
         sendAndParse (parse <$> parseMacAddrTable)
-          (defCmd $ "show mac address-table interface " <> printPortNum2 pn) ts
+          (defCmd $ "show mac address-table interface " <> ciscoPortNum pn) ts
       where
-        parse :: [PortInfoEl] -> Maybe (M.Map SwPort2 [MacAddr])
+        parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
         parse xs = if null xs
                       then Nothing
                       else Just $ M.singleton pid (map (either error id . parseMacAddr . elMac) xs)
@@ -203,41 +186,20 @@ main    = do
       Right () -> return ()
       Left err -> print err
 
-parseArgs :: M.Map SwName SwInfo -> [String] -> PortMacMap
-parseArgs swInfo = foldr go M.empty
+parseArgs2 :: M.Map SwName SwInfo -> [String] -> PortMacMap
+parseArgs2 swInfo = foldr go M.empty
   where
     go :: String -> PortMacMap -> PortMacMap
     go xs z = let (sn, '/' : sp) = span (/= '/') xs
                   swn = SwName (T.pack sn)
                   ps = maybe "huy" defaultPortSpec (M.lookup swn swInfo)
               in  M.insert
-                    (SwPort {portSw = swn, portSpec = ps, port = PortNum (read sp)})
-                    Nothing
-                    z
-
-parseArgs2 :: M.Map SwName SwInfo -> [String] -> PortMacMap2
-parseArgs2 swInfo = foldr go M.empty
-  where
-    go :: String -> PortMacMap2 -> PortMacMap2
-    go xs z = let (sn, '/' : sp) = span (/= '/') xs
-                  swn = SwName (T.pack sn)
-                  ps = maybe "huy" defaultPortSpec (M.lookup swn swInfo)
-              in  M.insert
                     -- FIXME: Wrong port speed.
-                    (SwPort2 {portSw2 = swn, portSpec2 = PortNum2 {portSpeed = FastEthernet, portGroup = 0, portNumber = read sp}})
+                    (SwPort {portSw2 = swn, portSpec2 = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = read sp}})
                     Nothing
                     z
 
-getIPs :: PortMacMap -> MacIpMap -> [IP]
-getIPs portMac macIp = foldr go [] portMac
-  where
-    go :: Maybe [MacAddr] -> [IP] -> [IP]
-    go Nothing zs   = zs
-    go (Just ms) zs = foldr goMacs zs ms
-    goMacs :: MacAddr -> [IP] -> [IP]
-    goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
-
-getIPs2 :: PortMacMap2 -> MacIpMap -> [IP]
+getIPs2 :: PortMacMap -> MacIpMap -> [IP]
 getIPs2 portMac macIp = foldr go [] portMac
   where
     go :: Maybe [MacAddr] -> [IP] -> [IP]
@@ -246,13 +208,7 @@ getIPs2 portMac macIp = foldr go [] portMac
     goMacs :: MacAddr -> [IP] -> [IP]
     goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
 
-macsToIPs :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
-macsToIPs macIp = M.map (foldr go [])
-  where
-    go :: MacAddr -> [IP] -> [IP]
-    go m zs = fromMaybe [] (M.lookup m macIp) ++ zs
-
-macsToIPs2 :: MacIpMap -> M.Map SwPort2 [MacAddr] -> M.Map SwPort2 [IP]
+macsToIPs2 :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
 macsToIPs2 macIp = M.map (foldr go [])
   where
     go :: MacAddr -> [IP] -> [IP]

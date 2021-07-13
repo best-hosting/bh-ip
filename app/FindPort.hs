@@ -27,7 +27,7 @@ findPort t0 = do
     let parse :: [PortInfoEl] -> Maybe (M.Map SwName [PortNum])
         parse ps = if null ps
                      then Nothing
-                     else Just $ M.singleton sn (map (PortNum . portNumber . elPort) ps)
+                     else Just $ M.singleton sn (map elPort ps)
     sendAndParse (parse <$> parseMacAddrTable)
           (defCmd $ "show mac address-table address " <> T.pack (show mac))
           t0
