@@ -71,15 +71,6 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             }
                 )
 
-data Port     = Port {portPrefix :: T.Text, portNum :: Int}
-  deriving (Eq, Ord, Show)
-
-{---parsePort :: T.Text -> Either Port
-parsePort :: T.Text -> Maybe T.Text
-parsePort ts = do
-        join $ find (`T.stripPrefix` ts) ["FastEthernet", "Fa", "fa"] >> Just "FastEthernet"
-    <|> find (`T.stripPrefix` ts) ["GigabitEthernet", "Gi", "gi"] >> Just "GigabitEthernet"-}
-
 data SwPort        = SwPort {portSw2 :: SwName, portSpec2 :: PortNum}
   deriving (Eq, Ord, Show)
 
