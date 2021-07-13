@@ -32,6 +32,7 @@ library
       BH.Switch
       BH.Telnet
   other-modules:
+      BH.SwitchMega
       Paths_bh_ip
   hs-source-dirs:
       src

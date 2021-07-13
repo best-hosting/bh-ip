@@ -50,13 +50,12 @@ import BH.Switch
 
 type TelnetCmd a b c = (Show b, Monoid b) => T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
--- FIXME: Use A.Result instead of A.IResult.
 data TelnetState a b    = TelnetState
                             { telnetResult :: b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
-                            , telnetEchoResult   :: Maybe (A.IResult T.Text T.Text)
-                            , telnetOutputResult :: Maybe (A.IResult T.Text b)
+                            , telnetEchoResult   :: Maybe (A.Result T.Text)
+                            , telnetOutputResult :: Maybe (A.Result b)
                             , telnetPrompt  :: T.Text
                             }
 
