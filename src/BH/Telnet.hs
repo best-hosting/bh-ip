@@ -162,7 +162,7 @@ parseCmd p = shiftW $ \(k, ts) ->do
       case telnetOutputResult st of
         Just (A.Done _ res) -> do
           liftIO $ print "Merging telnet OUTPUT result" >> print res
-          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = res <> telnetResult st}, ()))
+          liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res <> telnetResult st}, ()))
         _ -> error "Huh blye?"
       st2    <- liftIO (readIORef stRef)
       liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult st2)
@@ -178,8 +178,7 @@ parseOutputL l p = go <=< resetResult
     resetResult = shiftW $ \(k, ts) -> do
       liftIO $ print $ "Reset parser result.."
       stRef <- asks telnetRef
-      -- FIXME: Change atomicModifyIORef to atomicWriteIORef ?
-      liftIO $ atomicModifyIORef stRef (\s -> (setL l Nothing s, ()))
+      liftIO $ atomicModifyIORef' stRef (\s -> (setL l Nothing s, ()))
       saveResume k
       lift (k ts)
     --go :: TelnetCmd a b T.Text
@@ -207,7 +206,7 @@ saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
               -> ContT () (ReaderT (TelnetInfo a b) m) ()
 saveResume k = do
     tRef <- asks telnetRef
-    liftIO $ atomicModifyIORef tRef (\r -> (r{telnetResume = Just k}, ()))
+    liftIO $ atomicModifyIORef' tRef (\r -> (r{telnetResume = Just k}, ()))
 
 runCmd :: (Show b, Monoid b) => T.Text -> TelnetCmd a b () -> ContT () (ReaderT (TelnetInfo a b) IO) ()
 runCmd ts cmd = do
@@ -282,7 +281,7 @@ setPrompt promptP = go <=< resetPrompt
     resetPrompt = shiftW $ \(k, ts) -> do
       liftIO $ putStrLn "Reset old telnet prompt.."
       stRef <- asks telnetRef
-      liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = T.empty}, ()))
+      liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetPrompt = T.empty}, ()))
       saveResume k
       lift (k ts)
     go :: TelnetCmd a b T.Text
@@ -294,7 +293,7 @@ setPrompt promptP = go <=< resetPrompt
       case telnetEchoResult st of
         Just (A.Done _ prompt) -> do
           liftIO $ print $ "Set prompt to: " <> prompt
-          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetPrompt = prompt}, ()))
+          liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetPrompt = prompt}, ()))
         _ -> error "Huh?"
       saveResume k
       lift (k unparsedTxt)

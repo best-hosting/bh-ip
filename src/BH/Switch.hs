@@ -13,7 +13,6 @@ module BH.Switch
     , PortInfoEl (..)
     , defaultPortInfoEl
     , PortNum (..)
-    , Vlan (..)
     , ciscoPortNum
     , PortSpeed (..)
     , parseMacAddrTable
@@ -81,8 +80,6 @@ type PortMap       = M.Map SwPort [(MacAddr, [IP])]
 type SwConfig       = M.Map SwName T.Text
 
 
-newtype Vlan = Vlan Int
-  deriving (Show)
 data PortInfoEl = PortInfoEl { elVlan :: Vlan
                              , elMac  :: T.Text
                              , elPort :: PortNum
@@ -107,23 +104,12 @@ data PortSpeed  = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Show)
 
 -- Below are attoparsec version.
-symbolA :: T.Text -> A.Parser T.Text
-symbolA   = lexemeA . A.string
-
-lexemeA :: A.Parser a -> A.Parser a
-lexemeA p = p <* A.takeWhile A.isHorizontalSpace
-
 parseVlanA :: A.Parser Vlan
 parseVlanA  = lexemeA $ do
       v <- lexemeA A.decimal A.<?> "vlan number"
       if v < 4096
         then return (Vlan v)
         else fail "Nihuya sebe vlan"
-
--- FIXME: Rewrite with 'count'
-parseMacAddressA :: A.Parser T.Text
-parseMacAddressA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
-                   in  lexemeA (A.takeWhile1 isMacChars) A.<?> "mac address"
 
 parsePortNumA :: A.Parser PortNum
 parsePortNumA    = lexemeA
