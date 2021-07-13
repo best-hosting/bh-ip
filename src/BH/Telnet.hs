@@ -52,8 +52,7 @@ type TelnetCmd a b c = (Show b, Monoid b) => T.Text -> ContT () (ReaderT (Telnet
 
 -- FIXME: Use A.Result instead of A.IResult.
 data TelnetState a b    = TelnetState
-                            { telnetResult  :: Maybe b
-                            , telnetResult2 :: b
+                            { telnetResult :: b
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
                             , telnetEchoResult   :: Maybe (A.IResult T.Text T.Text)
@@ -69,8 +68,7 @@ telnetOutputResultL g z@TelnetState{telnetOutputResult = x} = (\x' -> z{telnetOu
 
 defTelnetState :: Monoid b => TelnetState a b
 defTelnetState  = TelnetState { telnetResume = Nothing
-                              , telnetResult = Nothing
-                              , telnetResult2 = mempty
+                              , telnetResult = mempty
                               , tInt = 0
                               , telnetEchoResult = Nothing
                               , telnetOutputResult = Nothing
@@ -165,10 +163,10 @@ parseCmd p = shiftW $ \(k, ts) ->do
       case telnetOutputResult st of
         Just (A.Done _ res) -> do
           liftIO $ print "Merging telnet OUTPUT result" >> print res
-          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult2 = res <> telnetResult2 st}, ()))
+          liftIO $ atomicModifyIORef stRef (\x -> (x{telnetResult = res <> telnetResult st}, ()))
         _ -> error "Huh blye?"
       st2    <- liftIO (readIORef stRef)
-      liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult2 st2)
+      liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult st2)
       saveResume k
       lift (k unparsedTxt)
 
@@ -342,9 +340,9 @@ run' tRef input telnetCmd sn = do
         atomicWriteIORef tRef defTelnetState
         connect h "23" (\(s, _) -> handle ti s)
         st2    <- liftIO (readIORef tRef)
-        liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult2 st2)
+        liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult st2)
       Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
-    telnetResult2 <$> liftIO (readIORef tRef)
+    telnetResult <$> liftIO (readIORef tRef)
   where
     --handle :: (TL.TelnetPtr -> TelnetInfo a) -> Socket -> IO ()
     handle ti sock = do
