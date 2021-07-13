@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TupleSections  #-}
+{-# LANGUAGE RecordWildCards  #-}
 
 module BH.Switch
     ( SwName (..)
@@ -8,13 +9,17 @@ module BH.Switch
     , parseSwInfo
     , PortNum (..)
     , SwPort (..)
+    , SwPort2 (..)
     , PortMacMap
+    , PortMacMap2
     , MacPortMap
     , SwConfig
     , MacIpMap
     , PortMap
     , PortInfoEl (..)
     , PortNum2 (..)
+    , printPortNum2
+    , PortSpeed (..)
     , parseMacAddrTable
     , parseCiscoConfig
     )
@@ -82,12 +87,13 @@ parsePort ts = do
 newtype PortNum     = PortNum Int
   deriving (Eq, Ord, Show)
 
-data SwPort2        = SwPort2 {portSw2 :: SwName, portSpec2 :: Port}
+data SwPort2        = SwPort2 {portSw2 :: SwName, portSpec2 :: PortNum2}
   deriving (Eq, Ord, Show)
 data SwPort         = SwPort {portSw :: SwName, portSpec :: T.Text, port :: PortNum}
   deriving (Eq, Ord, Show)
 
 type PortMacMap     = M.Map SwPort (Maybe [MacAddr])
+type PortMacMap2    = M.Map SwPort2 (Maybe [MacAddr])
 
 -- FIXME: New port and switch types:
 -- swName, (portNum, portSpeed), [(Mac, Vlan)]
@@ -99,6 +105,7 @@ type MacPortMap     = M.Map MacAddr (Maybe [SwPort])
 type MacIpMap       = M.Map MacAddr [IP]
 
 type PortMap        = M.Map SwPort [(MacAddr, [IP])]
+type PortMap2       = M.Map SwPort2 [(MacAddr, [IP])]
 
 type SwConfig       = M.Map SwName T.Text
 
@@ -138,12 +145,17 @@ data PortInfoEl = PortInfoEl { elVlan :: Int
   deriving (Show)
 
 defaultPortInfoEl :: PortInfoEl
-defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum2 {portSpeed = FastEthernet, portNumber = 0}}
+defaultPortInfoEl = PortInfoEl {elVlan = 0, elMac = "0000", elPort = PortNum2 {portSpeed = FastEthernet, portGroup = 0, portNumber = 0}}
 
-data PortNum2   = PortNum2  { portSpeed :: PortSpeed
+data PortNum2   = PortNum2  { portSpeed  :: PortSpeed
+                            , portGroup  :: Int
                             , portNumber :: Int
                             }
   deriving (Eq, Ord, Show)
+
+printPortNum2 :: PortNum2 -> T.Text
+printPortNum2 PortNum2{..} =
+    T.pack $ show portSpeed <> " " <> show portGroup <> "/" <> show portNumber
 
 data PortSpeed  = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Show)
@@ -192,7 +204,8 @@ parseMacAddress = lexemeM $ M.takeWhile1P (Just "mac address") ((||) <$> isHexDi
 
 parsePortNum :: Parser PortNum2
 parsePortNum    = lexemeM $ PortNum2
-    <$> (symbol "Fa0" *> pure FastEthernet <|> symbol "Gi0" *> pure GigabitEthernet)
+    <$> (symbol "Fa" *> pure FastEthernet <|> symbol "Gi" *> pure GigabitEthernet)
+    <*> ML.decimal
     <*> (symbol "/" *> ML.decimal)
 
 columnVlanP :: Parser (PortInfoEl -> Parser PortInfoEl)
@@ -287,7 +300,8 @@ parseMacAddressA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
 parsePortNumA :: A.Parser PortNum2
 parsePortNumA    = lexemeA
     $ ( PortNum2
-        <$> (symbolA "Fa0" *> pure FastEthernet <|> symbolA "Gi0" *> pure GigabitEthernet)
+        <$> (symbolA "Fa" *> pure FastEthernet <|> symbolA "Gi" *> pure GigabitEthernet)
+        <*> A.decimal
         <*> (symbolA "/" *> A.decimal)
         A.<?> "port number"
       )
