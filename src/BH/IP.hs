@@ -47,22 +47,16 @@ instance Show MacAddr2 where
         . showHex octet6
 
 instance Read MacAddr2 where
-    readPrec = lift $ do
+    readPrec = parens . prec 10 . lift $ do
         Ident "MacAddr2" <- Text.Read.Lex.lex
         skipSpaces
-        o1 <- readHexP
-        --Symbol ":" <- Text.Read.Lex.lex
-        expect (Symbol ":")
-        o2 <- readHexP
-        Symbol ":" <- Text.Read.Lex.lex
-        o3 <- readHexP
-        Symbol ":" <- Text.Read.Lex.lex
-        o4 <- readHexP
-        Symbol ":" <- Text.Read.Lex.lex
-        o5 <- readHexP
-        Symbol ":" <- Text.Read.Lex.lex
-        o6 <- readHexP
-        pure (MacAddr2{octet1 = o1, octet2 = o2, octet3 = o3, octet4 = o4, octet5 = o5, octet6 = o6})
+        MacAddr2
+          <$> readHexP <* expect (Symbol ":")
+          <*> readHexP <* expect (Symbol ":")
+          <*> readHexP <* expect (Symbol ":")
+          <*> readHexP <* expect (Symbol ":")
+          <*> readHexP <* expect (Symbol ":")
+          <*> readHexP
 
 -- FIXME: Rewrite with 'count'
 parseMacAddrA :: A.Parser MacAddr
