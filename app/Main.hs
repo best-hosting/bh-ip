@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Main where
 
@@ -28,9 +29,7 @@ getMacs t0 = do
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) t0 ps >>= sendExit
   where
-    go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (Maybe (M.Map SwPort [MacAddr]))) IO) T.Text
-    -- FIXME: func type.
-    --go :: SwPort -> T.Text -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr]) T.Text
+    go :: SwPort -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) T.Text
     go pid@SwPort{portSpec = pn} ts =
         sendAndParse (parse <$> parseMacAddrTable)
           (defCmd $ "show mac address-table interface " <> ciscoPortNum pn) ts
