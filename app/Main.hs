@@ -22,8 +22,8 @@ import BH.IP
 import BH.Switch
 import BH.Telnet
 
-getMacs2 :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
-getMacs2 t0 = do
+getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
+getMacs t0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw2) . telnetIn)
     foldM (flip go) t0 ps >>= sendExit
@@ -170,24 +170,24 @@ main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
-    swports <- parseArgs2 swInfo <$> getArgs
+    swports <- parseArgs swInfo <$> getArgs
     print swports
     let sw = head . M.keys $ swports
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs2 (portSw2 sw)
+      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw2 sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ putStrLn "Gathered ac map:"
       liftIO $ print mm
       arp1 <- queryLinuxArp "certbot"
       liftIO $ putStrLn "Finally, ips..."
-      liftIO $ print (macsToIPs2 arp1 mm)
+      liftIO $ print (macsToIPs arp1 mm)
     case res of
       Right () -> return ()
       Left err -> print err
 
-parseArgs2 :: M.Map SwName SwInfo -> [String] -> PortMacMap
-parseArgs2 swInfo = foldr go M.empty
+parseArgs :: M.Map SwName SwInfo -> [String] -> PortMacMap
+parseArgs swInfo = foldr go M.empty
   where
     go :: String -> PortMacMap -> PortMacMap
     go xs z = let (sn, '/' : sp) = span (/= '/') xs
@@ -199,8 +199,8 @@ parseArgs2 swInfo = foldr go M.empty
                     Nothing
                     z
 
-getIPs2 :: PortMacMap -> MacIpMap -> [IP]
-getIPs2 portMac macIp = foldr go [] portMac
+getIPs :: PortMacMap -> MacIpMap -> [IP]
+getIPs portMac macIp = foldr go [] portMac
   where
     go :: Maybe [MacAddr] -> [IP] -> [IP]
     go Nothing zs   = zs
@@ -208,8 +208,8 @@ getIPs2 portMac macIp = foldr go [] portMac
     goMacs :: MacAddr -> [IP] -> [IP]
     goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
 
-macsToIPs2 :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
-macsToIPs2 macIp = M.map (foldr go [])
+macsToIPs :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
+macsToIPs macIp = M.map (foldr go [])
   where
     go :: MacAddr -> [IP] -> [IP]
     go m zs = fromMaybe [] (M.lookup m macIp) ++ zs
