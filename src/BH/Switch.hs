@@ -71,7 +71,8 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             }
                 )
 
-data SwPort        = SwPort {portSw2 :: SwName, portSpec2 :: PortNum}
+-- TODO: Add and check for 'disabled' port state.
+data SwPort        = SwPort {portSw :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
 type PortMacMap    = M.Map SwPort (Maybe [MacAddr])

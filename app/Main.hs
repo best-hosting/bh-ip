@@ -25,13 +25,13 @@ import BH.Telnet
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
     curSn <- asks (swName . switchInfo)
-    ps    <- asks (filter ((== curSn) . portSw2) . telnetIn)
+    ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) t0 ps >>= sendExit
   where
     go :: SwPort -> T.Text -> ContT () (ReaderT (TelnetInfo [SwPort] (Maybe (M.Map SwPort [MacAddr]))) IO) T.Text
     -- FIXME: func type.
     --go :: SwPort -> T.Text -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr]) T.Text
-    go pid@SwPort{portSpec2 = pn} ts =
+    go pid@SwPort{portSpec = pn} ts =
         sendAndParse (parse <$> parseMacAddrTable)
           (defCmd $ "show mac address-table interface " <> ciscoPortNum pn) ts
       where
@@ -174,7 +174,7 @@ main    = do
     print swports
     let sw = head . M.keys $ swports
     res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw2 sw)
+      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ putStrLn "Gathered ac map:"
@@ -195,7 +195,7 @@ parseArgs swInfo = foldr go M.empty
                   ps = maybe "huy" defaultPortSpec (M.lookup swn swInfo)
               in  M.insert
                     -- FIXME: Wrong port speed.
-                    (SwPort {portSw2 = swn, portSpec2 = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = read sp}})
+                    (SwPort {portSw = swn, portSpec = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = read sp}})
                     Nothing
                     z
 
