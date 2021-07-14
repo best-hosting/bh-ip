@@ -19,6 +19,7 @@ import Numeric
 import Text.Read
 import Text.Read.Lex
 import Text.ParserCombinators.ReadP
+import Control.Applicative
 
 import BH.Common
 
@@ -27,24 +28,24 @@ newtype MacAddr     = MacAddr T.Text
   deriving (Eq, Ord)
 
 data MacAddr2       = MacAddr2
-                        { octet1 :: Int
-                        , octet2 :: Int
-                        , octet3 :: Int
-                        , octet4 :: Int
-                        , octet5 :: Int
-                        , octet6 :: Int
+                        { macOctet1 :: Int
+                        , macOctet2 :: Int
+                        , macOctet3 :: Int
+                        , macOctet4 :: Int
+                        , macOctet5 :: Int
+                        , macOctet6 :: Int
                         }
   deriving (Eq, Ord)
 
 instance Show MacAddr2 where
     showsPrec d MacAddr2{..} = showParen (d > 10) $
           showString "MacAddr2 "
-        . showHex octet1 . showString ":"
-        . showHex octet2 . showString ":"
-        . showHex octet3 . showString ":"
-        . showHex octet4 . showString ":"
-        . showHex octet5 . showString ":"
-        . showHex octet6
+        . showHex macOctet1 . showString ":"
+        . showHex macOctet2 . showString ":"
+        . showHex macOctet3 . showString ":"
+        . showHex macOctet4 . showString ":"
+        . showHex macOctet5 . showString ":"
+        . showHex macOctet6
 
 instance Read MacAddr2 where
     readPrec = parens . prec 10 . lift $ do
@@ -65,25 +66,26 @@ parseMacAddrA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
 
     --(++) <$> count 5 (A.hexadecimal <* A.char ':') <*> ((: []) <$> A.hexadecimal)
 
-macOctet :: A.Parser Int
-macOctet = do
+macOctetP :: A.Parser Int
+macOctetP = do
     x <- A.hexadecimal A.<?> "mac octet"
     if x > 255
       then fail "Too great number for mac octet"
       else pure x
 
-macOctet4 :: A.Parser (Int, Int)
-macOctet4 = do
-    x <- A.hexadecimal A.<?> "4-byte mac octet"
+macOctetP2 :: A.Parser [Int]
+macOctetP2 = do
+    x <- A.hexadecimal A.<?> "2-byte mac octet"
     if x > 65535
-      then fail "Too great number for 4-byte mac octet"
-      else pure (x `divMod` 256)
+      then fail "Too great number for 2-byte mac octet"
+      else let (o1, o2) = x `divMod` 256 in pure [o1, o2]
 
-mac :: A.Parser [Int]
-mac = (:) <$> macOctet <*> A.count 5 (A.char ':' *> macOctet)
-
-mac4 :: A.Parser [(Int, Int)]
-mac4 = (:) <$> macOctet4 <*> A.count 2 (A.char '.' *> macOctet4)
+mac :: A.Parser MacAddr2
+mac = do
+    [macOctet1, macOctet2, macOctet3, macOctet4, macOctet5, macOctet6]
+        <-                  (:) <$> macOctetP  <*> A.count 5 (A.char ':' *> macOctetP)
+            <|> concat <$> ((:) <$> macOctetP2 <*> A.count 2 (A.char '.' *> macOctetP2))
+    return MacAddr2{..}
 
 parseMacAddr :: T.Text -> Either String MacAddr
 parseMacAddr t = MacAddr <$> T.foldr go end t 1
