@@ -8,7 +8,9 @@ module BH.IP
     , showMacAddr
     --, parseMacAddr
     , IP (..)
-    , parseIP
+    , defIP
+    --, showIP
+    --, ipP
     , Vlan (..)
     )
   where
@@ -64,9 +66,7 @@ showMacAddr :: MacAddr -> String
 showMacAddr m = showsMacAddr m ""
 
 instance Show MacAddr where
-    showsPrec d m = showParen (d > 10) $
-          showString "MacAddr "
-        . showsMacAddr m
+    showsPrec d m = showParen (d > 10) $ showString "MacAddr " . showsMacAddr m
 
 instance Read MacAddr where
     readPrec = parens . prec 10 . lift $ do
@@ -94,7 +94,7 @@ instance J.FromJSONKey MacAddr where
 macOctetP1 :: A.Parser Int
 macOctetP1 = do
     x <- A.hexadecimal A.<?> "mac octet"
-    if x > 255
+    if x > 256
       then fail "Too great number for mac octet"
       else pure x
 
@@ -171,35 +171,81 @@ instance J.FromJSONKey MacAddr2 where
     fromJSONKey = J.FromJSONKeyTextParser (either fail return . parseMacAddr2)
 
 
-newtype IP          = IP (Int, Int, Int, Int)
+data IP = IP
+            { ipOctet1 :: Int
+            , ipOctet2 :: Int
+            , ipOctet3 :: Int
+            , ipOctet4 :: Int
+            }
   deriving (Eq)
 
+defIP :: IP
+defIP   = IP
+            { ipOctet1 = 0
+            , ipOctet2 = 0
+            , ipOctet3 = 0
+            , ipOctet4 = 0
+            }
+
+showsIP :: IP -> ShowS
+showsIP IP{..} =
+          shows ipOctet1 . showString "."
+        . shows ipOctet2 . showString "."
+        . shows ipOctet3 . showString "."
+        . shows ipOctet4
+
+showIP :: IP -> String
+showIP m = showsIP m ""
+
 instance Show IP where
-    showsPrec d ip = (showIP ip ++)
+    showsPrec d m = showParen (d > 10) $ showString "IP " . showsIP m
+
+instance Read IP where
+    readPrec = parens . prec 10 . lift $ do
+        Ident "IP" <- Text.Read.Lex.lex
+        skipSpaces
+        IP <$> readDecP <* expect (Symbol ".")
+           <*> readDecP <* expect (Symbol ".")
+           <*> readDecP <* expect (Symbol ".")
+           <*> readDecP
+
+ipOctetP :: A.Parser Int
+ipOctetP = do
+    x <- A.decimal A.<?> "ip octet"
+    if x > 256
+      then fail "Too great number for ip octet"
+      else pure x
+
+
+newtype IP2          = IP2 (Int, Int, Int, Int)
+  deriving (Eq)
+
+instance Show IP2 where
+    showsPrec d ip = (showIP2 ip ++)
       where
-        showIP :: IP -> String
-        showIP (IP (o1, o2, o3, o4)) =
+        showIP2 :: IP2 -> String
+        showIP2 (IP2 (o1, o2, o3, o4)) =
             show o1 ++ "." ++ show o2 ++ "." ++ show o3 ++ "." ++ show o4
 
-instance J.ToJSON IP where
+instance J.ToJSON IP2 where
     toJSON ip   = J.toJSON (show ip)
 
-instance J.FromJSON IP where
-    parseJSON (J.String t) = either fail return (parseIP t)
+instance J.FromJSON IP2 where
+    parseJSON (J.String t) = either fail return (parseIP2 t)
 
-parseIP :: T.Text -> Either String IP
-parseIP t = do
+parseIP2 :: T.Text -> Either String IP2
+parseIP2 t = do
     os <- mapM parseOctet . T.split (== '.') $ t
     case os of
-      [o1, o2, o3, o4]  -> Right (IP (o1, o2, o3, o4))
+      [o1, o2, o3, o4]  -> Right (IP2 (o1, o2, o3, o4))
       _                 -> Left "Too few or too many octets."
   where
     parseOctet :: T.Text -> Either String Int
     parseOctet ds = case reads (T.unpack ds) of
         [(d, "")]
           | 0 <= d && d <= 255  -> Right d
-          | otherwise           -> Left $ "Incorrect IP octet '" ++ show d ++ "'"
-        []                      -> Left "Can't read IP octet."
+          | otherwise           -> Left $ "Incorrect IP2 octet '" ++ show d ++ "'"
+        []                      -> Left "Can't read IP2 octet."
 
 newtype Vlan = Vlan Int
   deriving (Show)
