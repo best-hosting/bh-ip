@@ -3,7 +3,8 @@
 
 module BH.IP
     ( MacAddr (..)
-    , parseMacAddr
+    , macP
+    --, parseMacAddr
     , IP (..)
     , parseIP
     , Vlan (..)
@@ -25,34 +26,34 @@ import Control.Applicative
 import BH.Common
 
 
-newtype MacAddr     = MacAddr T.Text
+data MacAddr    = MacAddr
+                    { macOctet1 :: Int
+                    , macOctet2 :: Int
+                    , macOctet3 :: Int
+                    , macOctet4 :: Int
+                    , macOctet5 :: Int
+                    , macOctet6 :: Int
+                    }
   deriving (Eq, Ord)
 
-data MacAddr2       = MacAddr2
-                        { macOctet1 :: Int
-                        , macOctet2 :: Int
-                        , macOctet3 :: Int
-                        , macOctet4 :: Int
-                        , macOctet5 :: Int
-                        , macOctet6 :: Int
-                        }
-  deriving (Eq, Ord)
+instance Show MacAddr where
+    showsPrec d MacAddr{..} = showParen (d > 10) $
+          showString "MacAddr "
+        . showOctet macOctet1 . showString ":"
+        . showOctet macOctet2 . showString ":"
+        . showOctet macOctet3 . showString ":"
+        . showOctet macOctet4 . showString ":"
+        . showOctet macOctet5 . showString ":"
+        . showOctet macOctet6
+      where
+        showOctet :: Int -> ShowS
+        showOctet d = showHex (d `div` 16) . showHex (d `mod` 16)
 
-instance Show MacAddr2 where
-    showsPrec d MacAddr2{..} = showParen (d > 10) $
-          showString "MacAddr2 "
-        . showHex macOctet1 . showString ":"
-        . showHex macOctet2 . showString ":"
-        . showHex macOctet3 . showString ":"
-        . showHex macOctet4 . showString ":"
-        . showHex macOctet5 . showString ":"
-        . showHex macOctet6
-
-instance Read MacAddr2 where
+instance Read MacAddr where
     readPrec = parens . prec 10 . lift $ do
-        Ident "MacAddr2" <- Text.Read.Lex.lex
+        Ident "MacAddr" <- Text.Read.Lex.lex
         skipSpaces
-        MacAddr2
+        MacAddr
           <$> readHexP <* expect (Symbol ":")
           <*> readHexP <* expect (Symbol ":")
           <*> readHexP <* expect (Symbol ":")
@@ -60,13 +61,17 @@ instance Read MacAddr2 where
           <*> readHexP <* expect (Symbol ":")
           <*> readHexP
 
--- FIXME: Rewrite with 'count'
-parseMacAddrA :: A.Parser MacAddr
-parseMacAddrA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
-                in  MacAddr <$> lexemeA (A.takeWhile1 isMacChars) A.<?> "mac address"
+instance J.ToJSON MacAddr where
+    toJSON mac = J.toJSON (show mac)
+instance J.ToJSONKey MacAddr where
+    toJSONKey = J.ToJSONKeyText (T.pack . show) (J.string . show)
 
-    --(++) <$> count 5 (A.hexadecimal <* A.char ':') <*> ((: []) <$> A.hexadecimal)
+instance J.FromJSON MacAddr where
+    parseJSON (J.String t) = either fail return (A.parseOnly macP t)
+instance J.FromJSONKey MacAddr where
+    fromJSONKey = J.FromJSONKeyTextParser (either fail return . A.parseOnly macP)
 
+-- | Parse single mac octet.
 macOctetP1 :: A.Parser Int
 macOctetP1 = do
     x <- A.hexadecimal A.<?> "mac octet"
@@ -74,6 +79,7 @@ macOctetP1 = do
       then fail "Too great number for mac octet"
       else pure x
 
+-- | Parse two mac octets written as single hexadecimal number.
 macOctetP2 :: A.Parser [Int]
 macOctetP2 = do
     x <- A.hexadecimal A.<?> "2-byte mac octet"
@@ -81,39 +87,38 @@ macOctetP2 = do
       then fail "Too great number for 2-byte mac octet"
       else let (o1, o2) = x `divMod` 256 in pure [o1, o2]
 
-mac :: A.Parser MacAddr2
-mac = do
-    [macOctet1, macOctet2, macOctet3, macOctet4, macOctet5, macOctet6]
-        <-                  (:) <$> macOctetP1  <*> A.count 5 (A.char ':' *> macOctetP1)
-            <|> concat <$> ((:) <$> macOctetP2 <*> A.count 2 (A.char '.' *> macOctetP2))
-    return MacAddr2{..}
-
+-- | Parser for mac address written as "11:22:33:44:55:66".
 macP1 :: A.Parser [Int]
 macP1 =
-    (:)
-        <$> macOctetP1
+    (:) <$> macOctetP1
         <*> (A.count 5 (A.char ':' *> macOctetP1) A.<?> "Too few octets for mac")
 
+-- | Parser for mac address written as "1122.3344.5566".
 macP2 :: A.Parser [Int]
 macP2 = fmap concat $
     (:) <$> macOctetP2
         <*> (A.count 2 (A.char '.' *> macOctetP2) A.<?> "Too few octets for 2-byte mac")
 
-mac' :: A.Parser MacAddr2
-mac' = do
+-- | Parser for mac addresses.
+macP :: A.Parser MacAddr
+macP = do
     -- 'lookAhead' allows to choose parsing branch first and then fail entire
     -- parser, if choosed branch fails. If on the other hand <|> would be
-    -- applied to branches itself 'macP1 <|> macP2', then e.g. regular
-    -- erroneous mac address ("x:1:2:3:4:5") will always fail in 2nd branch
-    -- and error message will be misleading.
+    -- applied to branches itself, like 'macP1 <|> macP2', then e.g.
+    -- erroneous mac address ("x:1:2:3:4:5") conforming to 1st branch 'macP1'
+    -- will fail in 2nd branch with misleading error message.
     p <-    A.lookAhead (A.takeWhile1 (`notElem` [':', '.']) <* A.char ':') *> return macP1
         <|> A.lookAhead (A.takeWhile1 (`notElem` [':', '.']) <* A.char '.') *> return macP2
     [macOctet1, macOctet2, macOctet3, macOctet4, macOctet5, macOctet6]
       <- p
-    return MacAddr2{..}
+    return MacAddr{..}
 
-parseMacAddr :: T.Text -> Either String MacAddr
-parseMacAddr t = MacAddr <$> T.foldr go end t 1
+-- | Old text-based mac address implementation.
+newtype MacAddr2     = MacAddr2 T.Text
+  deriving (Eq, Ord)
+
+parseMacAddr2 :: T.Text -> Either String MacAddr2
+parseMacAddr2 t = MacAddr2 <$> T.foldr go end t 1
   where
     go :: Char -> (Int -> Either String T.Text) -> Int -> Either String T.Text
     go c zf n
@@ -126,8 +131,8 @@ parseMacAddr t = MacAddr <$> T.foldr go end t 1
       | n /= 13             = Left "Too few chars for mac address."
       | otherwise           = Right T.empty
 
-instance Show MacAddr where
-    showsPrec d (MacAddr t) = showMac (T.unpack t)
+instance Show MacAddr2 where
+    showsPrec d (MacAddr2 t) = showMac (T.unpack t)
       where
         showMac :: String -> ShowS
         showMac t r = foldr (\(n, x) zs ->
@@ -136,15 +141,16 @@ instance Show MacAddr where
                         . zip [1..12]
                         $ t
 
-instance J.ToJSON MacAddr where
+instance J.ToJSON MacAddr2 where
     toJSON mac = J.toJSON (show mac)
-instance J.ToJSONKey MacAddr where
+instance J.ToJSONKey MacAddr2 where
     toJSONKey = J.ToJSONKeyText (T.pack . show) (J.string . show)
 
-instance J.FromJSON MacAddr where
-    parseJSON (J.String t) = either fail return (parseMacAddr t)
-instance J.FromJSONKey MacAddr where
-    fromJSONKey = J.FromJSONKeyTextParser (either fail return . parseMacAddr)
+instance J.FromJSON MacAddr2 where
+    parseJSON (J.String t) = either fail return (parseMacAddr2 t)
+instance J.FromJSONKey MacAddr2 where
+    fromJSONKey = J.FromJSONKeyTextParser (either fail return . parseMacAddr2)
+
 
 newtype IP          = IP (Int, Int, Int, Int)
   deriving (Eq)
