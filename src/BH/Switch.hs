@@ -29,6 +29,7 @@ import qualified Data.Attoparsec.Text as A
 import Data.Char
 import Control.Monad
 
+import BH.Common
 import BH.IP
 
 
@@ -81,13 +82,13 @@ type SwConfig       = M.Map SwName T.Text
 
 
 data PortInfoEl = PortInfoEl { elVlan :: Vlan
-                             , elMac  :: T.Text
+                             , elMac  :: MacAddr
                              , elPort :: PortNum
                              }
   deriving (Show)
 
 defaultPortInfoEl :: PortInfoEl
-defaultPortInfoEl = PortInfoEl {elVlan = Vlan 0, elMac = "0000", elPort = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
+defaultPortInfoEl = PortInfoEl {elVlan = Vlan 0, elMac = defMacAddr, elPort = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
 data PortNum  = PortNum { portSpeed  :: PortSpeed
                         , portSlot   :: Int
@@ -142,7 +143,7 @@ parseMacAddrTable = do
          ) <* A.endOfLine
       <* A.count 4 dashLineA <* A.endOfLine
     many $ A.takeWhile A.isHorizontalSpace
-      *> (PortInfoEl <$> parseVlanA <*> parseMacAddressA <*> portNumP)
+      *> (PortInfoEl <$> parseVlanA <*> macP <*> portNumP)
       <* (void A.endOfLine <|> A.endOfInput)
 -- FIXME: end of input termination is probably wrong, because attoparsec may
 -- run on whole stream. Probably, it's better to terminate at prompt or smth

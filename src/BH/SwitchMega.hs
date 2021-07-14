@@ -14,7 +14,18 @@ import qualified Text.Megaparsec        as M
 import qualified Text.Megaparsec.Char   as M
 import qualified Text.Megaparsec.Char.Lexer as ML
 
+import BH.IP
 import BH.Switch
+
+
+data PortInfoEl2 = PortInfoEl2  { elVlan2 :: Vlan
+                                , elMac2  :: T.Text
+                                , elPort2 :: PortNum
+                                }
+  deriving (Show)
+
+defaultPortInfoEl2 :: PortInfoEl2
+defaultPortInfoEl2 = PortInfoEl2 {elVlan2 = Vlan 0, elMac2 = "0000", elPort2 = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
 type Parser = M.Parsec Void T.Text
 
@@ -66,23 +77,23 @@ parsePortNum    = lexemeM $ PortNum
     <*> ML.decimal
     <*> (symbol "/" *> ML.decimal)
 
-columnVlanP :: Parser (PortInfoEl -> Parser PortInfoEl)
-columnVlanP = symbol "Vlan" *> pure (\p -> (\x -> p{elVlan = x}) <$> parseVlan)
+columnVlanP :: Parser (PortInfoEl2 -> Parser PortInfoEl2)
+columnVlanP = symbol "Vlan" *> pure (\p -> (\x -> p{elVlan2 = x}) <$> parseVlan)
                 M.<?> "column header 'Vlan'"
 
-columnMacAddressP :: Parser (PortInfoEl -> Parser PortInfoEl)
-columnMacAddressP = symbol "Mac Address" *> pure (\p -> (\x -> p{elMac = x}) <$> parseMacAddress)
+columnMacAddressP :: Parser (PortInfoEl2 -> Parser PortInfoEl2)
+columnMacAddressP = symbol "Mac Address" *> pure (\p -> (\x -> p{elMac2 = x}) <$> parseMacAddress)
                       M.<?> "column header 'Mac Address'"
 
-columnPortNumP :: Parser (PortInfoEl -> Parser PortInfoEl)
-columnPortNumP = symbol "Ports" *> pure (\p -> (\x -> p{elPort = x}) <$> parsePortNum)
+columnPortNumP :: Parser (PortInfoEl2 -> Parser PortInfoEl2)
+columnPortNumP = symbol "Ports" *> pure (\p -> (\x -> p{elPort2 = x}) <$> parsePortNum)
                    M.<?> "column header 'Ports'"
 
-columnTypeP :: Parser (PortInfoEl -> Parser PortInfoEl)
+columnTypeP :: Parser (PortInfoEl2 -> Parser PortInfoEl2)
 columnTypeP = symbol "Type" *> pure (\p -> symbol "DYNAMIC" *> pure p)
                 M.<?> "column header 'Type'"
 
-macAddrTableColumns :: [Parser (PortInfoEl -> Parser PortInfoEl)]
+macAddrTableColumns :: [Parser (PortInfoEl2 -> Parser PortInfoEl2)]
 macAddrTableColumns =
     [ columnVlanP
     , columnMacAddressP
@@ -119,11 +130,11 @@ parseTable emptyRow cols = do
     let rowP = M.hspace *> foldl (>>=) (pure emptyRow) cellPs <* (void M.eol <|> M.eof)
     many rowP
 
-parseMacAddrTableM2 :: Parser [PortInfoEl]
-parseMacAddrTableM2 = parseTable defaultPortInfoEl macAddrTableColumns
+parseMacAddrTableM2 :: Parser [PortInfoEl2]
+parseMacAddrTableM2 = parseTable defaultPortInfoEl2 macAddrTableColumns
 
 -- | Another (simpler) mac table parsing variant.
-parseMacAddrTableM :: Parser [PortInfoEl]
+parseMacAddrTableM :: Parser [PortInfoEl2]
 parseMacAddrTableM = do
     let dashLine = lexemeM $ M.takeWhile1P (Just "column header dash lines for one column") (== '-')
     void $ optional topHeader
@@ -133,6 +144,6 @@ parseMacAddrTableM = do
          ) <* M.eol
       <* M.count 4 dashLine <* M.eol
     many $ M.hspace
-      *> (PortInfoEl <$> parseVlan <*> parseMacAddress <*> portNumP)
+      *> (PortInfoEl2 <$> parseVlan <*> parseMacAddress <*> portNumP)
       <* (void M.eol <|> M.eof)
 

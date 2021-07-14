@@ -29,7 +29,7 @@ findPort t0 = do
                      then Nothing
                      else Just $ M.singleton sn (map elPort ps)
     sendAndParse (parse <$> parseMacAddrTable)
-          (defCmd $ "show mac address-table address " <> T.pack (show mac))
+          (defCmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
           t0
       >>= sendExit
 
@@ -37,7 +37,7 @@ main :: IO ()
 main    = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
-    Right mac <- head . map (parseMacAddr . T.pack) <$> getArgs
+    Right mac <- head . map (A.parseOnly macP . T.pack) <$> getArgs
     print mac
     res <- runExceptT $ do
       --mm <- flip runReaderT swInfo $ runTill mac findPort (const True)

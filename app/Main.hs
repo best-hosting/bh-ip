@@ -18,6 +18,7 @@ import Control.Concurrent
 import qualified Data.Yaml as Y
 import System.Directory
 import Text.HTML.TagSoup
+import qualified Data.Attoparsec.Text as A
 
 import BH.IP
 import BH.Switch
@@ -37,7 +38,7 @@ getMacs t0 = do
         parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
         parse xs = if null xs
                       then Nothing
-                      else Just $ M.singleton pid (map (either error id . parseMacAddr . elMac) xs)
+                      else Just $ M.singleton pid (map elMac xs)
 
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
@@ -48,7 +49,7 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
     go zs (_ : _ : x : y : _) =
         either (const zs) (\(w, t) -> uncurry (M.insertWith addIp) (w, t) zs) $ do
           ip <- parseIP x
-          ma <- parseMacAddr y
+          ma <- A.parseOnly macP y
           return (ma, [ip])
     go zs _                   = zs
 
@@ -87,7 +88,7 @@ queryLinuxArp host   = do
           | s == "REACHABLE" || s == "STALE" = do
             zs <- mzs
             ip <- parseIP x
-            ma <- parseMacAddr y
+            ma <- A.parseOnly macP y
             return (M.insertWith addIp ma [ip] zs)
           | otherwise   = mzs
         go _ _          = Left "Unrecognized `ip neigh` output line."
@@ -109,7 +110,7 @@ queryLinuxArp host   = do
             in  case oneHost xs of
                   [x, y]  -> do
                               ip  <- parseIP (fromAttrib "addr" x)
-                              mac <- parseMacAddr (fromAttrib "addr" y)
+                              mac <- A.parseOnly macP (fromAttrib "addr" y)
                               return (mac, [ip])
                   _       -> Left "Unrecognized ip, mac pair in nmap output."
 

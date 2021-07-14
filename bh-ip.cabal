@@ -74,6 +74,7 @@ executable bh-ip-exe
     , aeson
     , directory
     , tagsoup
+    , attoparsec
   default-language: Haskell2010
 
 executable bh-save-exe

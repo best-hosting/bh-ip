@@ -3,7 +3,9 @@
 
 module BH.IP
     ( MacAddr (..)
+    , defMacAddr
     , macP
+    , showMacAddr
     --, parseMacAddr
     , IP (..)
     , parseIP
@@ -36,10 +38,19 @@ data MacAddr    = MacAddr
                     }
   deriving (Eq, Ord)
 
-instance Show MacAddr where
-    showsPrec d MacAddr{..} = showParen (d > 10) $
-          showString "MacAddr "
-        . showOctet macOctet1 . showString ":"
+defMacAddr :: MacAddr
+defMacAddr  = MacAddr
+                    { macOctet1 = 0
+                    , macOctet2 = 0
+                    , macOctet3 = 0
+                    , macOctet4 = 0
+                    , macOctet5 = 0
+                    , macOctet6 = 0
+                    }
+
+showsMacAddr :: MacAddr -> ShowS
+showsMacAddr MacAddr{..} =
+          showOctet macOctet1 . showString ":"
         . showOctet macOctet2 . showString ":"
         . showOctet macOctet3 . showString ":"
         . showOctet macOctet4 . showString ":"
@@ -48,6 +59,14 @@ instance Show MacAddr where
       where
         showOctet :: Int -> ShowS
         showOctet d = showHex (d `div` 16) . showHex (d `mod` 16)
+
+showMacAddr :: MacAddr -> String
+showMacAddr m = showsMacAddr m ""
+
+instance Show MacAddr where
+    showsPrec d m = showParen (d > 10) $
+          showString "MacAddr "
+        . showsMacAddr m
 
 instance Read MacAddr where
     readPrec = parens . prec 10 . lift $ do
