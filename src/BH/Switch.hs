@@ -143,7 +143,7 @@ parseMacAddrTable = do
          ) <* A.endOfLine
       <* A.count 4 dashLineA <* A.endOfLine
     many $ A.takeWhile A.isHorizontalSpace
-      *> (PortInfoEl <$> parseVlanA <*> macP <*> portNumP)
+      *> (PortInfoEl <$> parseVlanA <*> lexemeA macP <*> portNumP)
       <* (void A.endOfLine <|> A.endOfInput)
 -- FIXME: end of input termination is probably wrong, because attoparsec may
 -- run on whole stream. Probably, it's better to terminate at prompt or smth
