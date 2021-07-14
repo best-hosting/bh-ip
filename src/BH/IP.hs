@@ -15,6 +15,7 @@ import qualified Data.Text as T
 import qualified Data.Aeson as J
 import qualified Data.Aeson.Encoding as J
 import qualified Data.Attoparsec.Text as A
+import qualified Data.Attoparsec.Combinator as A
 import Numeric
 import Text.Read
 import Text.Read.Lex
@@ -66,8 +67,8 @@ parseMacAddrA = let isMacChars = (||) <$> isHexDigit <*> (== '.')
 
     --(++) <$> count 5 (A.hexadecimal <* A.char ':') <*> ((: []) <$> A.hexadecimal)
 
-macOctetP :: A.Parser Int
-macOctetP = do
+macOctetP1 :: A.Parser Int
+macOctetP1 = do
     x <- A.hexadecimal A.<?> "mac octet"
     if x > 255
       then fail "Too great number for mac octet"
@@ -83,8 +84,32 @@ macOctetP2 = do
 mac :: A.Parser MacAddr2
 mac = do
     [macOctet1, macOctet2, macOctet3, macOctet4, macOctet5, macOctet6]
-        <-                  (:) <$> macOctetP  <*> A.count 5 (A.char ':' *> macOctetP)
+        <-                  (:) <$> macOctetP1  <*> A.count 5 (A.char ':' *> macOctetP1)
             <|> concat <$> ((:) <$> macOctetP2 <*> A.count 2 (A.char '.' *> macOctetP2))
+    return MacAddr2{..}
+
+macP1 :: A.Parser [Int]
+macP1 =
+    (:)
+        <$> macOctetP1
+        <*> (A.count 5 (A.char ':' *> macOctetP1) A.<?> "Too few octets for mac")
+
+macP2 :: A.Parser [Int]
+macP2 = fmap concat $
+    (:) <$> macOctetP2
+        <*> (A.count 2 (A.char '.' *> macOctetP2) A.<?> "Too few octets for 2-byte mac")
+
+mac' :: A.Parser MacAddr2
+mac' = do
+    -- 'lookAhead' allows to choose parsing branch first and then fail entire
+    -- parser, if choosed branch fails. If on the other hand <|> would be
+    -- applied to branches itself 'macP1 <|> macP2', then e.g. regular
+    -- erroneous mac address ("x:1:2:3:4:5") will always fail in 2nd branch
+    -- and error message will be misleading.
+    p <-    A.lookAhead (A.takeWhile1 (`notElem` [':', '.']) <* A.char ':') *> return macP1
+        <|> A.lookAhead (A.takeWhile1 (`notElem` [':', '.']) <* A.char '.') *> return macP2
+    [macOctet1, macOctet2, macOctet3, macOctet4, macOctet5, macOctet6]
+      <- p
     return MacAddr2{..}
 
 parseMacAddr :: T.Text -> Either String MacAddr
