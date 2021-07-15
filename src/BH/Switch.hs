@@ -104,14 +104,6 @@ ciscoPortNum PortNum{..} =
 data PortSpeed  = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Show)
 
--- Below are attoparsec version.
-parseVlanA :: A.Parser Vlan
-parseVlanA  = lexemeA $ do
-      v <- lexemeA A.decimal A.<?> "vlan number"
-      if v < 4096
-        then return (Vlan v)
-        else fail "Nihuya sebe vlan"
-
 parsePortNumA :: A.Parser PortNum
 parsePortNumA    = lexemeA
     $ ( PortNum
@@ -143,7 +135,7 @@ parseMacAddrTable = do
          ) <* A.endOfLine
       <* A.count 4 dashLineA <* A.endOfLine
     many $ A.takeWhile A.isHorizontalSpace
-      *> (PortInfoEl <$> parseVlanA <*> lexemeA macP <*> portNumP)
+      *> (PortInfoEl <$> lexemeA vlanP <*> lexemeA macP <*> portNumP)
       <* (void A.endOfLine <|> A.endOfInput)
 -- FIXME: end of input termination is probably wrong, because attoparsec may
 -- run on whole stream. Probably, it's better to terminate at prompt or smth

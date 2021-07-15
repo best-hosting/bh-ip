@@ -11,6 +11,7 @@ module BH.IP
     , showIP
     , ipP
     , Vlan (..)
+    , vlanP
     )
   where
 
@@ -248,3 +249,12 @@ parseIP t = do
 
 newtype Vlan = Vlan Int
   deriving (Show)
+
+-- | Parser for vlan number.
+vlanP :: A.Parser Vlan
+vlanP = do
+    v <- A.decimal A.<?> "vlan number"
+    if v < 4096
+      then return (Vlan v)
+      else fail "Nihuya sebe vlan"
+
