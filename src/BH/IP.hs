@@ -6,11 +6,10 @@ module BH.IP
     , defMacAddr
     , macP
     , showMacAddr
-    --, parseMacAddr
     , IP (..)
     , defIP
-    --, showIP
-    --, ipP
+    , showIP
+    , ipP
     , Vlan (..)
     )
   where
@@ -81,9 +80,9 @@ instance Read MacAddr where
           <*> readHexP
 
 instance J.ToJSON MacAddr where
-    toJSON mac = J.toJSON (show mac)
+    toJSON mac = J.toJSON (showMacAddr mac)
 instance J.ToJSONKey MacAddr where
-    toJSONKey = J.ToJSONKeyText (T.pack . show) (J.string . show)
+    toJSONKey = J.ToJSONKeyText (T.pack . showMacAddr) (J.string . showMacAddr)
 
 instance J.FromJSON MacAddr where
     parseJSON (J.String t) = either fail return (A.parseOnly macP t)
@@ -119,6 +118,7 @@ macP2 = fmap concat $
         <*> (A.count 2 (A.char '.' *> macOctetP2) A.<?> "Too few octets for 2-byte mac")
 
 -- | Parser for mac addresses.
+-- Note, to print mac address in parser-compatible form use 'showMacAddr'.
 macP :: A.Parser MacAddr
 macP = do
     -- 'lookAhead' allows to choose parsing branch first and then fail entire
@@ -209,6 +209,13 @@ instance Read IP where
            <*> readDecP <* expect (Symbol ".")
            <*> readDecP
 
+instance J.ToJSON IP where
+    toJSON ip   = J.toJSON (showIP ip)
+
+instance J.FromJSON IP where
+    parseJSON (J.String t) = either fail return (A.parseOnly ipP t)
+
+-- | Parser for IP address octet.
 ipOctetP :: A.Parser Int
 ipOctetP = do
     x <- A.decimal A.<?> "ip octet"
@@ -216,8 +223,15 @@ ipOctetP = do
       then fail "Too great number for ip octet"
       else pure x
 
+-- | Parser for IP address.
+-- Note, to print IP address in parser-compatible form use 'showIP'.
+ipP :: A.Parser IP
+ipP = do
+    [ipOctet1, ipOctet2, ipOctet3, ipOctet4]
+      <- (:) <$> ipOctetP <*> A.count 3 (A.char '.' *> ipOctetP)
+    return IP{..}
 
-newtype IP2          = IP2 (Int, Int, Int, Int)
+{-newtype IP2          = IP2 (Int, Int, Int, Int)
   deriving (Eq)
 
 instance Show IP2 where
@@ -231,13 +245,14 @@ instance J.ToJSON IP2 where
     toJSON ip   = J.toJSON (show ip)
 
 instance J.FromJSON IP2 where
-    parseJSON (J.String t) = either fail return (parseIP2 t)
+    parseJSON (J.String t) = either fail return (parseIP t)-}
 
-parseIP2 :: T.Text -> Either String IP2
-parseIP2 t = do
+-- | Plain (no parsec) parser for IP address.
+parseIP :: T.Text -> Either String IP
+parseIP t = do
     os <- mapM parseOctet . T.split (== '.') $ t
     case os of
-      [o1, o2, o3, o4]  -> Right (IP2 (o1, o2, o3, o4))
+      [ipOctet1, ipOctet2, ipOctet3, ipOctet4]  -> Right (IP {..})
       _                 -> Left "Too few or too many octets."
   where
     parseOctet :: T.Text -> Either String Int

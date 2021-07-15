@@ -48,7 +48,7 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
     go :: MacIpMap -> [T.Text] -> MacIpMap
     go zs (_ : _ : x : y : _) =
         either (const zs) (\(w, t) -> uncurry (M.insertWith addIp) (w, t) zs) $ do
-          ip <- parseIP x
+          ip <- A.parseOnly ipP x
           ma <- A.parseOnly macP y
           return (ma, [ip])
     go zs _                   = zs
@@ -87,7 +87,7 @@ queryLinuxArp host   = do
         go mzs (x : _ : _ : _ : y : s : _)
           | s == "REACHABLE" || s == "STALE" = do
             zs <- mzs
-            ip <- parseIP x
+            ip <- A.parseOnly ipP x
             ma <- A.parseOnly macP y
             return (M.insertWith addIp ma [ip] zs)
           | otherwise   = mzs
@@ -109,7 +109,7 @@ queryLinuxArp host   = do
             let oneHost = filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String))
             in  case oneHost xs of
                   [x, y]  -> do
-                              ip  <- parseIP (fromAttrib "addr" x)
+                              ip  <- A.parseOnly ipP (fromAttrib "addr" x)
                               mac <- A.parseOnly macP (fromAttrib "addr" y)
                               return (mac, [ip])
                   _       -> Left "Unrecognized ip, mac pair in nmap output."
@@ -122,7 +122,7 @@ queryLinuxArp host   = do
 parseMikrotikArp zs t = case T.words t of
     (_ : _ : x : y : _) ->
       either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
-        ip <- parseIP x
+        ip <- A.parseOnly ipP x
         ma <- parseMacAddr y
         return (ma, [ip])
     _                   -> zs-}
@@ -132,7 +132,7 @@ parseMikrotikArp    = go . T.words
   where
     go :: [T.Text] -> Either String (MacAddr, [IP])
     go (_ : _ : x : y : _) = do
-      ip <- parseIP x
+      ip <- A.parseOnly ipP x
       ma <- parseMacAddr y
       return (ma, [ip])
     go _ = Left "Huy"
@@ -142,7 +142,7 @@ parseLinuxArp   = go . T.words
   where
     go :: [T.Text] -> Either String (MacAddr, [IP])
     go (_ : x : _ : y : _) = do
-      ip <- parseIP x
+      ip <- A.parseOnly ipP x
       ma <- parseMacAddr y
       return (ma, [ip])
     go _ = Left "Huy"
@@ -150,7 +150,7 @@ parseLinuxArp   = go . T.words
 
 parseLinuxArp :: [T.Text] -> Either String (MacAddr, [IP])
 parseLinuxArp (_ : x : _ : y : _) = do
-      ip <- parseIP x
+      ip <- A.parseOnly ipP x
       ma <- parseMacAddr y
       return (ma, [ip])
 parseLinuxArp _ = Left "Huy"
@@ -158,7 +158,7 @@ parseLinuxArp _ = Left "Huy"
 {-parseLinuxArp :: MacIpMap -> T.Text -> MacIpMap
 parseLinuxArp zs t = case T.words t of
     (_ : x : _ : y : _) -> either (const zs) (\(w, y) -> uncurry (M.insertWith addIp) (w, y) zs) $ do
-      ip <- parseIP x
+      ip <- A.parseOnly ipP x
       ma <- parseMacAddr y
       return (ma, [ip])
     _                   -> zs-}-}
