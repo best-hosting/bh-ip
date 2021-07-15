@@ -155,6 +155,7 @@ executable t2
     , parser-combinators
     , mtl
     , containers
+    , optparse-applicative
   default-language: Haskell2010
 
 test-suite bh-ip-test
