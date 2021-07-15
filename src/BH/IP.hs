@@ -231,22 +231,6 @@ ipP = do
       <- (:) <$> ipOctetP <*> A.count 3 (A.char '.' *> ipOctetP)
     return IP{..}
 
-{-newtype IP2          = IP2 (Int, Int, Int, Int)
-  deriving (Eq)
-
-instance Show IP2 where
-    showsPrec d ip = (showIP2 ip ++)
-      where
-        showIP2 :: IP2 -> String
-        showIP2 (IP2 (o1, o2, o3, o4)) =
-            show o1 ++ "." ++ show o2 ++ "." ++ show o3 ++ "." ++ show o4
-
-instance J.ToJSON IP2 where
-    toJSON ip   = J.toJSON (show ip)
-
-instance J.FromJSON IP2 where
-    parseJSON (J.String t) = either fail return (parseIP t)-}
-
 -- | Plain (no parsec) parser for IP address.
 parseIP :: T.Text -> Either String IP
 parseIP t = do
