@@ -1,8 +1,10 @@
 {-# LANGUAGE GADTs #-}
 
+import qualified Options.Applicative as O
+
 data Option a = Option
   { optName :: String
-  , optParser :: String -> Maybe a
+  , optParser :: String -> Maybe a -- ^ How to parse option argument.
   }
 
 instance Functor Option where
@@ -26,9 +28,11 @@ instance Applicative Parser where
   ConsP opt rest <*> p =
     ConsP (fmap uncurry opt) ((,) <$> rest <*> p)
 
+-- | Create Parser for option.
 option :: String -> (String -> Maybe a) -> Parser a
 option name p = ConsP (fmap const (Option name p)) (NilP ())
 
+-- | Create Parser for option using 'read' as argument parser.
 optionR :: Read a => String -> Parser a
 optionR name = option name p
   where
