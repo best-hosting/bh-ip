@@ -6,6 +6,8 @@ module BH.Switch
     , SwInfo (..)
     , parseSwInfo
     , SwPort (..)
+    , swPortP
+    , swPortP'
     , PortMacMap
     , MacPortMap
     , SwConfig
@@ -68,6 +70,19 @@ parseSwInfo   = M.fromList . map go .  T.lines
 data SwPort        = SwPort {portSw :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
+-- | Parse fully specified switch port.
+swPortP :: A.Parser SwPort
+swPortP = swPortP' (const (Nothing, Nothing))
+
+-- | Parse switch port providing function for determining defaults for port
+-- specification parser.
+swPortP' :: (SwName -> (Maybe PortSpeed, Maybe Int)) ->  A.Parser SwPort
+swPortP' getDefs = do
+    pn <- SwName <$> A.takeWhile1 (/= '/') <* A.string "/" A.<?> "switch name"
+    let (defSpeed, defSlot) = getDefs $ pn
+    SwPort pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
+
+
 type PortMacMap    = M.Map SwPort (Maybe [MacAddr])
 
 -- FIXME: New port and switch types:
@@ -106,8 +121,7 @@ data PortSpeed  = FastEthernet | GigabitEthernet
 portNumP :: A.Parser PortNum
 portNumP    = portNumP' Nothing Nothing
 
--- | Parse port number using default port speed and default port slot, if its
--- missed.
+-- | Parse port number providing default port speed and default port slot.
 portNumP' :: Maybe PortSpeed -- ^ Default port speed.
           -> Maybe Int       -- ^ Default port slot.
           -> A.Parser PortNum

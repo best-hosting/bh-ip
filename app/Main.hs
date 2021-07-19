@@ -19,6 +19,8 @@ import qualified Data.Yaml as Y
 import System.Directory
 import Text.HTML.TagSoup
 import qualified Data.Attoparsec.Text as A
+import qualified Options.Applicative  as O
+import Control.Monad (join)
 
 import BH.IP
 import BH.Switch
@@ -165,6 +167,29 @@ parseLinuxArp zs t = case T.words t of
 
 addIp :: [IP] -> [IP] -> [IP]
 addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
+
+data Options = Options { switchPort :: String }
+
+main2 :: IO ()
+main2 = join . O.customExecParser (O.prefs O.showHelpOnError) $
+  O.info (O.helper <*> parser)
+  (  O.fullDesc
+  <> O.header "General program title/description"
+  <> O.progDesc "What does this thing do?"
+  )
+  where
+    parser :: O.Parser (IO ())
+    parser =
+      work . Options
+        <$> O.strOption
+            (  O.long "switch-port"
+            <> O.short 'p'
+            <> O.metavar "SWITCH/PORT"
+            <> O.help "Switch port to look for."
+            )
+
+work :: Options -> IO ()
+work _ = return ()
 
 main :: IO ()
 main    = do
