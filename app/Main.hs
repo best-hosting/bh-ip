@@ -21,6 +21,7 @@ import Text.HTML.TagSoup
 import qualified Data.Attoparsec.Text as A
 import qualified Options.Applicative  as O
 import Control.Monad (join)
+import Control.Applicative
 
 import BH.IP
 import BH.Switch
@@ -168,36 +169,42 @@ parseLinuxArp zs t = case T.words t of
 addIp :: [IP] -> [IP] -> [IP]
 addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
 
-data Options = Options { switchPort :: String }
+data Options = Options {switchPorts :: [SwPort]}
+  deriving (Show)
 
-main2 :: IO ()
-main2 = join . O.customExecParser (O.prefs O.showHelpOnError) $
-  O.info (O.helper <*> parser)
-  (  O.fullDesc
-  <> O.header "General program title/description"
-  <> O.progDesc "What does this thing do?"
-  )
-  where
-    parser :: O.Parser (IO ())
-    parser =
-      work . Options
-        <$> O.strOption
+optParser :: M.Map SwName SwInfo -> O.Parser Options
+optParser swInfo = Options
+    <$> some
+        ( O.option
+            (O.eitherReader (A.parseOnly (swPortP' getSwDefaults) . T.pack))
             (  O.long "switch-port"
             <> O.short 'p'
             <> O.metavar "SWITCH/PORT"
             <> O.help "Switch port to look for."
             )
-
-work :: Options -> IO ()
-work _ = return ()
+        )
+  where
+    getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
+    getSwDefaults sn = let m = M.lookup sn swInfo
+                       in  (defaultPortSpeed <$> m, defaultPortSlot <$> m)
 
 main :: IO ()
-main    = do
+main = do
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
-    swports <- parseArgs swInfo <$> getArgs
-    print swports
-    let sw = head . M.keys $ swports
+    opts <- O.customExecParser (O.prefs O.showHelpOnError) $
+      O.info (O.helper <*> optParser swInfo)
+      (  O.fullDesc
+      <> O.header "General program title/description"
+      <> O.progDesc "What does this thing do?"
+      )
+    work swInfo opts
+
+work :: M.Map SwName SwInfo -> Options -> IO ()
+work swInfo opts = do
+    print opts
+    let swports = M.fromList . map (\x -> (x, [])) $ switchPorts opts
+        sw = head . M.keys $ swports
     res <- runExceptT $ do
       Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
       --mm <-  flip runReaderT swInfo $ Main.run
@@ -210,19 +217,6 @@ main    = do
     case res of
       Right () -> return ()
       Left err -> print err
-
-parseArgs :: M.Map SwName SwInfo -> [String] -> PortMacMap
-parseArgs swInfo = foldr go M.empty
-  where
-    go :: String -> PortMacMap -> PortMacMap
-    go xs z = let (sn, '/' : sp) = span (/= '/') xs
-                  swn = SwName (T.pack sn)
-                  ps = maybe "huy" defaultPortSpec (M.lookup swn swInfo)
-              in  M.insert
-                    -- FIXME: Wrong port speed.
-                    (SwPort {portSw = swn, portSpec = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = read sp}})
-                    Nothing
-                    z
 
 getIPs :: PortMacMap -> MacIpMap -> [IP]
 getIPs portMac macIp = foldr go [] portMac

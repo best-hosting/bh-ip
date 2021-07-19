@@ -19,6 +19,7 @@ module BH.Switch
     , portNumP'
     , ciscoPortNum
     , PortSpeed (..)
+    , portSpeedP
     , parseMacAddrTable
     , parseCiscoConfig
     )
@@ -47,7 +48,8 @@ data SwInfo         = SwInfo
                         , userName :: T.Text
                         , password :: T.Text
                         , enablePassword :: T.Text
-                        , defaultPortSpec :: T.Text
+                        , defaultPortSpeed :: PortSpeed
+                        , defaultPortSlot  :: Int
                         }
   deriving (Show)
 
@@ -62,7 +64,8 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             , userName = un
                             , password = pw
                             , enablePassword = enpw
-                            , defaultPortSpec = ds
+                            , defaultPortSpeed = either error id (A.parseOnly portSpeedP ds)
+                            , defaultPortSlot = 0
                             }
                 )
 
@@ -108,13 +111,19 @@ data PortInfoEl = PortInfoEl { elVlan :: Vlan
 defaultPortInfoEl :: PortInfoEl
 defaultPortInfoEl = PortInfoEl {elVlan = Vlan 0, elMac = defMacAddr, elPort = PortNum {portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
+data PortSpeed  = FastEthernet | GigabitEthernet
+  deriving (Eq, Ord, Read, Show)
+
+portSpeedP :: A.Parser PortSpeed
+portSpeedP =
+        A.string "FastEthernet"     *> pure FastEthernet
+    <|> A.string "GigabitEthernet"  *> pure GigabitEthernet
+    A.<?> "port speed"
+
 data PortNum  = PortNum { portSpeed  :: PortSpeed
                         , portSlot   :: Int
                         , portNumber :: Int
                         }
-  deriving (Eq, Ord, Show)
-
-data PortSpeed  = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Show)
 
 -- | Parse fully specified port number.
