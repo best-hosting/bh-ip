@@ -13,6 +13,8 @@ module BH.Switch
     , PortInfoEl (..)
     , defaultPortInfoEl
     , PortNum (..)
+    , portNumP
+    , portNumP'
     , ciscoPortNum
     , PortSpeed (..)
     , parseMacAddrTable
@@ -26,6 +28,7 @@ import qualified Data.Map as M
 
 import Control.Applicative
 import qualified Data.Attoparsec.Text as A
+import qualified Data.Attoparsec.Combinator as A
 import Data.Char
 import Control.Monad
 
@@ -96,22 +99,47 @@ data PortNum  = PortNum { portSpeed  :: PortSpeed
                         }
   deriving (Eq, Ord, Show)
 
+data PortSpeed  = FastEthernet | GigabitEthernet
+  deriving (Eq, Ord, Show)
+
+-- | Parse fully specified port number.
+portNumP :: A.Parser PortNum
+portNumP    = portNumP' Nothing Nothing
+
+-- | Parse port number using default port speed and default port slot, if its
+-- missed.
+portNumP' :: Maybe PortSpeed -- ^ Default port speed.
+          -> Maybe Int       -- ^ Default port slot.
+          -> A.Parser PortNum
+portNumP' defSpeed defSlot = do
+    p <- A.lookAhead
+            $ (A.string "Fa" <|> A.string "fa" <|> A.string "Gi" <|> A.string "gi")
+                    *> pure p1
+                <|>    pure p2
+    p <*> A.decimal A.<?> "port number"
+  where
+    -- Parse speed and port number from 'fa0/3', 'fa/3' and 'fa3'.  In last
+    -- two variants default port slot is /required/.
+    p1 :: A.Parser (Int -> PortNum)
+    p1 = PortNum
+            <$> (   (A.string "Fa" <|> A.string "fa") *> pure FastEthernet
+                <|> (A.string "Gi" <|> A.string "gi") *> pure GigabitEthernet
+                )
+            <*> (   A.decimal <* A.string "/"
+                <|> maybe (fail "No default port slot") pure defSlot <* optional (A.string "/")
+                A.<?> "slot number"
+                )
+    -- If port speed is not specified explicitly, both default port speed and
+    -- port slot are /required/.
+    p2 :: A.Parser (Int -> PortNum)
+    p2 = PortNum
+            <$> maybe (fail "No default port speed") pure defSpeed
+            <*> maybe (fail "No default port slot")  pure defSlot A.<?> "slot number"
+
 -- | Print 'PortNum' in a format understand by cisco.
 ciscoPortNum :: PortNum -> T.Text
 ciscoPortNum PortNum{..} =
     T.pack $ show portSpeed <> " " <> show portSlot <> "/" <> show portNumber
-
-data PortSpeed  = FastEthernet | GigabitEthernet
-  deriving (Eq, Ord, Show)
-
-parsePortNumA :: A.Parser PortNum
-parsePortNumA    = lexemeA
-    $ ( PortNum
-        <$> (symbolA "Fa" *> pure FastEthernet <|> symbolA "Gi" *> pure GigabitEthernet)
-        <*> A.decimal
-        <*> (symbolA "/" *> A.decimal)
-        A.<?> "port number"
-      )
 
 -- | Dashes underlining header of _one_ column. Trailing spaces are consumed,
 -- but newline does _not_ .
@@ -130,8 +158,8 @@ parseMacAddrTable :: A.Parser [PortInfoEl]
 parseMacAddrTable = do
     void $ optional topHeaderA
     portNumP <- symbolA "Vlan" *> symbolA "Mac Address"
-      *> (      symbolA "Type"  *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> parsePortNumA)
-            <|> symbolA "Ports" *> symbolA "Type"  *> pure (parsePortNumA <* symbolA "DYNAMIC")
+      *> (      symbolA "Type"  *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> lexemeA portNumP)
+            <|> symbolA "Ports" *> symbolA "Type"  *> pure (lexemeA portNumP <* symbolA "DYNAMIC")
          ) <* A.endOfLine
       <* A.count 4 dashLineA <* A.endOfLine
     many $ A.takeWhile A.isHorizontalSpace
