@@ -65,6 +65,9 @@ optParser swInfo = Options
 
 main :: IO ()
 main = do
+    -- TODO: I may use single for storing authinfo and other config. This file
+    -- may be encrypted with gpg and edited with sops. Alternatively, i may
+    -- split config..
     swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
     print swInfo
     opts <- O.customExecParser (O.prefs O.showHelpOnError) $
@@ -74,6 +77,13 @@ main = do
       <> O.progDesc "What does this thing do?"
       )
     work swInfo opts
+
+-- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
+-- - "physical" - mac address used by server. It may be considered bind to
+-- server.
+-- - "virtual" - mac address of virtual machine. It may migrate from server
+-- (switch port) to server, though physical server connection does not change.
+-- - "unknown" - mac address is not assigned to any server.
 
 work :: M.Map SwName SwInfo -> Options -> IO ()
 work swInfo opts = do
@@ -86,7 +96,7 @@ work swInfo opts = do
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ putStrLn "Gathered ac map:"
       liftIO $ print mm
-      arp1 <- queryLinuxArp "certbot"
+      arp1 <- queryLinuxArp "mac-ip-cache.yml" "certbot"
       liftIO $ putStrLn "Finally, ips..."
       liftIO $ print (macsToIPs arp1 mm)
     case res of
