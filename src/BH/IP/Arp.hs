@@ -40,7 +40,6 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
           return (ma, [ip])
     go zs _                   = zs
 
-queryLinuxArp = undefined
 {--- Use 'ip neigh'.
 queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
               -> T.Text     -- ^ ssh hostname of host, from which to query.
@@ -61,7 +60,7 @@ queryLinuxArp file host = do
         liftIO $ Y.encodeFile file macMap
         return maps-}
 
-{--- Use 'ip neigh'.
+-- Use 'ip neigh'.
 queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
               -> T.Text     -- ^ ssh hostname of host, from which to query.
               -> ExceptT String IO (MacIpMap, IpMacMap)
@@ -69,7 +68,7 @@ queryLinuxArp file host = do
     b <- liftIO $ doesFileExist file
     -- FIXME: Update cache, if it's too old.
     if b
-      then catchE (ExceptT (Y.decodeFileEither file) >>= \x -> (x, M.empty)) $ \e -> do
+      then catchE (ExceptT (Y.decodeFileEither file) >>= \x -> return (x, M.empty)) $ \e -> do
         liftIO (print e)
         updateArpCache
       else updateArpCache
@@ -79,7 +78,7 @@ queryLinuxArp file host = do
         --mi <- nmapCache
         maps@(macMap, _) <- ipNeighCache host
         liftIO $ Y.encodeFile file macMap
-        return maps-}
+        return maps
 
 ipNeighCache :: MonadIO m => T.Text -> ExceptT String m (MacIpMap, IpMacMap)
 ipNeighCache host = ExceptT . Sh.shelly . Sh.silently $ do
@@ -87,8 +86,7 @@ ipNeighCache host = ExceptT . Sh.shelly . Sh.silently $ do
     Sh.run_ "ssh"
             (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
     liftIO $ threadDelay 5000000
-    --mi <- Sh.runFoldLines (return M.empty) (\zs -> go zs . T.words) "ssh"
-    z <- Sh.runFoldLines (pure (M.empty, M.empty)) (\mz ts -> mz >>= go2 ts) "ssh"
+    z <- Sh.runFoldLines (pure mempty) (\mz ts -> mz >>= go2 ts) "ssh"
             (host : T.words "ip neighbour show nud reachable nud stale")
     Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
     return z
