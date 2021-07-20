@@ -67,18 +67,24 @@ queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
 queryLinuxArp file host = do
     b <- liftIO $ doesFileExist file
     -- FIXME: Update cache, if it's too old.
-    if b
-      then catchE (ExceptT (Y.decodeFileEither file) >>= \x -> return (x, M.empty)) $ \e -> do
-        liftIO (print e)
-        updateArpCache
-      else updateArpCache
+    cache <- if b
+      then catchE (ExceptT $ Y.decodeFileEither file) $ \e ->
+             liftIO (print e) >> return mempty
+      else return mempty
+    updateArpCache file host cache
+
+updateArpCache :: FilePath -> T.Text -> MacIpMap -> ExceptT String IO (MacIpMap, IpMacMap)
+updateArpCache file host cache
+  | cache /= mempty = return (cache, M.foldrWithKey rebuild mempty cache)
+  | otherwise = do
+    --mi <- nmapCache
+    maps@(macMap, _) <- ipNeighCache host
+    liftIO $ Y.encodeFile file macMap
+    return maps
   where
-    updateArpCache :: ExceptT String IO (MacIpMap, IpMacMap)
-    updateArpCache  = do
-        --mi <- nmapCache
-        maps@(macMap, _) <- ipNeighCache host
-        liftIO $ Y.encodeFile file macMap
-        return maps
+    -- Rebuild 'IpMacMap' from cached 'MacIpMap'.
+    rebuild :: MacAddr -> [IP] -> IpMacMap -> IpMacMap
+    rebuild mac ips zm0 = foldr (\ip zm -> M.insert ip mac zm) zm0 ips
 
 ipNeighCache :: MonadIO m => T.Text -> ExceptT String m (MacIpMap, IpMacMap)
 ipNeighCache host = ExceptT . Sh.shelly . Sh.silently $ do
