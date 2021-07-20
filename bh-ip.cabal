@@ -29,6 +29,7 @@ library
   exposed-modules:
       BH.Common
       BH.IP
+      BH.IP.Arp
       BH.Switch
       BH.Telnet
   other-modules:
@@ -49,6 +50,10 @@ library
     , monad-loops
     , megaparsec
     , attoparsec
+    , tagsoup
+    , directory
+    , shelly
+    , yaml
   default-language: Haskell2010
 
 executable bh-ip-exe
