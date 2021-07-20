@@ -12,6 +12,7 @@ module BH.Switch
     , MacPortMap
     , SwConfig
     , MacIpMap
+    , IpMacMap
     , PortInfoEl (..)
     , defaultPortInfoEl
     , PortNum (..)
@@ -95,7 +96,9 @@ type PortMacMap    = M.Map SwPort (Maybe [MacAddr])
 
 type MacPortMap     = M.Map MacAddr (Maybe [SwPort])
 
+-- FIXME: Use Set, so uniquiness won't be a problem.
 type MacIpMap       = M.Map MacAddr [IP]
+type IpMacMap       = M.Map IP MacAddr
 
 type PortMap       = M.Map SwPort [(MacAddr, [IP])]
 

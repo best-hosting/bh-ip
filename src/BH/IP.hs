@@ -178,7 +178,7 @@ data IP = IP
             , ipOctet3 :: Int
             , ipOctet4 :: Int
             }
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 defIP :: IP
 defIP   = IP

@@ -96,7 +96,7 @@ work swInfo opts = do
       --mm <-  flip runReaderT swInfo $ runOn
       liftIO $ putStrLn "Gathered ac map:"
       liftIO $ print mm
-      arp1 <- queryLinuxArp "mac-ip-cache.yml" "certbot"
+      (arp1, _) <- queryLinuxArp "mac-ip-cache.yml" "certbot"
       liftIO $ putStrLn "Finally, ips..."
       liftIO $ print (macsToIPs arp1 mm)
     case res of

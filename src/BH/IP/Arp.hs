@@ -40,35 +40,58 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
           return (ma, [ip])
     go zs _                   = zs
 
--- Use 'ip neigh'.
+queryLinuxArp = undefined
+{--- Use 'ip neigh'.
 queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
               -> T.Text     -- ^ ssh hostname of host, from which to query.
-              -> ExceptT String IO MacIpMap
+              -> ExceptT String IO (MacIpMap, IpMacMap)
 queryLinuxArp file host = do
     b <- liftIO $ doesFileExist file
+    -- FIXME: Update cache, if it's too old.
     if b
-      then catchE (ExceptT $ Y.decodeFileEither file) $ \e -> do
+      then catchE (ExceptT (Y.decodeFileEither file) >>= \x -> (x, M.empty)) $ \e -> do
         liftIO (print e)
         updateArpCache
       else updateArpCache
   where
-    updateArpCache :: ExceptT String IO MacIpMap
+    updateArpCache :: ExceptT String IO (MacIpMap, IpMacMap)
     updateArpCache  = do
         --mi <- nmapCache
-        mi <- ipNeighCache host
-        liftIO $ Y.encodeFile file mi
-        return mi
+        maps@(macMap, _) <- ipNeighCache host
+        liftIO $ Y.encodeFile file macMap
+        return maps-}
 
-ipNeighCache :: T.Text -> ExceptT String IO MacIpMap
+{--- Use 'ip neigh'.
+queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
+              -> T.Text     -- ^ ssh hostname of host, from which to query.
+              -> ExceptT String IO (MacIpMap, IpMacMap)
+queryLinuxArp file host = do
+    b <- liftIO $ doesFileExist file
+    -- FIXME: Update cache, if it's too old.
+    if b
+      then catchE (ExceptT (Y.decodeFileEither file) >>= \x -> (x, M.empty)) $ \e -> do
+        liftIO (print e)
+        updateArpCache
+      else updateArpCache
+  where
+    updateArpCache :: ExceptT String IO (MacIpMap, IpMacMap)
+    updateArpCache  = do
+        --mi <- nmapCache
+        maps@(macMap, _) <- ipNeighCache host
+        liftIO $ Y.encodeFile file macMap
+        return maps-}
+
+ipNeighCache :: MonadIO m => T.Text -> ExceptT String m (MacIpMap, IpMacMap)
 ipNeighCache host = ExceptT . Sh.shelly . Sh.silently $ do
     liftIO $ putStrLn "Updating arp cache using `nping` and `ip neighbour`..."
     Sh.run_ "ssh"
             (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
     liftIO $ threadDelay 5000000
-    mi <- Sh.runFoldLines (return M.empty) (\zs -> go zs . T.words) "ssh"
+    --mi <- Sh.runFoldLines (return M.empty) (\zs -> go zs . T.words) "ssh"
+    z <- Sh.runFoldLines (pure (M.empty, M.empty)) (\mz ts -> mz >>= go2 ts) "ssh"
             (host : T.words "ip neighbour show nud reachable nud stale")
     Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
-    return mi
+    return z
   where
     go :: Either String MacIpMap -> [T.Text] -> Either String MacIpMap
     go mzs (x : _ : _ : _ : y : s : _)
@@ -80,11 +103,27 @@ ipNeighCache host = ExceptT . Sh.shelly . Sh.silently $ do
       | otherwise   = mzs
     go _ _          = Left "Unrecognized `ip neigh` output line."
 
-go2 :: A.Parser (IP, MacAddr)
-go2 = (,)
-    <$> lexemeA ipP  <*  A.count 3 (A.takeWhile1 (/= ' ') *> A.string " ")
-    <*> lexemeA macP <*  A.takeWhile1 (not . A.isEndOfLine)
-    A.<?> "ip neigh output line"
+--go2 :: Either String (MacIpMap, IpMacMap) -> T.Text -> Either String (MacIpMap, IpMacMap)
+go2 :: T.Text -> (MacIpMap, IpMacMap) -> Either String (MacIpMap, IpMacMap)
+go2 ts z@(macMap, ipMap) = do
+    (ip, mac, state) <- A.parseOnly ipNeighP ts
+    if state == "STALE" || state == "REACHABLE"
+      then return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)
+      else return z
+
+{-go3 :: (MacIpMap, IpMacMap) -> T.Text -> (MacIpMap, IpMacMap)
+go3 zs@(macMap, ipMap) ts = fromMaybe zs $ do
+    (ip, mac) <- either (const Nothing) Just $ A.parseOnly ipNeighP ts
+    return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)-}
+
+-- | Parse 'ip neigh' output in the form of "IP, Mac, record state".
+ipNeighP :: A.Parser (IP, MacAddr, T.Text)
+ipNeighP = (,,)
+    <$> lexemeA ipP  <* A.count 3 (A.takeWhile1 (/= ' ') *> A.string " ")
+    <*> lexemeA macP
+    <*> (A.string "REACHABLE" <|> A.string "STALE" A.<?> "mac state")
+    <*  A.takeWhile (not . A.isEndOfLine)
+    A.<?> "ip neigh output"
 
 nmapCache :: T.Text -> ExceptT String IO MacIpMap
 nmapCache host = do
