@@ -11,6 +11,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Control.Monad.IO.Class
 import qualified Data.Map as M
+import qualified Data.Set as S
 import System.Environment
 import Control.Monad.Trans.Cont
 import Control.Monad.Reader
@@ -24,6 +25,7 @@ import Text.HTML.TagSoup
 import qualified Data.Attoparsec.Text as A
 import Control.Monad (join)
 import Control.Applicative
+import Control.Applicative.Combinators
 import Data.Char
 
 import BH.Common
@@ -128,6 +130,51 @@ updateArpCache cacheFile host cache
     -- Rebuild 'IpMacMap' from cached 'MacIpMap'.
     rebuild :: MacAddr -> [IP] -> IpMacMap -> IpMacMap
     rebuild mac ips zm0 = foldr (\ip zm -> M.insert ip mac zm) zm0 ips
+
+{-nmapP :: A.Parser (T.Text, IP, MacAddr)
+nmapP =
+    lexemeA (A.string "<host>") *> lexemeA (A.string "<status ")
+    A.string "reason="
+        *> A.string "arp-response"
+    lexemeA (A.string "address ") *> A.string "addr="
+        *> lexemeA (between (A.string "\"") (A.string "\"") ipP)
+    lexemeA (A.string "address ") *> A.string "addr="
+        *> lexemeA (between (A.string "\"") (A.string "\"") macP)-}
+
+-- TODO: nmap xml contains vendor determined from mac address. This may be
+-- used for calssifying mac address for virtual and physical.
+
+{-nmapXmlHostP :: A.Parser (IP, MacAddr)
+nmapXmlHostP =
+    lexemeA (A.string "<host>") *> lexemeA (A.string "<status ")-}
+
+-- | Parse host status in nmap xml.
+nmapXmlHostStatusP :: A.Parser T.Text
+nmapXmlHostStatusP =
+    let statusChars = liftA2 (||) isAlpha (== '-')
+    in  lexemeA (A.string "<status ") *> A.string "reason="
+          *> (between (A.string "\"") (A.string "\"") (A.takeWhile1 statusChars A.<?> "status chars"))
+          <*  A.takeWhile (/= '/') <* A.string "/>"
+          A.<?> "nmap xml address"
+
+-- | Parse mac or IP address in nmap xml.
+nmapXmlAddressP :: A.Parser a -> A.Parser a
+nmapXmlAddressP addrP =
+    lexemeA (A.string "<address ") *> A.string "addr="
+      *> lexemeA (between (A.string "\"") (A.string "\"") addrP)
+      <* A.takeWhile (/= '/') <* A.string "/>"
+      A.<?> "nmap xml address"
+
+findXmlElementP :: A.Parser T.Text -> A.Parser a -> A.Parser a
+findXmlElementP nameP valueP =
+    let anyNameP = A.takeWhile1 isAlpha
+        anyValueP = A.takeWhile1 (/= '"')
+        xmlElementP nameP valueP
+    <|> lexemeA (xmlElementP anyNameP anyValueP) *> findXmlElementP nameP valueP
+
+xmlElementP :: A.Parser T.Text -> A.Parser a -> A.Parser a
+xmlElementP nameP valueP =
+    nameP *> A.string "=" *> (between (A.string "\"") (A.string "\"") valueP)
 
 nmapCache :: T.Text -> ExceptT String IO MacIpMap
 nmapCache host = do
