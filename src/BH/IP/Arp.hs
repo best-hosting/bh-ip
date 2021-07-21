@@ -27,6 +27,8 @@ import Control.Monad (join)
 import Control.Applicative
 import Control.Applicative.Combinators
 import Data.Char
+import Text.XML.Light
+import Data.List
 
 import BH.Common
 import BH.IP
@@ -144,9 +146,53 @@ nmapP =
 -- TODO: nmap xml contains vendor determined from mac address. This may be
 -- used for calssifying mac address for virtual and physical.
 
+-- TODO: May be add 'vlan' field to 'IP' ? And 'vendor' field to 'MacAddr' type ?
+
 {-nmapXmlHostP :: A.Parser (IP, MacAddr)
 nmapXmlHostP =
     lexemeA (A.string "<host>") *> lexemeA (A.string "<status ")-}
+
+t2 :: IO [Content]
+t2 = do
+    c <- T.readFile "nmap_arp_cache.xml"
+    return (parseXML c)
+
+t3 :: Content -> Bool
+t3 (Elem e) = qName (elName e) == "nmaprun"
+t3 _ = False
+
+--t4' :: [Content] -> [String]
+t4' es = t4 (blank_element{elContent = es})
+
+--t4 :: Element -> [String]
+t4 e = do
+    host <- findChildren (blank_name{qName = "nmaprun"}) e
+              >>= findChildren (blank_name{qName = "host"})
+    status <- findChildren (blank_name{qName = "status"}) host
+    if checkStatusP "arp-response" status
+      then do
+        addr <- findChildren (blank_name{qName = "address"}) host
+        maybe mzero return $ xmlIpP addr <|> xmlMacP addr
+      else mzero
+
+checkStatusP :: String -> Element -> Bool
+checkStatusP reason e = maybe False id $ do
+    r <- findAttr (blank_name{qName = "reason"}) e
+    return (r == reason)
+
+xmlIpP :: Element -> Maybe String
+xmlIpP e = do
+    addrtype <- findAttr (blank_name{qName = "addrtype"}) e
+    if addrtype == "ipv4"
+      then findAttr (blank_name{qName = "addr"}) e
+      else mempty
+
+xmlMacP :: Element -> Maybe String
+xmlMacP e = do
+    addrtype <- findAttr (blank_name{qName = "addrtype"}) e
+    if addrtype == "mac"
+      then findAttr (blank_name{qName = "addr"}) e
+      else mempty
 
 -- | Parse host status in nmap xml.
 nmapXmlHostStatusP :: A.Parser T.Text
@@ -165,12 +211,12 @@ nmapXmlAddressP addrP =
       <* A.takeWhile (/= '/') <* A.string "/>"
       A.<?> "nmap xml address"
 
-findXmlElementP :: A.Parser T.Text -> A.Parser a -> A.Parser a
+{-findXmlElementP :: A.Parser T.Text -> A.Parser a -> A.Parser a
 findXmlElementP nameP valueP =
     let anyNameP = A.takeWhile1 isAlpha
         anyValueP = A.takeWhile1 (/= '"')
         xmlElementP nameP valueP
-    <|> lexemeA (xmlElementP anyNameP anyValueP) *> findXmlElementP nameP valueP
+    <|> lexemeA (xmlElementP anyNameP anyValueP) *> findXmlElementP nameP valueP-}
 
 xmlElementP :: A.Parser T.Text -> A.Parser a -> A.Parser a
 xmlElementP nameP valueP =
