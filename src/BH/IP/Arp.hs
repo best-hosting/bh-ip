@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module BH.IP.Arp
-    ( queryLinuxArp
+    ( MacIpMap
+    , IpMacMap
+    , queryLinuxArp
     )
   where
 
@@ -22,11 +24,47 @@ import Text.HTML.TagSoup
 import qualified Data.Attoparsec.Text as A
 import Control.Monad (join)
 import Control.Applicative
+import Data.Char
 
 import BH.Common
 import BH.IP
 import BH.Switch
 
+
+-- FIXME: Use Set, so uniquiness won't be a problem.
+type MacIpMap       = M.Map MacAddr [IP]
+type IpMacMap       = M.Map IP MacAddr
+
+-- | Parse 'ip neigh' output in the form of "IP, Mac, record state". This
+-- parser does /not/ consume trailing line character or spaces.
+ipNeighP :: A.Parser (IP, MacAddr, T.Text)
+ipNeighP = (,,)
+    <$> lexemeA ipP  <* A.count 3 (A.takeWhile1 (/= ' ') *> A.string " ")
+    <*> lexemeA macP
+    <*> (A.takeWhile1 (not . isSpace) A.<?> "mac state")
+    A.<?> "ip neigh"
+
+-- | Parse single line from 'ip neigh' output and initialize 'MacIpMap' and
+-- 'IpMacMap' from it.
+readIpNeighLine :: T.Text -> (MacIpMap, IpMacMap) -> Either String (MacIpMap, IpMacMap)
+readIpNeighLine ts z@(macMap, ipMap) = do
+    (ip, mac, state) <- A.parseOnly ipNeighP ts
+    if state == "STALE" || state == "REACHABLE"
+      then return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)
+      else return z
+
+-- | Call 'ip neigh' on specified host and initialize 'MacIpMap' and
+-- 'IpMacMap' from it output.
+ipNeigh :: MonadIO m => T.Text -> ExceptT String m (MacIpMap, IpMacMap)
+ipNeigh host = ExceptT . Sh.shelly . Sh.silently $ do
+    liftIO $ putStrLn "Updating arp cache using `nping` and `ip neighbour`..."
+    Sh.run_ "ssh"
+            (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
+    liftIO $ threadDelay 5000000
+    z <- Sh.runFoldLines (pure mempty) (\mz ts -> mz >>= readIpNeighLine ts) "ssh"
+            (host : T.words "ip neighbour show nud reachable nud stale")
+    Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
+    return z
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host   = Sh.shelly . Sh.silently $
@@ -64,70 +102,32 @@ queryLinuxArp file host = do
 queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
               -> T.Text     -- ^ ssh hostname of host, from which to query.
               -> ExceptT String IO (MacIpMap, IpMacMap)
-queryLinuxArp file host = do
-    b <- liftIO $ doesFileExist file
+queryLinuxArp cacheFile host =
+    readCache cacheFile >>= updateArpCache cacheFile host
+
+-- | Read arp cache file.
+readCache :: FilePath -> ExceptT String IO MacIpMap
+readCache cacheFile = do
+    b <- liftIO $ doesFileExist cacheFile
     -- FIXME: Update cache, if it's too old.
-    cache <- if b
-      then catchE (ExceptT $ Y.decodeFileEither file) $ \e ->
+    if b
+      then catchE (ExceptT $ Y.decodeFileEither cacheFile) $ \e ->
              liftIO (print e) >> return mempty
       else return mempty
-    updateArpCache file host cache
 
+-- | Update arp cache file, if necessary, and build corresponding maps.
 updateArpCache :: FilePath -> T.Text -> MacIpMap -> ExceptT String IO (MacIpMap, IpMacMap)
-updateArpCache file host cache
+updateArpCache cacheFile host cache
   | cache /= mempty = return (cache, M.foldrWithKey rebuild mempty cache)
   | otherwise = do
     --mi <- nmapCache
-    maps@(macMap, _) <- ipNeighCache host
-    liftIO $ Y.encodeFile file macMap
+    maps@(macMap, _) <- ipNeigh host
+    liftIO $ Y.encodeFile cacheFile macMap
     return maps
   where
     -- Rebuild 'IpMacMap' from cached 'MacIpMap'.
     rebuild :: MacAddr -> [IP] -> IpMacMap -> IpMacMap
     rebuild mac ips zm0 = foldr (\ip zm -> M.insert ip mac zm) zm0 ips
-
-ipNeighCache :: MonadIO m => T.Text -> ExceptT String m (MacIpMap, IpMacMap)
-ipNeighCache host = ExceptT . Sh.shelly . Sh.silently $ do
-    liftIO $ putStrLn "Updating arp cache using `nping` and `ip neighbour`..."
-    Sh.run_ "ssh"
-            (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
-    liftIO $ threadDelay 5000000
-    z <- Sh.runFoldLines (pure mempty) (\mz ts -> mz >>= go2 ts) "ssh"
-            (host : T.words "ip neighbour show nud reachable nud stale")
-    Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
-    return z
-  where
-    go :: Either String MacIpMap -> [T.Text] -> Either String MacIpMap
-    go mzs (x : _ : _ : _ : y : s : _)
-      | s == "REACHABLE" || s == "STALE" = do
-        zs <- mzs
-        ip <- A.parseOnly ipP x
-        ma <- A.parseOnly macP y
-        return (M.insertWith addIp ma [ip] zs)
-      | otherwise   = mzs
-    go _ _          = Left "Unrecognized `ip neigh` output line."
-
---go2 :: Either String (MacIpMap, IpMacMap) -> T.Text -> Either String (MacIpMap, IpMacMap)
-go2 :: T.Text -> (MacIpMap, IpMacMap) -> Either String (MacIpMap, IpMacMap)
-go2 ts z@(macMap, ipMap) = do
-    (ip, mac, state) <- A.parseOnly ipNeighP ts
-    if state == "STALE" || state == "REACHABLE"
-      then return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)
-      else return z
-
-{-go3 :: (MacIpMap, IpMacMap) -> T.Text -> (MacIpMap, IpMacMap)
-go3 zs@(macMap, ipMap) ts = fromMaybe zs $ do
-    (ip, mac) <- either (const Nothing) Just $ A.parseOnly ipNeighP ts
-    return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)-}
-
--- | Parse 'ip neigh' output in the form of "IP, Mac, record state".
-ipNeighP :: A.Parser (IP, MacAddr, T.Text)
-ipNeighP = (,,)
-    <$> lexemeA ipP  <* A.count 3 (A.takeWhile1 (/= ' ') *> A.string " ")
-    <*> lexemeA macP
-    <*> (A.string "REACHABLE" <|> A.string "STALE" A.<?> "mac state")
-    <*  A.takeWhile (not . A.isEndOfLine)
-    A.<?> "ip neigh output"
 
 nmapCache :: T.Text -> ExceptT String IO MacIpMap
 nmapCache host = do
