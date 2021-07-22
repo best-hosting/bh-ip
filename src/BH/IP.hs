@@ -34,6 +34,8 @@ import GHC.Generics (Generic)
 import BH.Common
 
 
+-- TODO: May be add 'vlan' field to 'IP' ? And 'vendor' field to 'MacAddr' type ?
+
 data MacAddr    = MacAddr
                     { macOctet1 :: Int
                     , macOctet2 :: Int
