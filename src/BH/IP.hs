@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards  #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module BH.IP
     ( MacAddr (..)
@@ -26,6 +28,8 @@ import Text.Read
 import Text.Read.Lex
 import Text.ParserCombinators.ReadP
 import Control.Applicative
+import Control.DeepSeq
+import GHC.Generics (Generic)
 
 import BH.Common
 
@@ -38,7 +42,7 @@ data MacAddr    = MacAddr
                     , macOctet5 :: Int
                     , macOctet6 :: Int
                     }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic, NFData)
 
 defMacAddr :: MacAddr
 defMacAddr  = MacAddr
@@ -178,7 +182,7 @@ data IP = IP
             , ipOctet3 :: Int
             , ipOctet4 :: Int
             }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic, NFData)
 
 defIP :: IP
 defIP   = IP

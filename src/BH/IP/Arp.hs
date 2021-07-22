@@ -32,6 +32,8 @@ import Text.XML.Light
 import Data.List
 import Data.Maybe
 import Control.Monad.Except
+import Control.Exception
+import Control.DeepSeq
 
 import BH.Common
 import BH.IP
@@ -127,8 +129,8 @@ updateArpCache :: FilePath -> T.Text -> MacIpMap -> ExceptT String IO (MacIpMap,
 updateArpCache cacheFile host cache
   | cache /= mempty = return (cache, M.foldrWithKey rebuild mempty cache)
   | otherwise = do
-    --mi <- nmapCache
-    maps@(macMap, _) <- ipNeigh host
+    maps@(macMap, _) <- nmapCache host
+    --maps@(macMap, _) <- ipNeigh host
     liftIO $ Y.encodeFile cacheFile macMap
     return maps
   where
@@ -217,7 +219,7 @@ parseNmapXml t =
         if b
           then do
             (mac, ips) <- xmlHostAddressP host
-            return (M.insert mac ips macMap, foldr (\ip zs -> M.insert ip mac zs) ipMap ips)
+            return (M.insertWith addIp mac ips macMap, foldr (\ip zs -> M.insert ip mac zs) ipMap ips)
           else return z
 
 -- FIXME: Use 'MonadError' from Control.Monad.Except instead of explicit
@@ -330,17 +332,15 @@ xmlElementP :: A.Parser T.Text -> A.Parser a -> A.Parser a
 xmlElementP nameP valueP =
     nameP *> A.string "=" *> (between (A.string "\"") (A.string "\"") valueP)
 
-nmapCache :: T.Text -> ExceptT String IO MacIpMap
-nmapCache host = do
+nmapCache :: T.Text -> ExceptT String IO (MacIpMap, IpMacMap)
+nmapCache host = ExceptT . Sh.shelly . Sh.silently $ do
     liftIO $ putStrLn "Updating arp cache using `nmap`..."
-    nxml <- liftIO . Sh.shelly . Sh.silently $ do
+    xml <- do
       Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
       Sh.run  "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
-    let emi = mapM go
-                . sections (~== ("<status state=\"up\" reason=\"arp-response\">" :: String))
-                . parseTags
-                $ nxml
-    M.fromListWith addIp <$> ExceptT (return emi)
+    z <- liftIO . evaluate . force $ parseNmapXml xml
+    --Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
+    return z
   where
     go :: [Tag T.Text] -> Either String (MacAddr, [IP])
     go xs =
