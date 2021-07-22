@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module BH.IP.Arp
     ( MacIpMap
@@ -30,6 +31,7 @@ import Data.Char
 import Text.XML.Light
 import Data.List
 import Data.Maybe
+import Control.Monad.Except
 
 import BH.Common
 import BH.IP
@@ -153,6 +155,11 @@ nmapP =
 nmapXmlHostP =
     lexemeA (A.string "<host>") *> lexemeA (A.string "<status ")-}
 
+t1 :: IO (Either String [(MacAddr, [IP])])
+t1 = do
+    c <- T.readFile "nmap_arp_cache.xml"
+    return (parseNmapXml c)
+
 t2 :: IO [Content]
 t2 = do
     c <- T.readFile "nmap_arp_cache.xml"
@@ -164,8 +171,6 @@ t3 _ = False
 
 --t4' :: [Content] -> [String]
 t4' es = t4 (blank_element{elContent = es})
-
-t5 es = nmapXmlP (blank_element{elContent = es})
 
 --t4 :: Element -> [String]
 t4 e = do
@@ -185,17 +190,32 @@ nmapXmlP e = do
       then except $ xmlHostAddressP host
       else mzero-}
 
-nmapXmlP :: Element -> Either String [(MacAddr, [IP])]
-nmapXmlP e =
-    let hosts = findChildren (blank_name{qName = "nmaprun"}) e
+parseNmapXml :: T.Text -> Either String [(MacAddr, [IP])]
+parseNmapXml t =
+    let xml = blank_element{elContent = parseXML t}
+        hosts = findChildren (blank_name{qName = "nmaprun"}) xml
                   >>= findChildren (blank_name{qName = "host"})
     in  foldM go [] hosts
   where
-    go :: [(MacAddr, [IP])] -> Element -> Either String [(MacAddr, [IP])]
+    --go :: MonadError String m => [(MacAddr, [IP])] -> Element -> m [(MacAddr, [IP])]
     go zs host = do
         b <- host `xmlHostStatusIs` "arp-response"
         if b
           then (: zs) <$> xmlHostAddressP host
+          else return zs
+
+parseNmapXml2 :: T.Text -> Either String MacIpMap
+parseNmapXml2 t =
+    let xml = blank_element{elContent = parseXML t}
+        hosts = findChildren (blank_name{qName = "nmaprun"}) xml
+                  >>= findChildren (blank_name{qName = "host"})
+    in  foldM go mempty hosts
+  where
+    go :: MonadError String m => MacIpMap -> Element -> m MacIpMap
+    go zs host = do
+        b <- host `xmlHostStatusIs` "arp-response"
+        if b
+          then (\(mac, ips) -> M.insert mac ips zs) <$> xmlHostAddressP host
           else return zs
 
 -- FIXME: Use 'MonadError' from Control.Monad.Except instead of explicit
@@ -204,17 +224,17 @@ nmapXmlP e =
 
 -- | Check that, 'reason' attribute of xml 'status' element (from inside xml
 -- 'host' element) is equal to specified value.
-xmlHostStatusIs :: Element -> String -> Either String Bool
+xmlHostStatusIs :: MonadError String m => Element -> String -> m Bool
 xmlHostStatusIs host rs =
     let sts = findChildren (blank_name{qName = "status"}) host
     in  case sts of
-          []        -> Left $ "No 'status' xml element found in host: '" <> show host <> "'"
+          []        -> throwError $ "No 'status' xml element found in host: '" <> show host <> "'"
           [status]  -> do
-            reason <- maybeErr
+            reason <- maybeErr2
                         ("Can't find 'reason' attribute in 'status' xml element: '" <> show status <> "'")
                         $ findAttr (blank_name{qName = "reason"}) status
             return (reason == rs)
-          _         -> Left $ "Several 'status' xml elements found in host: '" <> show host <> "'"
+          _         -> throwError $ "Several 'status' xml elements found in host: '" <> show host <> "'"
 
 xmlAddrsP :: Element -> Maybe (String, [String])
 xmlAddrsP host =
@@ -239,16 +259,19 @@ xmlIpP e = do
 maybeErr :: String -> Maybe a -> Either String a
 maybeErr err = maybe (Left err) return
 
+maybeErr2 :: MonadError String m => String -> Maybe a -> m a
+maybeErr2 err = maybe (throwError err) return
+
 -- | Parse mac and IP addresses from nmap xml 'host' element.
-xmlHostAddressP :: Element -> Either String (MacAddr, [IP])
+xmlHostAddressP :: MonadError String m => Element -> m (MacAddr, [IP])
 xmlHostAddressP host = do
     let addrs = findChildren (blank_name{qName = "address"}) host
     ips  <- catMaybes <$> mapM (xmlAddrP "ipv4" ipP) addrs
     macs <- catMaybes <$> mapM (xmlAddrP "mac" macP) addrs
     case macs of
-      []    -> Left $ "No mac address found in xml element: '" <> show host <> "'"
+      []    -> throwError $ "No mac address found in xml element: '" <> show host <> "'"
       [mac] -> return (mac, ips)
-      _     -> Left $ "Several mac addresses found in xml element: '" <> show host <> "'"
+      _     -> throwError $ "Several mac addresses found in xml element: '" <> show host <> "'"
 
 -- | Parse 'address' element from nmap xml. Parse errors and missed (but
 -- expected) xml attributes are treated as errors and will be preserved in
@@ -256,15 +279,18 @@ xmlHostAddressP host = do
 -- type/ will just result in 'Nothing'. This allows to use this parser
 -- uniformly for parsing IP and mac addresses and still catching all real
 -- parse errors.
-xmlAddrP :: String -> A.Parser a -> Element -> Either String (Maybe a)
+xmlAddrP :: MonadError String m => String -> A.Parser a -> Element -> m (Maybe a)
 xmlAddrP at addrP e = do
-    addrtype <- maybeErr
+    addrtype <- maybeErr2
                   ("Can't find 'addrtype' attribute in 'address' xml element: '" <> show e <> "'")
                   $ findAttr (blank_name{qName = "addrtype"}) e
     if addrtype == at
-      then maybeErr ("Can't find 'addr' attribute in 'address' xml element: '" <> show e <> "'")
-             (findAttr (blank_name{qName = "addr"}) e)
-             >>= fmap Just . A.parseOnly addrP . T.pack
+      then do
+        x <- maybeErr2 ("Can't find 'addr' attribute in 'address' xml element: '" <> show e <> "'")
+          (findAttr (blank_name{qName = "addr"}) e)
+        catchError
+          (fmap Just . liftEither . A.parseOnly addrP $ T.pack x)
+          (\e -> throwError $ "Error during parsing 'address' element: '" <> show x <> "'\n" <> e)
       else return Nothing
 
 xmlMacP :: Element -> Maybe String
