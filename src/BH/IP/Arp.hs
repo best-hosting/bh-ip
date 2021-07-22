@@ -165,6 +165,8 @@ t3 _ = False
 --t4' :: [Content] -> [String]
 t4' es = t4 (blank_element{elContent = es})
 
+t5 es = nmapXmlP (blank_element{elContent = es})
+
 --t4 :: Element -> [String]
 t4 e = do
     host <- findChildren (blank_name{qName = "nmaprun"}) e
@@ -173,6 +175,46 @@ t4 e = do
     if checkStatusP "arp-response" status
       then maybe mzero return (xmlAddrsP host)
       else mzero
+
+{-nmapXmlP :: Element -> ExceptT String [] (MacAddr, [IP])
+nmapXmlP e = do
+    host <- lift $ findChildren (blank_name{qName = "nmaprun"}) e
+                     >>= findChildren (blank_name{qName = "host"})
+    b <- except $ host `xmlHostStatusIs` "arp-response"
+    if b
+      then except $ xmlHostAddressP host
+      else mzero-}
+
+nmapXmlP :: Element -> Either String [(MacAddr, [IP])]
+nmapXmlP e =
+    let hosts = findChildren (blank_name{qName = "nmaprun"}) e
+                  >>= findChildren (blank_name{qName = "host"})
+    in  foldM go [] hosts
+  where
+    go :: [(MacAddr, [IP])] -> Element -> Either String [(MacAddr, [IP])]
+    go zs host = do
+        b <- host `xmlHostStatusIs` "arp-response"
+        if b
+          then (: zs) <$> xmlHostAddressP host
+          else return zs
+
+-- FIXME: Use 'MonadError' from Control.Monad.Except instead of explicit
+-- 'Either' or 'ExceptT'. Also, i should annotate errors, because now it's
+-- impossible to say, where e.g. error with mac parsing happens.
+
+-- | Check that, 'reason' attribute of xml 'status' element (from inside xml
+-- 'host' element) is equal to specified value.
+xmlHostStatusIs :: Element -> String -> Either String Bool
+xmlHostStatusIs host rs =
+    let sts = findChildren (blank_name{qName = "status"}) host
+    in  case sts of
+          []        -> Left $ "No 'status' xml element found in host: '" <> show host <> "'"
+          [status]  -> do
+            reason <- maybeErr
+                        ("Can't find 'reason' attribute in 'status' xml element: '" <> show status <> "'")
+                        $ findAttr (blank_name{qName = "reason"}) status
+            return (reason == rs)
+          _         -> Left $ "Several 'status' xml elements found in host: '" <> show host <> "'"
 
 xmlAddrsP :: Element -> Maybe (String, [String])
 xmlAddrsP host =
@@ -193,6 +235,37 @@ xmlIpP e = do
     if addrtype == "ipv4"
       then findAttr (blank_name{qName = "addr"}) e
       else mempty
+
+maybeErr :: String -> Maybe a -> Either String a
+maybeErr err = maybe (Left err) return
+
+-- | Parse mac and IP addresses from nmap xml 'host' element.
+xmlHostAddressP :: Element -> Either String (MacAddr, [IP])
+xmlHostAddressP host = do
+    let addrs = findChildren (blank_name{qName = "address"}) host
+    ips  <- catMaybes <$> mapM (xmlAddrP "ipv4" ipP) addrs
+    macs <- catMaybes <$> mapM (xmlAddrP "mac" macP) addrs
+    case macs of
+      []    -> Left $ "No mac address found in xml element: '" <> show host <> "'"
+      [mac] -> return (mac, ips)
+      _     -> Left $ "Several mac addresses found in xml element: '" <> show host <> "'"
+
+-- | Parse 'address' element from nmap xml. Parse errors and missed (but
+-- expected) xml attributes are treated as errors and will be preserved in
+-- 'Left'. But attempting to parse xml "address" record of /wrong address
+-- type/ will just result in 'Nothing'. This allows to use this parser
+-- uniformly for parsing IP and mac addresses and still catching all real
+-- parse errors.
+xmlAddrP :: String -> A.Parser a -> Element -> Either String (Maybe a)
+xmlAddrP at addrP e = do
+    addrtype <- maybeErr
+                  ("Can't find 'addrtype' attribute in 'address' xml element: '" <> show e <> "'")
+                  $ findAttr (blank_name{qName = "addrtype"}) e
+    if addrtype == at
+      then maybeErr ("Can't find 'addr' attribute in 'address' xml element: '" <> show e <> "'")
+             (findAttr (blank_name{qName = "addr"}) e)
+             >>= fmap Just . A.parseOnly addrP . T.pack
+      else return Nothing
 
 xmlMacP :: Element -> Maybe String
 xmlMacP e = do
