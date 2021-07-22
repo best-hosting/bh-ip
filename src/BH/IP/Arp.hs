@@ -155,10 +155,10 @@ nmapP =
 nmapXmlHostP =
     lexemeA (A.string "<host>") *> lexemeA (A.string "<status ")-}
 
-t1 :: IO (Either String [(MacAddr, [IP])])
+t1 :: ExceptT String IO (MacIpMap, IpMacMap)
 t1 = do
-    c <- T.readFile "nmap_arp_cache.xml"
-    return (parseNmapXml c)
+    c <- liftIO $ T.readFile "nmap_arp_cache.xml"
+    except (parseNmapXml c)
 
 t2 :: IO [Content]
 t2 = do
@@ -190,7 +190,7 @@ nmapXmlP e = do
       then except $ xmlHostAddressP host
       else mzero-}
 
-parseNmapXml :: T.Text -> Either String [(MacAddr, [IP])]
+{-parseNmapXml :: T.Text -> Either String [(MacAddr, [IP])]
 parseNmapXml t =
     let xml = blank_element{elContent = parseXML t}
         hosts = findChildren (blank_name{qName = "nmaprun"}) xml
@@ -202,21 +202,23 @@ parseNmapXml t =
         b <- host `xmlHostStatusIs` "arp-response"
         if b
           then (: zs) <$> xmlHostAddressP host
-          else return zs
+          else return zs-}
 
-parseNmapXml2 :: T.Text -> Either String MacIpMap
-parseNmapXml2 t =
+parseNmapXml :: T.Text -> Either String (MacIpMap, IpMacMap)
+parseNmapXml t =
     let xml = blank_element{elContent = parseXML t}
         hosts = findChildren (blank_name{qName = "nmaprun"}) xml
                   >>= findChildren (blank_name{qName = "host"})
     in  foldM go mempty hosts
   where
-    go :: MonadError String m => MacIpMap -> Element -> m MacIpMap
-    go zs host = do
+    go :: MonadError String m => (MacIpMap, IpMacMap) -> Element -> m (MacIpMap, IpMacMap)
+    go z@(macMap, ipMap) host = do
         b <- host `xmlHostStatusIs` "arp-response"
         if b
-          then (\(mac, ips) -> M.insert mac ips zs) <$> xmlHostAddressP host
-          else return zs
+          then do
+            (mac, ips) <- xmlHostAddressP host
+            return (M.insert mac ips macMap, foldr (\ip zs -> M.insert ip mac zs) ipMap ips)
+          else return z
 
 -- FIXME: Use 'MonadError' from Control.Monad.Except instead of explicit
 -- 'Either' or 'ExceptT'. Also, i should annotate errors, because now it's
