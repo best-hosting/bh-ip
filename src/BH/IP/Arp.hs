@@ -29,6 +29,7 @@ import Control.Applicative.Combinators
 import Data.Char
 import Text.XML.Light
 import Data.List
+import Data.Maybe
 
 import BH.Common
 import BH.IP
@@ -170,13 +171,19 @@ t4 e = do
               >>= findChildren (blank_name{qName = "host"})
     status <- findChildren (blank_name{qName = "status"}) host
     if checkStatusP "arp-response" status
-      then do
-        addr <- findChildren (blank_name{qName = "address"}) host
-        maybe mzero return $ xmlIpP addr <|> xmlMacP addr
+      then maybe mzero return (xmlAddrsP host)
       else mzero
 
+xmlAddrsP :: Element -> Maybe (String, [String])
+xmlAddrsP host =
+    let addrs = findChildren (blank_name{qName = "address"}) host
+        ips   = mapMaybe xmlIpP addrs
+    in  case mapMaybe xmlMacP addrs of
+          [mac] -> return (mac, ips)
+          _     -> mempty
+
 checkStatusP :: String -> Element -> Bool
-checkStatusP reason e = maybe False id $ do
+checkStatusP reason e = fromMaybe False $ do
     r <- findAttr (blank_name{qName = "reason"}) e
     return (r == reason)
 
