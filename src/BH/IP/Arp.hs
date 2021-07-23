@@ -8,8 +8,8 @@ module BH.IP.Arp (
   ipNeigh,
   nmapCache,
   queryLinuxArp,
-  queryIP,
-  queryMac
+  macToIP,
+  ipToMac
 ) where
 
 import Control.Concurrent
@@ -233,14 +233,14 @@ queryLinuxArp cacheFile host =
   readCache cacheFile >>= updateArpCache cacheFile host
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.
-queryIP :: MonadReader Config m => MacAddr -> m (Maybe (S.Set IP))
-queryIP mac = do
+macToIP :: MonadReader Config m => MacAddr -> m (Maybe (S.Set IP))
+macToIP mac = do
   Config{..} <- ask
   return (M.lookup mac macIpMap)
 
 -- TODO: Query IP using nmap/ip neigh, if not found.
-queryMac :: MonadReader Config m => IP -> m (Maybe MacAddr)
-queryMac ip = do
+ipToMac :: MonadReader Config m => IP -> m (Maybe MacAddr)
+ipToMac ip = do
   Config{..} <- ask
   return (M.lookup ip ipMacMap)
 

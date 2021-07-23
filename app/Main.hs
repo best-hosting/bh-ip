@@ -32,7 +32,7 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
--- FIXME: Use Set instead of list. Then i may 'concat' at 'queryIP'.
+-- FIXME: Use Set instead of list. Then i may 'concat' at 'macToIP'.
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
     curSn <- asks (swName . switchInfo)
@@ -101,22 +101,12 @@ work opts = do
     let swports = M.fromList . map (\x -> (x, [])) $ switchPorts opts
         sw = head . M.keys $ swports
     mm <- flip runReaderT swInfoMap $ run (M.keys swports) getMacs (portSw sw)
-    --mm <-  flip runReaderT swInfo $ Main.run
-    --mm <-  flip runReaderT swInfo $ runOn
     case mm of
       Just portMacs -> do
         liftIO $ putStrLn "Gathered ac map:"
         liftIO $ print portMacs
         liftIO $ putStrLn "Finally, ips..."
-        portIPs <- forM portMacs $ \macs -> catMaybes <$> mapM queryIP macs
+        portIPs <- forM portMacs $ \macs -> catMaybes <$> mapM macToIP macs
         liftIO $ print portIPs
       Nothing -> throwError "Huynya"
-
--- TODO: Write 'queryIP' function, which should query arp cache, and if not
--- found, re-run nmap/ip neigh with /paritcular/ ip.
-macsToIPs :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
-macsToIPs macIp = M.map (foldr go mempty)
-  where
-    go :: MacAddr -> [IP] -> [IP]
-    go mac zs = fromMaybe [] (S.toList <$> M.lookup mac macIp) ++ zs
 
