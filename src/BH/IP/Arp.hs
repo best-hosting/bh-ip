@@ -32,10 +32,9 @@ import BH.Common
 import BH.IP
 
 
--- FIXME: Use 'MonadError' everywhere instaed of 'ExceptT'.
 -- FIXME: Use Set, so uniquiness won't be a problem. And after that i can
 -- compare ipNeigh and nmapXml built results..
-type MacIpMap       = M.Map MacAddr [IP]
+type MacIpMap       = M.Map MacAddr (S.Set IP)
 type IpMacMap       = M.Map IP MacAddr
 
 -- Use "ip neigh" for buliding arp/IP cache.
@@ -58,7 +57,7 @@ readIpNeighLine :: MonadError String m =>
 readIpNeighLine ts z@(macMap, ipMap) = do
     (ip, mac, state) <- liftEither (A.parseOnly ipNeighP ts)
     if state == "STALE" || state == "REACHABLE"
-      then return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)
+      then return (M.insertWith (<>) mac (S.singleton ip) macMap, M.insert ip mac ipMap)
       else return z
 
 -- | Call 'ip neigh' on specified host and initialize 'MacIpMap' and
@@ -143,7 +142,7 @@ parseNmapXml t =
         if b
           then do
             (mac, ips) <- xmlHostAddressP host
-            return (M.insertWith addIp mac ips macMap, foldr (`M.insert` mac) ipMap ips)
+            return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
           else return z
 
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
@@ -189,7 +188,7 @@ updateArpCache cacheFile host cache
     return maps
   where
     -- Rebuild 'IpMacMap' from cached 'MacIpMap'.
-    rebuild :: MacAddr -> [IP] -> IpMacMap -> IpMacMap
+    rebuild :: MacAddr -> S.Set IP -> IpMacMap -> IpMacMap
     rebuild mac ips zm0 = foldr (`M.insert` mac) zm0 ips
 
 queryLinuxArp :: (MonadIO m, MonadError String m) =>
@@ -205,12 +204,9 @@ queryMikrotikArp host   = Sh.shelly . Sh.silently $
   where
     go :: MacIpMap -> [T.Text] -> MacIpMap
     go zs (_ : _ : x : y : _) =
-        either (const zs) (\(w, t) -> uncurry (M.insertWith addIp) (w, t) zs) $ do
+        either (const zs) (\(w, t) -> uncurry (M.insertWith (<>)) (w, S.fromList t) zs) $ do
           ip <- A.parseOnly ipP x
           ma <- A.parseOnly macP y
           return (ma, [ip])
     go zs _                   = zs
-
-addIp :: [IP] -> [IP] -> [IP]
-addIp xs zs0 = foldr (\x zs -> if x `elem` zs then zs else x : zs) zs0 xs
 

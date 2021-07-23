@@ -22,6 +22,7 @@ import qualified Data.Attoparsec.Text as A
 import qualified Options.Applicative  as O
 import Control.Monad (join)
 import Control.Applicative
+import qualified Data.Set as S
 
 import BH.IP
 import BH.IP.Arp
@@ -103,18 +104,11 @@ work swInfo opts = do
       Right () -> return ()
       Left err -> print err
 
-getIPs :: PortMacMap -> MacIpMap -> [IP]
-getIPs portMac macIp = foldr go [] portMac
-  where
-    go :: Maybe [MacAddr] -> [IP] -> [IP]
-    go Nothing zs   = zs
-    go (Just ms) zs = foldr goMacs zs ms
-    goMacs :: MacAddr -> [IP] -> [IP]
-    goMacs m zs = maybe zs (++ zs) (M.lookup m macIp)
-
+-- TODO: Write 'queryIP' function, which should query arp cache, and if not
+-- found, re-run nmap/ip neigh with /paritcular/ ip.
 macsToIPs :: MacIpMap -> M.Map SwPort [MacAddr] -> M.Map SwPort [IP]
-macsToIPs macIp = M.map (foldr go [])
+macsToIPs macIp = M.map (foldr go mempty)
   where
     go :: MacAddr -> [IP] -> [IP]
-    go m zs = fromMaybe [] (M.lookup m macIp) ++ zs
+    go mac zs = fromMaybe [] (S.toList <$> M.lookup mac macIp) ++ zs
 
