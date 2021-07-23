@@ -315,6 +315,9 @@ runOn :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.M
 runOn input telnetCmd =
     foldM (\zs sn -> (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
 
+-- FIXME: Use 'MonadError' and 'MonadReader' instead of particular 'ReaderT'
+-- and 'ExceptT'.
+
 -- | Run on one switch.
 run :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
 run input telnetCmd sn = run' telnetStateRef input telnetCmd sn

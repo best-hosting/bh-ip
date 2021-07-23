@@ -4,42 +4,35 @@
 module BH.IP.Arp
     ( MacIpMap
     , IpMacMap
+    , ipNeigh
+    , nmapCache
     , queryLinuxArp
     )
   where
 
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Control.Monad.IO.Class
 import qualified Data.Map as M
 import qualified Data.Set as S
-import System.Environment
-import Control.Monad.Trans.Cont
 import Control.Monad.Reader
-import Control.Monad.Trans.Except
-import Data.Maybe
 import qualified Shelly as Sh
 import Control.Concurrent
 import qualified Data.Yaml as Y
 import System.Directory
-import Text.HTML.TagSoup
 import qualified Data.Attoparsec.Text as A
-import Control.Monad (join)
-import Control.Applicative
-import Control.Applicative.Combinators
 import Data.Char
 import Text.XML.Light
-import Data.List
 import Data.Maybe
 import Control.Monad.Except
 import Control.Exception
 import Control.DeepSeq
+import Data.Either.Combinators
 
 import BH.Common
 import BH.IP
-import BH.Switch
 
 
+-- FIXME: Use 'MonadError' everywhere instaed of 'ExceptT'.
 -- FIXME: Use Set, so uniquiness won't be a problem. And after that i can
 -- compare ipNeigh and nmapXml built results..
 type MacIpMap       = M.Map MacAddr [IP]
@@ -58,25 +51,33 @@ ipNeighP = (,,)
 
 -- | Parse single line from 'ip neigh' output and initialize 'MacIpMap' and
 -- 'IpMacMap' from it.
-readIpNeighLine :: T.Text -> (MacIpMap, IpMacMap) -> Either String (MacIpMap, IpMacMap)
+readIpNeighLine :: MonadError String m =>
+                   T.Text   -- ^ Line of output text.
+                -> (MacIpMap, IpMacMap) -- ^ Current map values.
+                -> m (MacIpMap, IpMacMap)
 readIpNeighLine ts z@(macMap, ipMap) = do
-    (ip, mac, state) <- A.parseOnly ipNeighP ts
+    (ip, mac, state) <- liftEither (A.parseOnly ipNeighP ts)
     if state == "STALE" || state == "REACHABLE"
       then return (M.insertWith addIp mac [ip] macMap, M.insert ip mac ipMap)
       else return z
 
 -- | Call 'ip neigh' on specified host and initialize 'MacIpMap' and
 -- 'IpMacMap' from it output.
-ipNeigh :: MonadIO m => T.Text -> ExceptT String m (MacIpMap, IpMacMap)
-ipNeigh host = ExceptT . Sh.shelly . Sh.silently $ do
-    liftIO $ putStrLn "Updating arp cache using `nping` and `ip neighbour`..."
-    Sh.run_ "ssh"
-            (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
-    liftIO $ threadDelay 5000000
-    z <- Sh.runFoldLines (pure mempty) (\mz ts -> mz >>= readIpNeighLine ts) "ssh"
-            (host : T.words "ip neighbour show nud reachable nud stale")
-    Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
-    return z
+ipNeigh :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)
+ipNeigh host = Sh.shelly (Sh.silently go) >>= liftEither
+  where
+    go :: Sh.Sh (Either String (MacIpMap, IpMacMap))
+    go = do
+      liftIO $ putStrLn "Updating arp cache using `nping` and `ip neighbour`..."
+      Sh.run_ "ssh"
+              (host : T.words "nping --quiet -N --rate=100 -c1 213.108.248.0/21")
+      liftIO $ threadDelay 5000000
+      z <- Sh.runFoldLines (pure mempty)
+                (\mz ts -> mz >>= readIpNeighLine ts)
+                "ssh" (host : T.words "ip neighbour show nud reachable nud stale")
+             >>= liftIO . evaluate . force
+      Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
+      return z
 
 
 -- Use "nmap" for buliding arp/IP cache.
@@ -91,14 +92,14 @@ ipNeigh host = ExceptT . Sh.shelly . Sh.silently $ do
 -- uniformly for parsing IP and mac addresses and still catching all real
 -- parse errors.
 xmlAddrP :: MonadError String m => String -> A.Parser a -> Element -> m (Maybe a)
-xmlAddrP at addrP e = do
+xmlAddrP at addrP addr = do
     addrtype <- maybeErr
-                  ("Can't find 'addrtype' attribute in 'address' xml element: '" <> show e <> "'")
-                  $ findAttr (blank_name{qName = "addrtype"}) e
+                  ("Can't find 'addrtype' attribute in 'address' xml element: '" <> show addr <> "'")
+                  $ findAttr (blank_name{qName = "addrtype"}) addr
     if addrtype == at
       then do
-        x <- maybeErr ("Can't find 'addr' attribute in 'address' xml element: '" <> show e <> "'")
-          (findAttr (blank_name{qName = "addr"}) e)
+        x <- maybeErr ("Can't find 'addr' attribute in 'address' xml element: '" <> show addr <> "'")
+          (findAttr (blank_name{qName = "addr"}) addr)
         catchError
           (fmap Just . liftEither . A.parseOnly addrP $ T.pack x)
           (\e -> throwError $ "Error during parsing 'address' element: '" <> show x <> "'\n" <> e)
@@ -129,7 +130,7 @@ xmlHostStatusIs host rs =
             return (reason == rs)
           _         -> throwError $ "Several 'status' xml elements found in host: '" <> show host <> "'"
 
-parseNmapXml :: T.Text -> Either String (MacIpMap, IpMacMap)
+parseNmapXml :: MonadError String m => T.Text -> m (MacIpMap, IpMacMap)
 parseNmapXml t =
     let xml = blank_element{elContent = parseXML t}
         hosts = findChildren (blank_name{qName = "nmaprun"}) xml
@@ -142,44 +143,43 @@ parseNmapXml t =
         if b
           then do
             (mac, ips) <- xmlHostAddressP host
-            return (M.insertWith addIp mac ips macMap, foldr (\ip zs -> M.insert ip mac zs) ipMap ips)
+            return (M.insertWith addIp mac ips macMap, foldr (`M.insert` mac) ipMap ips)
           else return z
 
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
-nmapCache :: T.Text -> ExceptT String IO (MacIpMap, IpMacMap)
-nmapCache host = ExceptT . Sh.shelly . Sh.silently $ do
-    liftIO $ putStrLn "Updating arp cache using `nmap`..."
-    xml <- do
-      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
-      Sh.run  "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
-    z <- liftIO . evaluate . force $ parseNmapXml xml
-    --Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
-    return z
+nmapCache :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)
+nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
   where
-    go :: [Tag T.Text] -> Either String (MacAddr, [IP])
-    go xs =
-        let oneHost = filter (~== ("<address>" :: String)) . takeWhile (~/= ("</host>" :: String))
-        in  case oneHost xs of
-              [x, y]  -> do
-                          ip  <- A.parseOnly ipP (fromAttrib "addr" x)
-                          mac <- A.parseOnly macP (fromAttrib "addr" y)
-                          return (mac, [ip])
-              _       -> Left "Unrecognized ip, mac pair in nmap output."
+    go :: Sh.Sh (Either String (MacIpMap, IpMacMap))
+    go = do
+      liftIO $ putStrLn "Updating arp cache using `nmap`..."
+      xml <- do
+        Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
+        Sh.run  "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
+      z <- liftIO . evaluate . force $ parseNmapXml xml
+      void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
+      return z
 
 -- Read and initialize mac/IP cache.
 
+-- FIXME: Can i generalize following 'readCache' and 'updateArpCache'
+-- functions to just read _any_ yaml cache and update it upon some conditions?
+-- This cache may include regular ansible invetory.
+
 -- | Read arp cache file.
-readCache :: FilePath -> ExceptT String IO MacIpMap
+readCache :: (MonadIO m, MonadError String m) => FilePath -> m MacIpMap
 readCache cacheFile = do
-    b <- liftIO $ doesFileExist cacheFile
+    b <- liftIO (doesFileExist cacheFile)
     -- FIXME: Update cache, if it's too old.
     if b
-      then catchE (ExceptT $ Y.decodeFileEither cacheFile) $ \e ->
-             liftIO (print e) >> return mempty
+      then
+        catchError
+          (liftIO (Y.decodeFileEither cacheFile) >>= liftEither . mapLeft show)
+          (\e -> liftIO (print e) >> return mempty)
       else return mempty
 
 -- | Update arp cache file, if necessary, and build corresponding maps.
-updateArpCache :: FilePath -> T.Text -> MacIpMap -> ExceptT String IO (MacIpMap, IpMacMap)
+updateArpCache :: (MonadIO m, MonadError String m) => FilePath -> T.Text -> MacIpMap -> m (MacIpMap, IpMacMap)
 updateArpCache cacheFile host cache
   | cache /= mempty = return (cache, M.foldrWithKey rebuild mempty cache)
   | otherwise = do
@@ -190,11 +190,12 @@ updateArpCache cacheFile host cache
   where
     -- Rebuild 'IpMacMap' from cached 'MacIpMap'.
     rebuild :: MacAddr -> [IP] -> IpMacMap -> IpMacMap
-    rebuild mac ips zm0 = foldr (\ip zm -> M.insert ip mac zm) zm0 ips
+    rebuild mac ips zm0 = foldr (`M.insert` mac) zm0 ips
 
-queryLinuxArp :: FilePath   -- ^ Path to yaml cache.
+queryLinuxArp :: (MonadIO m, MonadError String m) =>
+              FilePath   -- ^ Path to yaml cache.
               -> T.Text     -- ^ ssh hostname of host, from which to query.
-              -> ExceptT String IO (MacIpMap, IpMacMap)
+              -> m (MacIpMap, IpMacMap)
 queryLinuxArp cacheFile host =
     readCache cacheFile >>= updateArpCache cacheFile host
 
