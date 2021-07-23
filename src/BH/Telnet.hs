@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 
@@ -35,10 +36,9 @@ import qualified Data.Map as M
 import System.IO.Unsafe
 import Control.Monad.Trans.Cont
 import Control.Monad.Reader
-import Control.Monad.Trans.Except
-import Data.Maybe
 import Control.Applicative
-import Data.Typeable
+import Control.Monad.Except
+import Data.Functor
 
 import qualified Network.Telnet.LibTelnet as TL
 import qualified Data.Attoparsec.Text as A
@@ -155,17 +155,17 @@ parseEcho = parseOutputL telnetEchoResultL
 
 parseCmd :: A.Parser b -> TelnetCmd a b T.Text
 parseCmd p = shiftW $ \(k, ts) ->do
-      liftIO $ print $ "Make cmd result parser.."
+      liftIO $ putStrLn "Make cmd result parser.."
       unparsedTxt <- shiftT (\h -> saveResume h >> lift (h ts)) >>= parseOutputL telnetOutputResultL p
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
       case telnetOutputResult st of
         Just (A.Done _ res) -> do
-          liftIO $ print "Merging telnet OUTPUT result" >> print res
+          liftIO $ putStrLn "Merging telnet OUTPUT result" >> print res
           liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res <> telnetResult st}, ()))
         _ -> error "Huh blye?"
       st2    <- liftIO (readIORef stRef)
-      liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult st2)
+      liftIO $ putStrLn "Merging telnet OUTPUT result2" >> print (telnetResult st2)
       saveResume k
       lift (k unparsedTxt)
 
@@ -176,23 +176,23 @@ parseOutputL l p = go <=< resetResult
   where
     --resetResult :: TelnetCmd a b T.Text
     resetResult = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Reset parser result.."
+      liftIO $ putStrLn "Reset parser result.."
       stRef <- asks telnetRef
       liftIO $ atomicModifyIORef' stRef (\s -> (setL l Nothing s, ()))
       saveResume k
       lift (k ts)
     --go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Parsing.."
+      liftIO $ putStrLn "Parsing.."
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
       let res = maybe (A.parse p) A.feed (getL l st) ts
       liftIO $ atomicModifyIORef' stRef (\s -> (setL l (Just res) s, ()))
       case res of
-        A.Partial _ -> liftIO $ print "Partial result.."
+        A.Partial _ -> liftIO $ putStrLn "Partial result.."
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
-        A.Done unparsedTxt res -> do
-          liftIO $ print $ "Finished output parsing"
+        A.Done unparsedTxt _ -> do
+          liftIO $ putStrLn "Finished output parsing"
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
           saveResume k
           lift (k unparsedTxt)
@@ -236,7 +236,7 @@ passwordPromptP = (A.endOfLine <|> pure ()) *> A.string "Password:"
 -- session will just hang on partials.
 -- FIXME: Really check prompt.
 checkRootP :: Monoid b => A.Parser b
-checkRootP = A.lookAhead (A.takeTill (== '#') *> A.string "#" *> pure mempty) <|> fail "Not a root"
+checkRootP = A.lookAhead (A.takeTill (== '#') *> A.string "#" $> mempty) <|> fail "Not a root"
 
 loginCmd :: TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
@@ -286,7 +286,7 @@ setPrompt promptP = go <=< resetPrompt
       lift (k ts)
     go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
-      liftIO $ print $ "Start parsing new prompt.."
+      liftIO $ putStrLn "Start parsing new prompt.."
       unparsedTxt <- parseEcho promptP ts
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
@@ -298,12 +298,12 @@ setPrompt promptP = go <=< resetPrompt
       saveResume k
       lift (k unparsedTxt)
 
-runTill :: (Monoid b, Show b) => a -> TelnetCmd a b () -> (b -> Bool) -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+runTill :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> (b -> Bool) -> m b
 runTill input telnetCmd p = do
     sws <- asks M.keys
     foldM go mempty sws
   where
-    --go :: SwName -> Maybe b -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (Maybe b)
+    --go :: SwName -> Maybe b -> ReaderT SwInfoMap (ExceptT String IO) (Maybe b)
     go z sn
       | p z         = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
       | otherwise   = do
@@ -311,7 +311,7 @@ runTill input telnetCmd p = do
         liftIO $ print $ "From runTill: " ++ show r
         return r
 
-runOn :: (Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) (M.Map SwName b)
+runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m (M.Map SwName b)
 runOn input telnetCmd =
     foldM (\zs sn -> (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
 
@@ -319,13 +319,13 @@ runOn input telnetCmd =
 -- and 'ExceptT'.
 
 -- | Run on one switch.
-run :: (Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
-run input telnetCmd sn = run' telnetStateRef input telnetCmd sn
+run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> m b
+run = run' telnetStateRef
 
 -- I need to pass default state as argument here to bind type variable 'b'
 -- used in default state to resulting 'b'. Otherwise, default state used in
 -- 'atomicWriteIORef' call won't typecheck.
-run' :: (Show b, Monoid b) => IORef (TelnetState a b) -> a -> TelnetCmd a b () -> SwName -> ReaderT (M.Map SwName SwInfo) (ExceptT String IO) b
+run' :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => IORef (TelnetState a b) -> a -> TelnetCmd a b () -> SwName -> m b
 run' tRef input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
@@ -341,8 +341,8 @@ run' tRef input telnetCmd sn = do
         atomicWriteIORef tRef defTelnetState
         connect h "23" (\(s, _) -> handle ti s)
         st2    <- liftIO (readIORef tRef)
-        liftIO $ print "Merging telnet OUTPUT result2" >> print (telnetResult st2)
-      Nothing -> fail $ "No auth info for switch: '" ++ show sn ++ "'"
+        liftIO $ putStrLn "Merging telnet OUTPUT result2" >> print (telnetResult st2)
+      Nothing -> throwError $ "No auth info for switch: '" ++ show sn ++ "'"
     telnetResult <$> liftIO (readIORef tRef)
   where
     --handle :: (TL.TelnetPtr -> TelnetInfo a) -> Socket -> IO ()

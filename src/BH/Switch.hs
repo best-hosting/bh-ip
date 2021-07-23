@@ -5,6 +5,7 @@ module BH.Switch
     ( SwName (..)
     , SwInfo (..)
     , parseSwInfo
+    , SwInfoMap
     , SwPort (..)
     , swPortP
     , swPortP'
@@ -67,6 +68,8 @@ parseSwInfo   = M.fromList . map go .  T.lines
                             , defaultPortSlot = 0
                             }
                 )
+
+type SwInfoMap = M.Map SwName SwInfo
 
 -- TODO: Add and check for 'disabled' port state.
 data SwPort        = SwPort {portSw :: SwName, portSpec :: PortNum}

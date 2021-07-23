@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
@@ -23,7 +24,9 @@ import qualified Options.Applicative  as O
 import Control.Monad (join)
 import Control.Applicative
 import qualified Data.Set as S
+import Control.Monad.Except
 
+import BH.Main
 import BH.IP
 import BH.IP.Arp
 import BH.Switch
@@ -69,15 +72,19 @@ main = do
     -- TODO: I may use single for storing authinfo and other config. This file
     -- may be encrypted with gpg and edited with sops. Alternatively, i may
     -- split config..
-    swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
-    print swInfo
+    swInfoMap <- parseSwInfo <$> T.readFile "authinfo.txt"
+    print swInfoMap
+    Right (macIpMap, ipMacMap) <- runExceptT $ queryLinuxArp "mac-ip-cache.yml" "certbot"
     opts <- O.customExecParser (O.prefs O.showHelpOnError) $
-      O.info (O.helper <*> optParser swInfo)
+      O.info (O.helper <*> optParser swInfoMap)
       (  O.fullDesc
       <> O.header "General program title/description"
       <> O.progDesc "What does this thing do?"
       )
-    work swInfo opts
+    res <- runExceptT . flip runReaderT (Config{..}) $ work opts
+    case res of
+      Right () -> return ()
+      Left err -> print err
 
 -- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
 -- - "physical" - mac address used by server. It may be considered bind to
@@ -86,23 +93,23 @@ main = do
 -- (switch port) to server, though physical server connection does not change.
 -- - "unknown" - mac address is not assigned to any server.
 
-work :: M.Map SwName SwInfo -> Options -> IO ()
-work swInfo opts = do
-    print opts
+work :: (MonadReader Config m, MonadError String m, MonadIO m) => Options -> m ()
+work opts = do
+    Config{..} <- ask
+    liftIO $ print opts
     let swports = M.fromList . map (\x -> (x, [])) $ switchPorts opts
         sw = head . M.keys $ swports
-    res <- runExceptT $ do
-      Just mm <- flip runReaderT swInfo $ run (M.keys swports) getMacs (portSw sw)
-      --mm <-  flip runReaderT swInfo $ Main.run
-      --mm <-  flip runReaderT swInfo $ runOn
-      liftIO $ putStrLn "Gathered ac map:"
-      liftIO $ print mm
-      (arp1, _) <- queryLinuxArp "mac-ip-cache.yml" "certbot"
-      liftIO $ putStrLn "Finally, ips..."
-      liftIO $ print (macsToIPs arp1 mm)
-    case res of
-      Right () -> return ()
-      Left err -> print err
+    mm <- flip runReaderT swInfoMap $ run (M.keys swports) getMacs (portSw sw)
+    --mm <-  flip runReaderT swInfo $ Main.run
+    --mm <-  flip runReaderT swInfo $ runOn
+    case mm of
+      Just portMacs -> do
+        liftIO $ putStrLn "Gathered ac map:"
+        liftIO $ print portMacs
+        (arp1, _) <- queryLinuxArp "mac-ip-cache.yml" "certbot"
+        liftIO $ putStrLn "Finally, ips..."
+        liftIO $ print (macsToIPs arp1 portMacs)
+      Nothing -> throwError "Huynya"
 
 -- TODO: Write 'queryIP' function, which should query arp cache, and if not
 -- found, re-run nmap/ip neigh with /paritcular/ ip.

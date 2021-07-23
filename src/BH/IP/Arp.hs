@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module BH.IP.Arp (
   MacIpMap,
@@ -7,6 +8,8 @@ module BH.IP.Arp (
   ipNeigh,
   nmapCache,
   queryLinuxArp,
+  queryIP,
+  queryMac
 ) where
 
 import Control.Concurrent
@@ -28,12 +31,16 @@ import System.Directory
 import Text.XML.Light
 
 import BH.Common
+import BH.Main
 import BH.IP
 
 
-type MacIpMap = M.Map MacAddr (S.Set IP)
-type IpMacMap = M.Map IP MacAddr
-
+-- TODO: Implement cache update strategy, where new entries are merged with
+-- old cache. Note, though, that in this case i'd better build 'IpMacMap'
+-- first, because it defines 1-1 relation and if some IP's mac address has
+-- changed, it'll be correctly updated. If i use 1-many relation (like in
+-- 'MacIpMap') finding this IP, who no longer has this mac, will be much more
+-- tricky.
 
 -- TODO: "ip neigh" usually finds much less IPs, than nmap. Also, subsequent
 -- nmap runs may miss one-two IPs. So, i should either just use "nmap" or use
@@ -225,6 +232,17 @@ queryLinuxArp ::
 queryLinuxArp cacheFile host =
   readCache cacheFile >>= updateArpCache cacheFile host
 
+-- TODO: Query Mac using nmap/ip neigh, if not found.
+queryIP :: MonadReader Config m => MacAddr -> m (Maybe (S.Set IP))
+queryIP mac = do
+  Config{..} <- ask
+  return (M.lookup mac macIpMap)
+
+-- TODO: Query IP using nmap/ip neigh, if not found.
+queryMac :: MonadReader Config m => IP -> m (Maybe MacAddr)
+queryMac ip = do
+  Config{..} <- ask
+  return (M.lookup ip ipMacMap)
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host =
