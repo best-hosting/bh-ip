@@ -35,6 +35,10 @@ import BH.IP
 type MacIpMap       = M.Map MacAddr (S.Set IP)
 type IpMacMap       = M.Map IP MacAddr
 
+-- TODO: "ip neigh" usually finds much less IPs, than nmap. Also, subsequent
+-- nmap runs may miss one-two IPs. So, i should either just use "nmap" or use
+-- both and merge results.
+
 -- Use "ip neigh" for buliding arp/IP cache.
 
 -- | Parse 'ip neigh' output in the form of "IP, Mac, record state". This
