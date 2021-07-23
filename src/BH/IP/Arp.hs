@@ -32,8 +32,6 @@ import BH.Common
 import BH.IP
 
 
--- FIXME: Use Set, so uniquiness won't be a problem. And after that i can
--- compare ipNeigh and nmapXml built results..
 type MacIpMap       = M.Map MacAddr (S.Set IP)
 type IpMacMap       = M.Map IP MacAddr
 
