@@ -32,6 +32,7 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
+-- FIXME: Use Set instead of list. Then i may 'concat' at 'queryIP'.
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
     curSn <- asks (swName . switchInfo)
@@ -106,9 +107,9 @@ work opts = do
       Just portMacs -> do
         liftIO $ putStrLn "Gathered ac map:"
         liftIO $ print portMacs
-        (arp1, _) <- queryLinuxArp "mac-ip-cache.yml" "certbot"
         liftIO $ putStrLn "Finally, ips..."
-        liftIO $ print (macsToIPs arp1 portMacs)
+        portIPs <- forM portMacs $ \macs -> catMaybes <$> mapM queryIP macs
+        liftIO $ print portIPs
       Nothing -> throwError "Huynya"
 
 -- TODO: Write 'queryIP' function, which should query arp cache, and if not
