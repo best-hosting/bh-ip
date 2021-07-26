@@ -20,6 +20,8 @@ import BH.Switch
 import BH.Telnet
 
 
+--queryIP :: TelnetCmd [IP] (Maybe (M.Map IP (SwPort, MacAddr))) ()
+--queryMac :: TelnetCmd [MacAddr] (Maybe (M.Map MacAddr (SwPort, [IP]))) ()
 findPort :: TelnetCmd MacAddr (Maybe (M.Map SwName [PortNum])) ()
 findPort t0 = do
     mac <- asks telnetIn

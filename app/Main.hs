@@ -33,6 +33,7 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
+--queryPort :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [(MacAddr, [IP])])) ()
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
     curSn <- asks (swName . switchInfo)
