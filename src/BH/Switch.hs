@@ -188,10 +188,11 @@ parseMacAddrTable = do
     many $ A.takeWhile A.isHorizontalSpace
       *> (PortInfoEl <$> lexemeA vlanP <*> lexemeA macP <*> portNumP)
       <* (void A.endOfLine <|> A.endOfInput)
--- FIXME: end of input termination is probably wrong, because attoparsec may
--- run on whole stream. Probably, it's better to terminate at prompt or smth
--- similar. Or just at end of line. After all, prompt must always be after
--- table and prompt itself won't match with 'many'.
+    -- 'endOfInput' should never match here, because mac table must be always
+    -- followed by telnet prompt and 'many' parser should not match with
+    -- prompt. On the other hand, matching (or using 'lookAhead') with prompt
+    -- explicitly here has little sense either, because prompt will always be
+    -- on the new line and i may just terminate match at 'endOfLine'.
 
 infixr 4 <<>>
 (<<>>) :: (Applicative f, Monoid a) => f a -> f a -> f a

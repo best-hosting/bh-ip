@@ -303,7 +303,7 @@ runTill input telnetCmd p = do
     sws <- asks M.keys
     foldM go mempty sws
   where
-    --go :: SwName -> Maybe b -> ReaderT SwInfoMap (ExceptT String IO) (Maybe b)
+    --go :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m) => b -> SwName -> m b
     go z sn
       | p z         = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
       | otherwise   = do
@@ -314,9 +314,6 @@ runTill input telnetCmd p = do
 runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m (M.Map SwName b)
 runOn input telnetCmd =
     foldM (\zs sn -> (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
-
--- FIXME: Use 'MonadError' and 'MonadReader' instead of particular 'ReaderT'
--- and 'ExceptT'.
 
 -- | Run on one switch.
 run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> m b

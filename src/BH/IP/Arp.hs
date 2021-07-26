@@ -41,6 +41,11 @@ import BH.IP
 -- changed, it'll be correctly updated. If i use 1-many relation (like in
 -- 'MacIpMap') finding this IP, who no longer has this mac, will be much more
 -- tricky.
+--
+-- I don't think, that i should merge old cache with new data. Old cache may
+-- contain no longer valid entires (e.g. port is blocked or server shutdown).
+-- Though, building 'IpMacMap' first may still be viable, because i may show
+-- the difference between current situation and old cache during update.
 
 -- TODO: "ip neigh" usually finds much less IPs, than nmap. Also, subsequent
 -- nmap runs may miss one-two IPs. So, i should either just use "nmap" or use
