@@ -33,6 +33,18 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
+queryPort :: (MonadReader Config m, MonadError String m, MonadIO m) =>
+             [SwPort] -> m (Maybe (M.Map SwPort [(MacAddr, [IP])]))
+queryPort = do
+  Config{..} <- ask
+  mm <- flip runReaderT swInfoMap $ run (M.keys swports) getMacs (portSw sw)
+  case mm of
+    Just portMacs -> do
+      liftIO $ putStrLn "Gathered ac map:"
+      liftIO $ print portMacs
+      liftIO $ putStrLn "Finally, ips..."
+      portIPs <- forM portMacs $ \macs -> mconcat . catMaybes <$> mapM macToIP macs
+
 --queryPort :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [(MacAddr, [IP])])) ()
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do

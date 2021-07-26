@@ -25,6 +25,7 @@ import BH.Common
 import BH.IP
 import BH.Switch.Types
 
+-- FIXME: Use generic yaml reading func.
 readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfoMap
 readSwInfo file = do
   b <- liftIO (doesFileExist file)
