@@ -52,6 +52,11 @@ getMacs t0 = do
 data Options = Options {switchPorts :: [SwPort]}
   deriving (Show)
 
+-- FIXME: If i want to make authinfo file location to be configurable, i won't
+-- be able to apply switch defaults here, in options parser. Then i should
+-- parse here 'switch-port' option arguments as plain text, then read config
+-- file, and then parse this text arguments into real 'SwPort'. But if i
+-- hardcode 'authinfo' file name, i may leave everything as is..
 optParser :: M.Map SwName SwInfo -> O.Parser Options
 optParser swInfo = Options
     <$> some
