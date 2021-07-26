@@ -9,7 +9,7 @@ module BH.IP.Arp (
   nmapCache,
   queryLinuxArp,
   macToIP,
-  ipToMac
+  ipToMac,
 ) where
 
 import Control.Concurrent
@@ -31,9 +31,8 @@ import System.Directory
 import Text.XML.Light
 
 import BH.Common
-import BH.Main
 import BH.IP
-
+import BH.Main
 
 -- TODO: Implement cache update strategy, where new entries are merged with
 -- old cache. Note, though, that in this case i'd better build 'IpMacMap'
@@ -63,7 +62,6 @@ ipNeighP =
     <*> (A.takeWhile1 (not . isSpace) A.<?> "mac state")
     A.<?> "ip neigh"
 
-
 -- | Parse single line from 'ip neigh' output and initialize 'MacIpMap' and
 -- 'IpMacMap' from it.
 readIpNeighLine ::
@@ -78,7 +76,6 @@ readIpNeighLine ts z@(macMap, ipMap) = do
   if state == "STALE" || state == "REACHABLE"
     then return (M.insertWith (<>) mac (S.singleton ip) macMap, M.insert ip mac ipMap)
     else return z
-
 
 -- | Call 'ip neigh' on specified host and initialize 'MacIpMap' and
 -- 'IpMacMap' from it output.
@@ -101,7 +98,6 @@ ipNeigh host = Sh.shelly (Sh.silently go) >>= liftEither
         >>= liftIO . evaluate . force
     Sh.run_ "ssh" (host : T.words "ip neighbour flush all")
     return z
-
 
 -- Use "nmap" for buliding arp/IP cache.
 
@@ -131,7 +127,6 @@ xmlAddrP at addrP addr = do
         (\e -> throwError $ "Error during parsing 'address' element: '" <> show x <> "'\n" <> e)
     else return Nothing
 
-
 -- | Parse mac and IP addresses from nmap xml 'host' element.
 xmlHostAddressP :: MonadError String m => Element -> m (MacAddr, [IP])
 xmlHostAddressP host = do
@@ -142,7 +137,6 @@ xmlHostAddressP host = do
     [] -> throwError $ "No mac address found in xml element: '" <> show host <> "'"
     [mac] -> return (mac, ips)
     _ -> throwError $ "Several mac addresses found in xml element: '" <> show host <> "'"
-
 
 -- | Check that, 'reason' attribute of xml 'status' element (from inside xml
 -- 'host' element) is equal to specified value.
@@ -158,7 +152,6 @@ xmlHostStatusIs host rs =
               $ findAttr (blank_name{qName = "reason"}) status
           return (reason == rs)
         _ -> throwError $ "Several 'status' xml elements found in host: '" <> show host <> "'"
-
 
 parseNmapXml :: MonadError String m => T.Text -> m (MacIpMap, IpMacMap)
 parseNmapXml t =
@@ -177,7 +170,6 @@ parseNmapXml t =
         return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
       else return z
 
-
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
 nmapCache :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)
 nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
@@ -191,7 +183,6 @@ nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
     z <- liftIO . evaluate . force $ parseNmapXml xml
     void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
     return z
-
 
 -- Read and initialize mac/IP cache.
 
@@ -211,7 +202,6 @@ readCache cacheFile = do
         (\e -> liftIO (print e) >> return mempty)
     else return mempty
 
-
 -- | Update arp cache file, if necessary, and build corresponding maps.
 updateArpCache :: (MonadIO m, MonadError String m) => FilePath -> T.Text -> MacIpMap -> m (MacIpMap, IpMacMap)
 updateArpCache cacheFile host cache
@@ -225,7 +215,6 @@ updateArpCache cacheFile host cache
   -- Rebuild 'IpMacMap' from cached 'MacIpMap'.
   rebuild :: MacAddr -> S.Set IP -> IpMacMap -> IpMacMap
   rebuild mac ips zm0 = foldr (`M.insert` mac) zm0 ips
-
 
 queryLinuxArp ::
   (MonadIO m, MonadError String m) =>
