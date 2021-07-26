@@ -20,5 +20,6 @@ data Config = Config
                 { macIpMap :: MacIpMap
                 , ipMacMap :: IpMacMap
                 , swInfoMap :: SwInfoMap
+                , ipCacheFile :: FilePath
                 }
   deriving (Show)

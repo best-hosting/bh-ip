@@ -240,9 +240,9 @@ checkRootP = A.lookAhead (A.takeTill (== '#') *> A.string "#" $> mempty) <|> fai
 
 loginCmd :: TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
-    SwInfo  { userName = user
-            , password = pw
-            , enablePassword = enPw
+    SwInfo  { swUser = user
+            , swPassword = pw
+            , swRootPassword = enPw
             } <- asks switchInfo
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
@@ -326,7 +326,7 @@ run' :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid
 run' tRef input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
-      Just swInfo@SwInfo{hostName = h} -> liftIO $ do
+      Just swInfo@SwInfo{swHost = h} -> liftIO $ do
         print $ "Connect to " ++ show h
         let ti con = TelnetInfo
                         { switchInfo = swInfo

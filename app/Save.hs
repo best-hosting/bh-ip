@@ -23,7 +23,10 @@ saveSwitch t0 =
 
 main :: IO ()
 main    = do
-    swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
+    swi <- runExceptT $ readSwInfo "authinfo.yaml"
+    swInfo <- case swi of
+      Right s -> return s
+      Left e -> error "huy"
     print swInfo
     sns <- parseArgs <$> getArgs
     print sns

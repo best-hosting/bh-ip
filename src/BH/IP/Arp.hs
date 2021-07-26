@@ -188,7 +188,8 @@ nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
 
 -- FIXME: Can i generalize following 'readCache' and 'updateArpCache'
 -- functions to just read _any_ yaml cache and update it upon some conditions?
--- This cache may include regular ansible invetory.
+-- This cache may include regular ansible invetory. Also, replace 'readSwInfo'
+-- with generic version of this.
 
 -- | Read arp cache file.
 readCache :: (MonadIO m, MonadError String m) => FilePath -> m MacIpMap

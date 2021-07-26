@@ -35,7 +35,10 @@ findPort t0 = do
 
 main :: IO ()
 main    = do
-    swInfo <- parseSwInfo <$> T.readFile "authinfo.txt"
+    swi <- runExceptT $ readSwInfo "authinfo.yaml"
+    swInfo <- case swi of
+      Right s -> return s
+      Left e -> error "huy"
     print swInfo
     Right mac <- head . map (A.parseOnly macP . T.pack) <$> getArgs
     print mac

@@ -1,11 +1,12 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module BH.Switch (
   SwName (..),
   SwInfo (..),
-  parseSwInfo,
   SwInfoMap,
+  readSwInfo,
   SwPort (..),
   swPortP,
   swPortP',
@@ -30,9 +31,15 @@ import Network.Simple.TCP
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Except
+import Control.Monad.IO.Class
+import Data.Aeson
 import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
 import Data.Char
+import Data.Either.Combinators
+import qualified Data.Yaml as Y
+import System.Directory
 
 import BH.Common
 import BH.IP
@@ -40,36 +47,58 @@ import BH.IP
 newtype SwName = SwName T.Text
   deriving (Eq, Ord, Show)
 
+instance ToJSON SwName where
+  toJSON (SwName v) = String v
+
+instance FromJSON SwName where
+  parseJSON = withText "SwName" (\t -> pure (SwName t))
+
+-- FIXME: 'swHost' should be 'Either HostName IP'.
 data SwInfo = SwInfo
   { swName :: SwName
-  , hostName :: HostName
-  , userName :: T.Text
-  , password :: T.Text
-  , enablePassword :: T.Text
-  , defaultPortSpeed :: PortSpeed
-  , defaultPortSlot :: Int
+  , swHost :: HostName
+  , swUser :: T.Text
+  , swPassword :: T.Text
+  , swRootPassword :: T.Text
+  , swDefaultPortSpeed :: PortSpeed
+  , swDefaultPortSlot :: Int
   }
   deriving (Show)
 
-parseSwInfo :: T.Text -> M.Map SwName SwInfo
-parseSwInfo = M.fromList . map go . T.lines
- where
-  go :: T.Text -> (SwName, SwInfo)
-  go t =
-    let [sn, hn, un, pw, enpw, ds] = T.splitOn ", " t
-     in ( SwName sn
-        , SwInfo
-            { swName = SwName sn
-            , hostName = T.unpack hn
-            , userName = un
-            , password = pw
-            , enablePassword = enpw
-            , defaultPortSpeed = either error id (A.parseOnly portSpeedP ds)
-            , defaultPortSlot = 0
-            }
-        )
+instance ToJSON SwInfo where
+  toJSON SwInfo{..} =
+    object $
+      [ "name" .= swName
+      , "host" .= swHost
+      , "user" .= swUser
+      , "password" .= swPassword
+      , "rootPassword" .= swRootPassword
+      , "defaultPortSpeed" .= swDefaultPortSpeed
+      , "defaultPortSlot" .= swDefaultPortSlot
+      ]
+
+instance FromJSON SwInfo where
+  parseJSON = withObject "SwInfo" $ \v ->
+    SwInfo
+      <$> v .: "name"
+      <*> v .: "host"
+      <*> v .: "user"
+      <*> v .: "password"
+      <*> v .: "rootPassword"
+      <*> v .: "defaultPortSpeed"
+      <*> v .: "defaultPortSlot"
 
 type SwInfoMap = M.Map SwName SwInfo
+
+readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfoMap
+readSwInfo file = do
+  b <- liftIO (doesFileExist file)
+  if b
+    then liftIO (Y.decodeFileEither file) >>= liftEither . mapLeft show >>= \x -> return (toSwInfoMap x)
+    else throwError ("File with switch info not found " <> file)
+ where
+  toSwInfoMap :: [SwInfo] -> SwInfoMap
+  toSwInfoMap = M.fromList . map (\x -> (swName x, x))
 
 -- TODO: Add and check for 'disabled' port state.
 data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}
@@ -107,11 +136,18 @@ data PortInfoEl = PortInfoEl
   }
   deriving (Show)
 
+-- FIXME: Do not use this.
 defaultPortInfoEl :: PortInfoEl
 defaultPortInfoEl = PortInfoEl{elVlan = Vlan 0, elMac = defMacAddr, elPort = PortNum{portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
+
+instance ToJSON PortSpeed where
+  toJSON = String . T.pack . show
+
+instance FromJSON PortSpeed where
+  parseJSON = withText "PortSpeed" (either fail pure . A.parseOnly portSpeedP)
 
 portSpeedP :: A.Parser PortSpeed
 portSpeedP =

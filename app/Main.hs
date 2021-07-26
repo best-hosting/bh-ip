@@ -25,6 +25,7 @@ import Control.Monad (join)
 import Control.Applicative
 import qualified Data.Set as S
 import Control.Monad.Except
+import Data.Either.Combinators
 
 import BH.Main
 import BH.IP
@@ -65,15 +66,18 @@ optParser swInfo = Options
   where
     getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
     getSwDefaults sn = let m = M.lookup sn swInfo
-                       in  (defaultPortSpeed <$> m, defaultPortSlot <$> m)
+                       in  (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
 
 main :: IO ()
 main = do
     -- TODO: I may use single for storing authinfo and other config. This file
     -- may be encrypted with gpg and edited with sops. Alternatively, i may
     -- split config..
-    swInfoMap <- parseSwInfo <$> T.readFile "authinfo.txt"
-    print swInfoMap
+    swi <- runExceptT $ readSwInfo "authinfo.yaml"
+    print swi
+    swInfoMap <- case swi of
+      Right s -> return s
+      Left e -> error "huy"
     Right (macIpMap, ipMacMap) <- runExceptT $ queryLinuxArp "mac-ip-cache.yml" "certbot"
     opts <- O.customExecParser (O.prefs O.showHelpOnError) $
       O.info (O.helper <*> optParser swInfoMap)
