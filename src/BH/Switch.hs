@@ -22,8 +22,8 @@ import qualified Data.Yaml as Y
 import System.Directory
 
 import BH.Common
-import BH.Switch.Types
 import BH.IP
+import BH.Switch.Types
 
 readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfoMap
 readSwInfo file = do
