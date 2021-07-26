@@ -9,6 +9,7 @@ module BH.Common
     , lexemeA
     , symbolA
     , maybeErr
+    , (<<>>)
     )
   where
 
@@ -17,6 +18,7 @@ import Data.Functor.Const
 import Data.Functor.Identity
 import qualified Data.Attoparsec.Text as A
 import Control.Monad.Except
+import Control.Applicative
 
 -- See https://www.twanvl.nl/blog/haskell/cps-functional-references .
 type LensC a b   = forall f. Functor f => (b -> f b) -> a -> f a
@@ -38,4 +40,8 @@ lexemeA p = p <* A.takeWhile A.isHorizontalSpace
 
 maybeErr :: MonadError String m => String -> Maybe a -> m a
 maybeErr err = maybe (throwError err) return
+
+infixr 4 <<>>
+(<<>>) :: (Applicative f, Monoid a) => f a -> f a -> f a
+(<<>>) = liftA2 (<>)
 
