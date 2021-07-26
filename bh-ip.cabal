@@ -27,13 +27,14 @@ source-repository head
 
 library
   exposed-modules:
-      BH.Common
       BH.IP
       BH.IP.Arp
       BH.Switch
       BH.Telnet
       BH.Main
   other-modules:
+      BH.Common
+      BH.Switch.Types
       BH.SwitchMega
       Paths_bh_ip
   hs-source-dirs:
