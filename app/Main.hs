@@ -32,7 +32,6 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
--- FIXME: Use Set instead of list. Then i may 'concat' at 'macToIP'.
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
     curSn <- asks (swName . switchInfo)
@@ -106,7 +105,7 @@ work opts = do
         liftIO $ putStrLn "Gathered ac map:"
         liftIO $ print portMacs
         liftIO $ putStrLn "Finally, ips..."
-        portIPs <- forM portMacs $ \macs -> catMaybes <$> mapM macToIP macs
+        portIPs <- forM portMacs $ \macs -> mconcat . catMaybes <$> mapM macToIP macs
         liftIO $ print portIPs
       Nothing -> throwError "Huynya"
 
