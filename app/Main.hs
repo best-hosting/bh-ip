@@ -37,42 +37,6 @@ import BH.Telnet
 -- TODO: queryX functions must return some unified information structure
 -- containing all (missed) info, like vlan, port state, IPs, macs, etc.
 
--- | Query single port.
-queryPort :: (MonadReader Config m, MonadError String m, MonadIO m) =>
-             SwPort -> m (M.Map SwPort [(MacAddr, S.Set IP)])
-queryPort swPort = queryPorts (S.singleton swPort)
-
--- | Query several ports.
-queryPorts :: (MonadReader Config m, MonadError String m, MonadIO m) =>
-             (S.Set SwPort) -> m (M.Map SwPort [(MacAddr, S.Set IP)])
-queryPorts switches = do
-  Config{..} <- ask
-  -- FIXME: Move reader context to upper layer.
-  portMacs <- flip runReaderT swInfoMap $ run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
-  liftIO $ putStrLn "Gathered ac map:"
-  liftIO $ print portMacs
-  liftIO $ putStrLn "Finally, ips..."
-  forM portMacs $ mapM (\m -> (m, ) <$> macToIPs m)
-
--- I'm intresting in receiving all ports in question as input, because then i
--- may connect to each switch only once and iterate over all asked ports from
--- this switch.
-getMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
-getMacs t0 = do
-    curSn <- asks (swName . switchInfo)
-    ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
-    foldM (flip go) t0 ps >>= sendExit
-  where
-    go :: SwPort -> TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) T.Text
-    go swPort@SwPort{..} =
-        sendAndParse (parse <$> parseMacAddrTable)
-          (cmd $ "show mac address-table interface " <> ciscoPortNum portSpec)
-      where
-        parse :: [PortInfoEl] -> M.Map SwPort [MacAddr]
-        parse xs = if null xs
-                      then mempty
-                      else M.singleton swPort (map elMac xs)
-
 data Options = Options {switchPorts :: [SwPort]}
   deriving (Show)
 
