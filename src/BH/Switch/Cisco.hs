@@ -23,6 +23,7 @@ import Control.Monad.Reader
 import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
 import Data.Either.Combinators
+import Data.Functor
 import qualified Data.Set as S
 import qualified Data.Yaml as Y
 import System.Directory
@@ -39,7 +40,7 @@ readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfoMap
 readSwInfo file = do
   b <- liftIO (doesFileExist file)
   if b
-    then liftIO (Y.decodeFileEither file) >>= liftEither . mapLeft show >>= return . toSwInfoMap
+    then (liftIO (Y.decodeFileEither file) >>= liftEither . mapLeft show) <&> toSwInfoMap
     else throwError ("File with switch info not found " <> file)
  where
   toSwInfoMap :: [SwInfo] -> SwInfoMap
@@ -67,8 +68,8 @@ parseMacAddrTable = do
   void $ optional topHeaderA
   portP <-
     symbolA "Vlan" *> symbolA "Mac Address"
-      *> ( symbolA "Type" *> symbolA "Ports" *> pure (symbolA "DYNAMIC" *> lexemeA portNumP)
-            <|> symbolA "Ports" *> symbolA "Type" *> pure (lexemeA portNumP <* symbolA "DYNAMIC")
+      *> ( symbolA "Type" *> symbolA "Ports" $> (symbolA "DYNAMIC" *> lexemeA portNumP)
+            <|> symbolA "Ports" *> symbolA "Type" $> (lexemeA portNumP <* symbolA "DYNAMIC")
          )
       <* A.endOfLine
       <* A.count 4 dashLineA
@@ -119,8 +120,9 @@ queryPorts ::
   m (M.Map SwPort [(MacAddr, S.Set IP)])
 queryPorts switches = do
   Config{..} <- ask
-  portMacs <- flip runReaderT swInfoMap
-    $ run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
+  portMacs <-
+    flip runReaderT swInfoMap $
+      run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
