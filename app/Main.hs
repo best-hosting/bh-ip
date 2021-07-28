@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -33,17 +34,19 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
-queryPort :: (MonadReader Config m, MonadError String m, MonadIO m) =>
-             [SwPort] -> m (Maybe (M.Map SwPort [(MacAddr, [IP])]))
-queryPort = do
+queryPorts :: (MonadReader Config m, MonadError String m, MonadIO m) =>
+             (S.Set SwPort) -> m (Maybe (M.Map SwPort [(MacAddr, S.Set IP)]))
+queryPorts switches = do
   Config{..} <- ask
-  mm <- flip runReaderT swInfoMap $ run (M.keys swports) getMacs (portSw sw)
+  mm <- flip runReaderT swInfoMap $ run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
   case mm of
     Just portMacs -> do
       liftIO $ putStrLn "Gathered ac map:"
       liftIO $ print portMacs
       liftIO $ putStrLn "Finally, ips..."
-      portIPs <- forM portMacs $ \macs -> mconcat . catMaybes <$> mapM macToIP macs
+      portIPs <- forM portMacs $ mapM (\m -> (m, ) <$> macToIPs m)
+      return (Just portIPs)
+    Nothing -> return Nothing
 
 --queryPort :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [(MacAddr, [IP])])) ()
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
@@ -116,18 +119,7 @@ main = do
 -- - "unknown" - mac address is not assigned to any server.
 
 work :: (MonadReader Config m, MonadError String m, MonadIO m) => Options -> m ()
-work opts = do
-    Config{..} <- ask
-    liftIO $ print opts
-    let swports = M.fromList . map (\x -> (x, [])) $ switchPorts opts
-        sw = head . M.keys $ swports
-    mm <- flip runReaderT swInfoMap $ run (M.keys swports) getMacs (portSw sw)
-    case mm of
-      Just portMacs -> do
-        liftIO $ putStrLn "Gathered ac map:"
-        liftIO $ print portMacs
-        liftIO $ putStrLn "Finally, ips..."
-        portIPs <- forM portMacs $ \macs -> mconcat . catMaybes <$> mapM macToIP macs
-        liftIO $ print portIPs
-      Nothing -> throwError "Huynya"
+work Options{..} = do
+    liftIO $ print switchPorts
+    queryPorts (S.fromList switchPorts) >>= liftIO . print
 

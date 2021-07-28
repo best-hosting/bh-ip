@@ -8,6 +8,7 @@ module BH.IP.Arp (
   ipNeigh,
   nmapCache,
   queryLinuxArp,
+  macToIPs,
   macToIP,
   ipToMac,
 ) where
@@ -228,6 +229,11 @@ queryLinuxArp cacheFile host =
   readCache cacheFile >>= updateArpCache cacheFile host
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.
+macToIPs :: MonadReader Config m => MacAddr -> m (S.Set IP)
+macToIPs mac = do
+  Config{..} <- ask
+  return . fromMaybe mempty $ M.lookup mac macIpMap
+
 macToIP :: MonadReader Config m => MacAddr -> m (Maybe (S.Set IP))
 macToIP mac = do
   Config{..} <- ask
