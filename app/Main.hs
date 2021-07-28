@@ -58,7 +58,7 @@ getMacs t0 = do
     go :: SwPort -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) T.Text
     go pid@SwPort{portSpec = pn} ts =
         sendAndParse (parse <$> parseMacAddrTable)
-          (cmdWEcho $ "show mac address-table interface " <> ciscoPortNum pn) ts
+          (cmd $ "show mac address-table interface " <> ciscoPortNum pn) ts
       where
         parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
         parse xs = if null xs

@@ -16,9 +16,9 @@ import BH.Telnet
 
 saveSwitch :: TelnetCmd () T.Text ()
 saveSwitch t0 =
-    sendCmd (cmdWEcho "write") t0 >>=
-    sendCmd (cmdWEcho "terminal length 0") >>=
-    sendAndParse parseCiscoConfig (cmdWEcho "show running") >>=
+    sendCmd (cmd "write") t0 >>=
+    sendCmd (cmd "terminal length 0") >>=
+    sendAndParse parseCiscoConfig (cmd "show running") >>=
     sendExit
 
 main :: IO ()
