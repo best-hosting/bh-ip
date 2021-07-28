@@ -128,32 +128,26 @@ takeTillPromptP prompt =
 sendParseWithPrompt :: A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> A.Parser b -> TelCmd -> TelnetCmd a b T.Text
-sendParseWithPrompt promptP p TelCmd{..} t0 = 
-    liftIO (putStrLn "sendParseWithPrompt: parsing echo") >>
-    parseEcho promptP t0 >>=
-    shiftW (\(k, _) -> do
+sendParseWithPrompt promptP p telCmd@TelCmd{..} t0 = do
+    liftIO (putStrLn "sendParseWithPrompt: parsing echo")
+    parseEcho promptP t0
+      >>= telnetCmdSend
+      >>= parseEchoCmd
+      >>= parseCmd p
+  where
+    telnetCmdSend :: TelnetCmd a b T.Text
+    telnetCmdSend = shiftW $ \(k, _) -> do
         con  <- asks telnetConn
         liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmdText <> "\n"
         saveResume k
-      ) >>=
-    shiftW (\(k, ts) ->
-        (if cmdEcho then parseEchoText cmdText ts else return ts)
-        >>= flip saveAndCont k
-      ) >>=
-    parseCmd p
-
-parseEchoText :: T.Text -- ^ Text, which i expect to be echoed back.
-              -> TelnetCmd a b T.Text
-parseEchoText echoTxt ts = do
-    liftIO $ print $ "Parsing echo text: '" <> echoTxt <> "'"
-    parseEcho (A.string echoTxt <* A.endOfLine) ts
-
--- | More generic 'parseEchoText', which accepts arbitrary parser. But result
--- is restricted to 'Text' and this function is intended just for a little
--- more sophisticated command echo and cmd prompt parsing.
-parseEcho :: A.Parser T.Text -- ^ Parser for command output.
-              -> TelnetCmd a b T.Text
-parseEcho = parseOutputL telnetEchoResultL
+    parseEchoCmd :: TelnetCmd a b T.Text
+    parseEchoCmd = shiftW $ \(k, ts) -> do
+        unparsedTxt <- if cmdEcho
+            then do
+              liftIO $ print $ "Parsing echo text: '" <> cmdText <> "'"
+              parseEcho (A.string cmdText <* A.endOfLine) ts
+            else return ts
+        saveAndCont unparsedTxt k
 
 parseCmd :: A.Parser b -> TelnetCmd a b T.Text
 parseCmd p = shiftW $ \(k, ts) ->do
@@ -169,6 +163,13 @@ parseCmd p = shiftW $ \(k, ts) ->do
       st2    <- liftIO (readIORef stRef)
       liftIO $ putStrLn "Merged telnet output result" >> print (telnetResult st2)
       saveAndCont unparsedTxt k
+
+-- | More generic 'parseEchoText', which accepts arbitrary parser. But result
+-- is restricted to 'Text' and this function is intended just for a little
+-- more sophisticated command echo and cmd prompt parsing.
+parseEcho :: A.Parser T.Text -- ^ Parser for command output.
+              -> TelnetCmd a b T.Text
+parseEcho = parseOutputL telnetEchoResultL
 
 parseOutputL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
                 -> A.Parser c -- ^ Parser for command output.
