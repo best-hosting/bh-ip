@@ -13,7 +13,7 @@ module BH.Telnet
     , shiftW
     , saveResume
     , sendCmd
-    , parseCmd
+    , parseResult
     , sendAndParse
     , sendExit
     , run
@@ -133,7 +133,7 @@ sendParseWithPrompt promptP p telCmd@TelCmd{..} t0 = do
     parseEcho promptP t0
       >>= telnetCmdSend
       >>= parseEchoCmd
-      >>= parseCmd p
+      >>= parseResult p
   where
     telnetCmdSend :: TelnetCmd a b T.Text
     telnetCmdSend = shiftW $ \(k, _) -> do
@@ -149,8 +149,8 @@ sendParseWithPrompt promptP p telCmd@TelCmd{..} t0 = do
             else return ts
         saveAndCont unparsedTxt k
 
-parseCmd :: A.Parser b -> TelnetCmd a b T.Text
-parseCmd p = shiftW $ \(k, ts) ->do
+parseResult :: A.Parser b -> TelnetCmd a b T.Text
+parseResult p = shiftW $ \(k, ts) ->do
       liftIO $ putStrLn "Starting command output parsing.."
       unparsedTxt <- parseOutputL telnetOutputResultL p ts
       stRef <- asks telnetRef
