@@ -47,6 +47,7 @@ queryPorts :: (MonadReader Config m, MonadError String m, MonadIO m) =>
              (S.Set SwPort) -> m (M.Map SwPort [(MacAddr, S.Set IP)])
 queryPorts switches = do
   Config{..} <- ask
+  -- FIXME: Move reader context to upper layer.
   portMacs <- flip runReaderT swInfoMap $ run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
