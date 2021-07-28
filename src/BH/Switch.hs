@@ -13,7 +13,6 @@ module BH.Switch (
   MacPortMap,
   SwConfig,
   PortInfoEl (..),
-  defaultPortInfoEl,
   PortNum (..),
   portNumP,
   portNumP',
@@ -112,10 +111,6 @@ data PortInfoEl = PortInfoEl
   , elPort :: PortNum
   }
   deriving (Show)
-
--- FIXME: Do not use this.
-defaultPortInfoEl :: PortInfoEl
-defaultPortInfoEl = PortInfoEl{elVlan = Vlan 0, elMac = defMacAddr, elPort = PortNum{portSpeed = FastEthernet, portSlot = 0, portNumber = 0}}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
