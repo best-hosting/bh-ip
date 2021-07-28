@@ -31,7 +31,7 @@ import Data.Either.Combinators
 import BH.Main
 import BH.IP
 import BH.IP.Arp
-import BH.Switch
+import BH.Switch.Cisco
 import BH.Telnet
 
 -- TODO: queryX functions must return some unified information structure

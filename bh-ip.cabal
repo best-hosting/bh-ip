@@ -31,10 +31,10 @@ library
       BH.IP.Arp
       BH.Switch
       BH.Telnet
+      BH.Switch.Cisco
       BH.Main
   other-modules:
       BH.Common
-      BH.Switch.Types
       BH.SwitchMega
       Paths_bh_ip
   hs-source-dirs:

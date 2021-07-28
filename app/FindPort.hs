@@ -16,7 +16,7 @@ import qualified Data.Attoparsec.Text as A
 import Control.Applicative
 
 import BH.IP
-import BH.Switch
+import BH.Switch.Cisco
 import BH.Telnet
 
 

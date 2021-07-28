@@ -12,7 +12,7 @@ import Control.Monad.Reader
 import Control.Monad.Trans.Except
 import qualified Data.Attoparsec.Text as A
 
-import BH.Switch
+import BH.Switch.Cisco
 import BH.Telnet
 
 
