@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module BH.Telnet
     ( TelCmd (..)
@@ -124,17 +125,17 @@ takeTillPromptP prompt =
 sendParseWithPrompt :: A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> A.Parser b -> TelCmd -> TelnetCmd a b T.Text
-sendParseWithPrompt promptP p TelCmd {cmdText = cmd, cmdEcho = ce} t0 = 
+sendParseWithPrompt promptP p TelCmd{..} t0 = 
     liftIO (putStrLn "sendParseWithPrompt: parsing echo") >>
     parseEcho promptP t0 >>=
     shiftW (\(k, _) -> do
         con  <- asks telnetConn
-        liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmd <> "\n"
+        liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmdText <> "\n"
         saveResume k
       ) >>=
     (\ts ->
-        if ce
-          then parseEchoText cmd ts
+        if cmdEcho
+          then parseEchoText cmdText ts
           else return ts
     -- FIXME: Save continuation after echo parsing complete.
     ) >>=
@@ -172,15 +173,13 @@ parseCmd p = shiftW $ \(k, ts) ->do
 parseOutputL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
                 -> A.Parser c -- ^ Parser for command output.
                 -> TelnetCmd a b T.Text
-parseOutputL l p = go <=< resetResult
+parseOutputL l p ts = do
+    liftIO $ putStrLn "Starting output parsing.."
+    liftIO $ putStrLn "Reset parser result.."
+    stRef <- asks telnetRef
+    liftIO $ atomicModifyIORef' stRef (\s -> (setL l Nothing s, ()))
+    shiftT (\h -> saveResume h >> lift (h ts)) >>= go
   where
-    --resetResult :: TelnetCmd a b T.Text
-    resetResult = shiftW $ \(k, ts) -> do
-      liftIO $ putStrLn "Reset parser result.."
-      stRef <- asks telnetRef
-      liftIO $ atomicModifyIORef' stRef (\s -> (setL l Nothing s, ()))
-      saveResume k
-      lift (k ts)
     --go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
       liftIO $ putStrLn "Parsing.."
@@ -273,17 +272,13 @@ telnetPromptP = go
           <|> A.takeTill A.isEndOfLine *> A.endOfLine *> go
 
 setPrompt :: A.Parser T.Text -> TelnetCmd a b T.Text
-setPrompt promptP = go <=< resetPrompt
+setPrompt promptP ts = do
+    liftIO $ putStrLn "Setting new prompt.."
+    liftIO $ putStrLn "Reset old telnet prompt.."
+    stRef <- asks telnetRef
+    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetPrompt = T.empty}, ()))
+    shiftT (\h -> saveResume h >> lift (h ts)) >>= go
   where
-    -- FIXME: Use 'shiftT', because 'resetPrompt' does not do anything with
-    -- text.
-    resetPrompt :: TelnetCmd a b T.Text
-    resetPrompt = shiftW $ \(k, ts) -> do
-      liftIO $ putStrLn "Reset old telnet prompt.."
-      stRef <- asks telnetRef
-      liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetPrompt = T.empty}, ()))
-      saveResume k
-      lift (k ts)
     go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
       liftIO $ putStrLn "Start parsing new prompt.."
