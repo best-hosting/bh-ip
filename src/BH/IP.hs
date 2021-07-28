@@ -35,6 +35,9 @@ import BH.Common
 
 
 -- TODO: May be add 'vlan' field to 'IP' ? And 'vendor' field to 'MacAddr' type ?
+-- May it's better leave 'MacAddr' and 'IP' as "pure" addresses and create
+-- wrapper type containing more info, like MacInfo{ macVlan :: Vlan, macAddr
+-- :: MacAddr} and IPInfo {ipVlan :: Vlan, ipAddr ;: IP} .
 
 data MacAddr    = MacAddr
                     { macOctet1 :: Int
