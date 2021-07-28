@@ -122,7 +122,7 @@ queryPorts switches = do
   Config{..} <- ask
   portMacs <-
     flip runReaderT swInfoMap $
-      run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
+      runOn (S.toList switches) getMacs (S.toList $ S.map portSw switches)
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
