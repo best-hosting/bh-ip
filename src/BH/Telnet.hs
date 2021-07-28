@@ -133,12 +133,10 @@ sendParseWithPrompt promptP p TelCmd{..} t0 =
         liftIO $ TL.telnetSend con . B8.pack $ T.unpack cmdText <> "\n"
         saveResume k
       ) >>=
-    (\ts ->
-        if cmdEcho
-          then parseEchoText cmdText ts
-          else return ts
-    -- FIXME: Save continuation after echo parsing complete.
-    ) >>=
+    shiftW (\(k, ts) ->
+        (if cmdEcho then parseEchoText cmdText ts else return ts)
+        >>= flip saveAndCont k
+      ) >>=
     parseCmd p
 
 parseEchoText :: T.Text -- ^ Text, which i expect to be echoed back.
@@ -156,19 +154,18 @@ parseEcho = parseOutputL telnetEchoResultL
 
 parseCmd :: A.Parser b -> TelnetCmd a b T.Text
 parseCmd p = shiftW $ \(k, ts) ->do
-      liftIO $ putStrLn "Make cmd result parser.."
-      unparsedTxt <- shiftT (\h -> saveResume h >> lift (h ts)) >>= parseOutputL telnetOutputResultL p
+      liftIO $ putStrLn "Starting command output parsing.."
+      unparsedTxt <- parseOutputL telnetOutputResultL p ts
       stRef <- asks telnetRef
       st    <- liftIO (readIORef stRef)
       case telnetOutputResult st of
         Just (A.Done _ res) -> do
-          liftIO $ putStrLn "Merging telnet OUTPUT result" >> print res
+          liftIO $ putStrLn "Cmd output result" >> print res
           liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res <> telnetResult st}, ()))
         _ -> error "Huh blye?"
       st2    <- liftIO (readIORef stRef)
-      liftIO $ putStrLn "Merging telnet OUTPUT result2" >> print (telnetResult st2)
-      saveResume k
-      lift (k unparsedTxt)
+      liftIO $ putStrLn "Merged telnet output result" >> print (telnetResult st2)
+      saveAndCont unparsedTxt k
 
 parseOutputL :: LensC (TelnetState a b) (Maybe (A.IResult T.Text c))
                 -> A.Parser c -- ^ Parser for command output.
@@ -178,7 +175,7 @@ parseOutputL l p ts = do
     liftIO $ putStrLn "Reset parser result.."
     stRef <- asks telnetRef
     liftIO $ atomicModifyIORef' stRef (\s -> (setL l Nothing s, ()))
-    shiftT (\h -> saveResume h >> lift (h ts)) >>= go
+    shiftT (saveAndCont ts) >>= go
   where
     --go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
@@ -193,19 +190,21 @@ parseOutputL l p ts = do
         A.Done unparsedTxt _ -> do
           liftIO $ putStrLn "Finished output parsing"
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
-          saveResume k
-          lift (k unparsedTxt)
+          saveAndCont unparsedTxt k
 
 sendExit :: TelnetCmd a b ()
 sendExit = (\_ -> pure ()) <=< sendCmd (defCmd "exit")
 
--- TODO: Write 'saveAndContinue', which saves resume and immediately calls it,
--- since this is the most commonly used pattern.
+-- | Save resume continuation.
 saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
               -> ContT () (ReaderT (TelnetInfo a b) m) ()
 saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef' tRef (\r -> (r{telnetResume = Just k}, ()))
+
+-- | Save resume continuation and call it immediately.
+saveAndCont :: T.Text -> (T.Text -> ReaderT (TelnetInfo a b) IO ()) -> ContT () (ReaderT (TelnetInfo a b) IO) ()
+saveAndCont ts k = saveResume k >> lift (k ts)
 
 runCmd :: (Show b, Monoid b) => T.Text -> TelnetCmd a b () -> ContT () (ReaderT (TelnetInfo a b) IO) ()
 runCmd ts cmd = do
@@ -277,7 +276,7 @@ setPrompt promptP ts = do
     liftIO $ putStrLn "Reset old telnet prompt.."
     stRef <- asks telnetRef
     liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetPrompt = T.empty}, ()))
-    shiftT (\h -> saveResume h >> lift (h ts)) >>= go
+    shiftT (saveAndCont ts) >>= go
   where
     go :: TelnetCmd a b T.Text
     go = shiftW $ \(k, ts) -> do
@@ -290,8 +289,7 @@ setPrompt promptP ts = do
           liftIO $ print $ "Set prompt to: " <> prompt
           liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetPrompt = prompt}, ()))
         _ -> error "Huh?"
-      saveResume k
-      lift (k unparsedTxt)
+      saveAndCont unparsedTxt k
 
 runTill :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> (b -> Bool) -> m b
 runTill input telnetCmd p = do
