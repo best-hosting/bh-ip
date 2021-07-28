@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Main where
@@ -16,7 +15,7 @@ import BH.Switch.Cisco
 import BH.Telnet
 
 
-saveSwitch :: A.Parser b -> TelnetCmd () b ()
+saveSwitch :: (Show b, Monoid b) => A.Parser b -> TelnetCmd () b ()
 saveSwitch p ts =
     sendCmd (cmd "write") ts >>=
     sendCmd (cmd "terminal length 0") >>=

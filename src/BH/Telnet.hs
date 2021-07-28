@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -51,8 +50,8 @@ import BH.Common
 import BH.Switch
 
 
-type TelnetCtx a b c = (Show b, Monoid b) => ContT () (ReaderT (TelnetInfo a b) IO) c
-type TelnetCmd a b c = (Show b, Monoid b) => T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
+type TelnetCtx a b c = ContT () (ReaderT (TelnetInfo a b) IO) c
+type TelnetCmd a b c = T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
 data TelnetState a b    = TelnetState
                             { telnetResult :: b
@@ -109,10 +108,10 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Send telnet command and wait until it'll be echo-ed back.
-sendCmd :: TelCmd -> TelnetCmd a b T.Text
+sendCmd :: (Show b, Monoid b) => TelCmd -> TelnetCmd a b T.Text
 sendCmd = sendAndParse (pure mempty)
 
-sendAndParse :: A.Parser b -> TelCmd -> TelnetCmd a b T.Text
+sendAndParse :: (Show b, Monoid b) => A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParse p cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
@@ -127,7 +126,7 @@ takeTillPromptP :: T.Text -> A.Parser T.Text
 takeTillPromptP prompt =
     A.string prompt <|> A.takeTill A.isEndOfLine *> A.endOfLine *> takeTillPromptP prompt
 
-sendParseWithPrompt :: A.Parser T.Text
+sendParseWithPrompt :: (Show b, Monoid b) => A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendParseWithPrompt promptP p telCmd@TelCmd{..} t0 = do
@@ -151,7 +150,7 @@ sendParseWithPrompt promptP p telCmd@TelCmd{..} t0 = do
             else return ts
         saveAndCont unparsedTxt k
 
-parseResult :: A.Parser b -> TelnetCmd a b T.Text
+parseResult :: (Show b, Monoid b) => A.Parser b -> TelnetCmd a b T.Text
 parseResult p = shiftW $ \(k, ts) ->do
       liftIO $ putStrLn "Starting command output parsing.."
       unparsedTxt <- parseOutputL telnetOutputResultL p ts
@@ -198,7 +197,7 @@ parseOutputL l p ts = do
           liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
           saveAndCont unparsedTxt k
 
-sendExit :: TelnetCmd a b ()
+sendExit :: (Show b, Monoid b) => TelnetCmd a b ()
 sendExit = (\_ -> pure ()) <=< sendCmd (cmd "exit")
 
 -- FIXME: Move up, close to 'shiftW'.
@@ -243,7 +242,7 @@ passwordPromptP = (A.endOfLine <|> pure ()) *> A.string "Password:"
 checkRootP :: Monoid b => A.Parser b
 checkRootP = A.lookAhead (A.takeTill (== '#') *> A.string "#" $> mempty) <|> fail "Not a root"
 
-loginCmd :: TelnetCmd a b T.Text
+loginCmd :: (Show b, Monoid b) => TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
     SwInfo  { swUser = user
             , swPassword = pw
