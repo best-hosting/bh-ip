@@ -6,7 +6,7 @@
 
 module BH.Telnet
     ( TelCmd (..)
-    , defCmd
+    , cmdWEcho
     , TelnetCmd
     , TelnetInfo (..)
     , shiftW
@@ -91,9 +91,11 @@ data TelnetInfo a b = TelnetInfo { switchInfo   :: SwInfo
 data TelCmd    = TelCmd {cmdText :: T.Text, cmdEcho :: Bool}
   deriving (Show)
 
-defCmd :: T.Text -> TelCmd
-defCmd t = TelCmd {cmdText = t, cmdEcho = True}
+cmdWEcho :: T.Text -> TelCmd
+cmdWEcho t = TelCmd {cmdText = t, cmdEcho = True}
 
+cmdNoEcho :: T.Text -> TelCmd
+cmdNoEcho t = TelCmd {cmdText = t, cmdEcho = False}
 
 
 
@@ -193,7 +195,7 @@ parseOutputL l p ts = do
           saveAndCont unparsedTxt k
 
 sendExit :: TelnetCmd a b ()
-sendExit = (\_ -> pure ()) <=< sendCmd (defCmd "exit")
+sendExit = (\_ -> pure ()) <=< sendCmd (cmdWEcho "exit")
 
 -- | Save resume continuation.
 saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
@@ -245,11 +247,11 @@ loginCmd ts0 = shiftT $ \finish -> do
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     pure ts0 >>=
-      sendParseWithPrompt userNamePromptP (pure mempty) (defCmd user) >>=
-      sendParseWithPrompt passwordPromptP (pure mempty) (TelCmd {cmdText = pw, cmdEcho = False}) >>=
+      sendParseWithPrompt userNamePromptP (pure mempty) (cmdWEcho user) >>=
+      sendParseWithPrompt passwordPromptP (pure mempty) (cmdNoEcho pw) >>=
       setPrompt telnetPromptP >>=
-      sendCmd (defCmd "enable") >>=
-      sendParseWithPrompt passwordPromptP checkRootP (TelCmd {cmdText = enPw, cmdEcho = False}) >>=
+      sendCmd (cmdWEcho "enable") >>=
+      sendParseWithPrompt passwordPromptP checkRootP (cmdNoEcho enPw) >>=
       lift . finish
 
 -- | Match to prompt and return it as a result, but leave it unconsumed, so

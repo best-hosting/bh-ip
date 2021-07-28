@@ -31,7 +31,7 @@ findPort t0 = do
                      then Nothing
                      else Just $ M.singleton sn (map elPort ps)
     sendAndParse (parse <$> parseMacAddrTable)
-          (defCmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+          (cmdWEcho $ "show mac address-table address " <> T.pack (showMacAddr mac))
           t0
       >>= sendExit
 
