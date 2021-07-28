@@ -178,6 +178,7 @@ portNumP' defSpeed defSlot = do
       <$> maybe (fail "No default port speed") pure defSpeed
       <*> maybe (fail "No default port slot") pure defSlot A.<?> "slot number"
 
+-- FIXME: Some cisco switches does not have slots.
 -- | Print 'PortNum' in a format understand by cisco.
 ciscoPortNum :: PortNum -> T.Text
 ciscoPortNum PortNum{..} =
