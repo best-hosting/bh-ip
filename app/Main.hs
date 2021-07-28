@@ -34,6 +34,7 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Telnet
 
+-- FIXME: Write 'queryPort' too (for single port).
 queryPorts :: (MonadReader Config m, MonadError String m, MonadIO m) =>
              (S.Set SwPort) -> m (Maybe (M.Map SwPort [(MacAddr, S.Set IP)]))
 queryPorts switches = do
@@ -48,6 +49,7 @@ queryPorts switches = do
       return (Just portIPs)
     Nothing -> return Nothing
 
+-- FIXME: Why i need 'Maybe' in result?
 --queryPort :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [(MacAddr, [IP])])) ()
 getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
 getMacs t0 = do
