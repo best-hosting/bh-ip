@@ -36,36 +36,30 @@ import BH.Telnet
 
 -- FIXME: Write 'queryPort' too (for single port).
 queryPorts :: (MonadReader Config m, MonadError String m, MonadIO m) =>
-             (S.Set SwPort) -> m (Maybe (M.Map SwPort [(MacAddr, S.Set IP)]))
+             (S.Set SwPort) -> m (M.Map SwPort [(MacAddr, S.Set IP)])
 queryPorts switches = do
   Config{..} <- ask
-  mm <- flip runReaderT swInfoMap $ run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
-  case mm of
-    Just portMacs -> do
-      liftIO $ putStrLn "Gathered ac map:"
-      liftIO $ print portMacs
-      liftIO $ putStrLn "Finally, ips..."
-      portIPs <- forM portMacs $ mapM (\m -> (m, ) <$> macToIPs m)
-      return (Just portIPs)
-    Nothing -> return Nothing
+  portMacs <- flip runReaderT swInfoMap $ run (S.toList switches) getMacs (head . S.toList $ S.map portSw switches)
+  liftIO $ putStrLn "Gathered ac map:"
+  liftIO $ print portMacs
+  liftIO $ putStrLn "Finally, ips..."
+  forM portMacs $ mapM (\m -> (m, ) <$> macToIPs m)
 
--- FIXME: Why i need 'Maybe' in result?
---queryPort :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [(MacAddr, [IP])])) ()
-getMacs :: TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) ()
+getMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 getMacs t0 = do
     curSn <- asks (swName . switchInfo)
     ps    <- asks (filter ((== curSn) . portSw) . telnetIn)
     foldM (flip go) t0 ps >>= sendExit
   where
-    go :: SwPort -> TelnetCmd [SwPort] (Maybe (M.Map SwPort [MacAddr])) T.Text
-    go pid@SwPort{portSpec = pn} ts =
+    go :: SwPort -> TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) T.Text
+    go swPort@SwPort{..} ts =
         sendAndParse (parse <$> parseMacAddrTable)
-          (cmd $ "show mac address-table interface " <> ciscoPortNum pn) ts
+          (cmd $ "show mac address-table interface " <> ciscoPortNum portSpec) ts
       where
-        parse :: [PortInfoEl] -> Maybe (M.Map SwPort [MacAddr])
+        parse :: [PortInfoEl] -> M.Map SwPort [MacAddr]
         parse xs = if null xs
-                      then Nothing
-                      else Just $ M.singleton pid (map elMac xs)
+                      then mempty
+                      else M.singleton swPort (map elMac xs)
 
 data Options = Options {switchPorts :: [SwPort]}
   deriving (Show)

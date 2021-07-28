@@ -33,6 +33,7 @@ import qualified Data.Attoparsec.Text as A
 
 import BH.IP
 
+-- FIXME: Rename to 'BH.Switch' and 'BH.Switch' rename to 'BH.Switch.Cisco' .
 newtype SwName = SwName T.Text
   deriving (Eq, Ord, Show)
 

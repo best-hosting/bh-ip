@@ -199,6 +199,7 @@ parseOutputL l p ts = do
 sendExit :: TelnetCmd a b ()
 sendExit = (\_ -> pure ()) <=< sendCmd (cmd "exit")
 
+-- FIXME: Move up, close to 'shiftW'.
 -- | Save resume continuation.
 saveResume :: MonadIO m => (T.Text -> ReaderT (TelnetInfo a b) IO ())
               -> ContT () (ReaderT (TelnetInfo a b) m) ()
