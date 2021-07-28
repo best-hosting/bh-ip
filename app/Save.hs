@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Main where
@@ -9,17 +10,26 @@ import qualified Data.Map as M
 import System.Environment
 import Control.Monad.Reader
 import Control.Monad.Trans.Except
+import qualified Data.Attoparsec.Text as A
 
 import BH.Switch
 import BH.Telnet
 
 
-saveSwitch :: TelnetCmd () T.Text ()
-saveSwitch t0 =
-    sendCmd (cmd "write") t0 >>=
+saveSwitch :: A.Parser b -> TelnetCmd () b ()
+saveSwitch p ts =
+    sendCmd (cmd "write") ts >>=
     sendCmd (cmd "terminal length 0") >>=
-    sendAndParse parseCiscoConfig (cmd "show running") >>=
+    sendAndParse p (cmd "show running") >>=
     sendExit
+
+getParser :: TelnetCtx () (M.Map SwName T.Text) (A.Parser (M.Map SwName T.Text))
+getParser = do
+    curSn <- asks (swName . switchInfo)
+    return (M.singleton curSn <$> parseCiscoConfig)
+
+saveSw :: TelnetCmd () (M.Map SwName T.Text) ()
+saveSw ts = getParser >>= flip saveSwitch ts
 
 main :: IO ()
 main    = do
@@ -32,8 +42,8 @@ main    = do
     print sns
     res <- runExceptT . flip runReaderT swInfo $
       if null sns
-        then runOn () saveSwitch (M.keys swInfo)
-        else runOn () saveSwitch sns
+        then runOn () saveSw (M.keys swInfo)
+        else runOn () saveSw sns
     case res of
       Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do

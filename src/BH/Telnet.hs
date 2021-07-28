@@ -9,6 +9,7 @@ module BH.Telnet
     , cmd
     , cmdNoEcho
     , TelnetCmd
+    , TelnetCtx
     , TelnetInfo (..)
     , shiftW
     , saveResume
@@ -50,6 +51,7 @@ import BH.Common
 import BH.Switch
 
 
+type TelnetCtx a b c = (Show b, Monoid b) => ContT () (ReaderT (TelnetInfo a b) IO) c
 type TelnetCmd a b c = (Show b, Monoid b) => T.Text -> ContT () (ReaderT (TelnetInfo a b) IO) c
 
 data TelnetState a b    = TelnetState
@@ -57,6 +59,7 @@ data TelnetState a b    = TelnetState
                             , telnetResume  :: Maybe (T.Text -> ReaderT (TelnetInfo a b) IO ())
                             , tInt :: Int
                             , telnetEchoResult   :: Maybe (A.Result T.Text)
+                              -- ^ Input already read for checking command echo.
                             , telnetOutputResult :: Maybe (A.Result b)
                             , telnetPrompt  :: T.Text
                             }
@@ -73,7 +76,6 @@ defTelnetState  = TelnetState { telnetResume = Nothing
                               , tInt = 0
                               , telnetEchoResult = Nothing
                               , telnetOutputResult = Nothing
-                              -- ^ Input already read for checking command echo.
                               , telnetPrompt = T.empty
                               }
 
@@ -309,9 +311,8 @@ runTill input telnetCmd p = do
         liftIO $ print $ "From runTill: " ++ show r
         return r
 
-runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m (M.Map SwName b)
-runOn input telnetCmd =
-    foldM (\zs sn -> (\x -> M.insert sn x zs) <$> run input telnetCmd sn) M.empty
+runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m b
+runOn input telnetCmd = fmap mconcat . mapM (run input telnetCmd)
 
 -- | Run on one switch.
 run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> m b
