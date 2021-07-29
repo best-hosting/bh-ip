@@ -35,6 +35,10 @@ import BH.Telnet
 
 -- TODO: queryX functions must return some unified information structure
 -- containing all (missed) info, like vlan, port state, IPs, macs, etc.
+--data SwPortInfo = SwPortInfo
+--                { swPort :: SwPort
+--                , swPortAddrs :: M.Map MacAddr [IP]
+--                }
 
 data Options = Options {switchPorts :: [SwPort]}
   deriving (Show)
@@ -46,13 +50,23 @@ data Options = Options {switchPorts :: [SwPort]}
 -- hardcode 'authinfo' file name, i may leave everything as is..
 optParser :: M.Map SwName SwInfo -> O.Parser Options
 optParser swInfo = Options
-    <$> some
-        ( O.option
-            (O.eitherReader (A.parseOnly (swPortP' getSwDefaults) . T.pack))
-            (  O.long "switch-port"
-            <> O.short 'p'
-            <> O.metavar "SWITCH/PORT"
-            <> O.help "Switch port to look for."
+    <$> ( some
+            ( O.option
+                (O.eitherReader (A.parseOnly (swPortP' getSwDefaults) . T.pack))
+                (  O.long "switch-port"
+                <> O.short 'p'
+                <> O.metavar "SWITCH/PORT"
+                <> O.help "Switch port to look for."
+                )
+            )
+        <|> some
+            ( O.option
+                (O.eitherReader (A.parseOnly macP . T.pack))
+                (  O.long "mac"
+                <> O.short 'm'
+                <> O.metavar "mac-address"
+                <> O.help "Mac address to look for."
+                )
             )
         )
   where
