@@ -31,15 +31,15 @@ optParser ::
 optParser =
   initConfig
     <$> globalOptions
-    <*> ( workQueryPorts
-            <$> some
-              ( O.strOption
-                  ( O.long "switch-port"
-                      <> O.short 'p'
-                      <> O.metavar "SWITCH/PORT"
-                      <> O.help "Switch port to look for."
-                  )
-              )
+    <*> (   workQueryPorts
+              <$> some
+                ( O.strOption
+                    ( O.long "switch-port"
+                        <> O.short 'p'
+                        <> O.metavar "SWITCH/PORT"
+                        <> O.help "Switch port to look for."
+                    )
+                )
             <|> workQueryMacs
               <$> some
                 ( O.option
