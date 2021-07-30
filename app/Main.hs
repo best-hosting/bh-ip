@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE GADTs #-}
 
 module Main where
 
@@ -59,22 +60,83 @@ optParser swInfo = Options
                 <> O.help "Switch port to look for."
                 )
             )
-        <|> some
-            ( O.option
-                (O.eitherReader (A.parseOnly macP . T.pack))
-                (  O.long "mac"
-                <> O.short 'm'
-                <> O.metavar "mac-address"
-                <> O.help "Mac address to look for."
-                )
-            )
         )
   where
     getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
     getSwDefaults sn = let m = M.lookup sn swInfo
                        in  (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
 
+data Options2 a where
+  QuerySwPort :: [SwPort] -> Options2 SwPort
+  QueryMacAddr :: [MacAddr] -> Options2 MacAddr
+  QueryIP :: [IP] -> Options2 IP
+
+data GlobalOptions =
+  GlobalOptions {authFile :: FilePath}
+
+
+optParser2 ::
+    (MonadError String m, MonadIO m) => O.Parser (m ())
+optParser2 =
+  initConfig
+  <$> globalOptions
+  <*> (
+    workQueryPorts <$> some
+      ( O.strOption
+          --(O.eitherReader (A.parseOnly (swPortP' getSwDefaults) . T.pack))
+          --(O.eitherReader (A.parseOnly swPortP . T.pack))
+          (  O.long "switch-port"
+          <> O.short 'p'
+          <> O.metavar "SWITCH/PORT"
+          <> O.help "Switch port to look for."
+          )
+      )
+  <|> workQueryMacs <$> some
+      ( O.option
+          (O.eitherReader (A.parseOnly macP . T.pack))
+          (  O.long "mac"
+          <> O.short 'm'
+          <> O.metavar "MAC-ADDRESS"
+          <> O.help "Mac address to look for."
+          )
+      )
+  <|> workQueryIPs <$> some
+      ( O.option
+          (O.eitherReader (A.parseOnly ipP . T.pack))
+          (  O.long "ip"
+          <> O.short 'i'
+          <> O.metavar "IP-ADDRESS"
+          <> O.help "IP address to look for."
+         )
+      )
+    )
+ where
+  globalOptions :: O.Parser GlobalOptions
+  globalOptions = GlobalOptions <$>
+    O.strOption
+        (  O.long "authfile"
+        <> O.short 'f'
+        <> O.metavar "FILENAME"
+        <> O.help "File with switches authentication information."
+        <> O.value "authinfo.yaml"
+        )
+
 main :: IO ()
+main = do
+    -- TODO: I may use single for storing authinfo and other config. This file
+    -- may be encrypted with gpg and edited with sops. Alternatively, i may
+    -- split config..
+    action <- O.customExecParser (O.prefs O.showHelpOnError) $
+      O.info (O.helper <*> optParser2)
+      (  O.fullDesc
+      <> O.header "General program title/description"
+      <> O.progDesc "What does this thing do?"
+      )
+    res <- runExceptT action
+    case res of
+      Right () -> return ()
+      Left err -> print err
+{-main :: IO ()
 main = do
     -- TODO: I may use single for storing authinfo and other config. This file
     -- may be encrypted with gpg and edited with sops. Alternatively, i may
@@ -94,7 +156,7 @@ main = do
     res <- runExceptT . flip runReaderT (Config{..}) $ work opts
     case res of
       Right () -> return ()
-      Left err -> print err
+      Left err -> print err-}
 
 -- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
 -- - "physical" - mac address used by server. It may be considered bind to
@@ -102,6 +164,49 @@ main = do
 -- - "virtual" - mac address of virtual machine. It may migrate from server
 -- (switch port) to server, though physical server connection does not change.
 -- - "unknown" - mac address is not assigned to any server.
+
+{-SwPortOptions <$> ..
+MacAddrOptions <$> ..
+IPOptions <$> ..-}
+
+initConfig ::
+  (MonadError String m, MonadIO m) =>
+  GlobalOptions -> ReaderT Config m () -> m ()
+initConfig GlobalOptions{..} action = do
+  swInfoMap <- readSwInfo "authinfo.yaml"
+  liftIO $ print swInfoMap
+  (macIpMap, ipMacMap) <- queryLinuxArp "mac-ip-cache.yml" "certbot"
+  runReaderT action Config{..}
+
+workQueryPorts ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [T.Text] -> m ()
+workQueryPorts ts = do
+  Config{..} <- ask
+  let getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
+      getSwDefaults sn =
+        let m = M.lookup sn swInfoMap
+        in  (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
+  swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
+  queryPorts (S.fromList swports) >>= liftIO . print
+ where
+  getSwDefaults :: SwInfoMap -> SwName -> (Maybe PortSpeed, Maybe Int)
+  getSwDefaults swInfo sn =
+    let m = M.lookup sn swInfo
+    in  (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
+
+workQueryMacs ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] -> m ()
+workQueryMacs macs = queryMacs macs >>= liftIO . print
+
+workQueryIPs ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [IP] -> m ()
+workQueryIPs ips = undefined
+
+{-workMacs :: Options MacAddr -> ...
+workIPs :: Options IP -> ...-}
 
 work :: (MonadReader Config m, MonadError String m, MonadIO m) => Options -> m ()
 work Options{..} = do

@@ -11,6 +11,8 @@ module BH.Switch.Cisco (
   getMacs,
   queryPorts,
   queryPort,
+  queryMacs,
+  queryMac
 ) where
 
 import qualified Data.Map as M
@@ -118,6 +120,7 @@ getMacs t0 = do
       | null xs = mempty
       | otherwise = M.singleton swPort (map elMac xs)
 
+-- FIXME: Use list as first arg.
 -- | Query several ports.
 queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
