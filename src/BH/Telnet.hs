@@ -297,18 +297,21 @@ setPrompt promptP ts = do
         _ -> error "Huh?"
       saveAndCont unparsedTxt k
 
-runTill :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> (b -> Bool) -> m b
-runTill input telnetCmd p = do
-    sws <- asks M.keys
-    foldM go mempty sws
+runTill ::
+  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  TelnetCmd a b () -> (b -> (a, Bool)) -> m b
+runTill telnetCmd p = asks M.keys >>= foldM go mempty
   where
-    --go :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m) => b -> SwName -> m b
-    go z sn
-      | p z         = liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
-      | otherwise   = do
-        r <- run input telnetCmd sn
-        liftIO $ print $ "From runTill: " ++ show r
-        return r
+    --go ::
+    --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+    --  b -> SwName -> m b
+    go z sn =
+      case p z of
+        (input, False) -> do
+          r <- run input telnetCmd sn
+          liftIO $ print $ "From runTill: " ++ show r
+          return (r <> z)
+        (_     , True)  -> liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
 
 runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m b
 runOn input telnetCmd = fmap mconcat . mapM (run input telnetCmd)

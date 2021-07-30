@@ -173,12 +173,13 @@ queryMacs ::
   [MacAddr] -> m (M.Map MacAddr (Maybe SwPort, S.Set IP))
 queryMacs macs = do
   Config{..} <- ask
-  let sortedMacs = sort macs
   macPorts <- flip runReaderT swInfoMap $
-    -- FIXME: Fix this shit.
-    runTill macs findPorts (\m -> sortedMacs == sort (M.keys m))
+    runTill findPorts (remMacs macs)
   M.foldrWithKey go (return mempty) macPorts
  where
+  remMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> ([MacAddr], Bool)
+  remMacs macs macMap = let xs = filter (`notElem` M.keys macMap) macs
+                        in  (xs, null xs)
   go ::
     MonadReader Config m =>
     MacAddr -> Maybe SwPort -> m (M.Map MacAddr (Maybe SwPort, S.Set IP)) -> m (M.Map MacAddr (Maybe SwPort, S.Set IP))
