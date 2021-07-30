@@ -300,8 +300,8 @@ setPrompt promptP ts = do
 -- | Run till predicate returns 'Just' with some input.
 runTill ::
   (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
-  TelnetCmd a b () -> (b -> Maybe a) -> m b
-runTill telnetCmd p = asks M.keys >>= foldM go mempty
+  (b -> Maybe a) -> TelnetCmd a b () -> m b
+runTill p telnetCmd = asks M.keys >>= foldM go mempty
   where
     --go ::
     --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
@@ -314,7 +314,9 @@ runTill telnetCmd p = asks M.keys >>= foldM go mempty
           return (r <> z)
         Nothing -> liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
 
-runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m b
+runOn ::
+  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  a -> TelnetCmd a b () -> [SwName] -> m b
 runOn input telnetCmd = fmap mconcat . mapM (run input telnetCmd)
 
 -- | Run on one switch.

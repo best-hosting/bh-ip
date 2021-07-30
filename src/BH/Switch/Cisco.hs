@@ -174,14 +174,11 @@ queryMacs ::
 queryMacs macs = do
   Config{..} <- ask
   macPorts <- flip runReaderT swInfoMap $
-    runTill findPorts (remMacs macs)
+    runTill (getMacs macs) findPorts
   M.foldrWithKey go (return mempty) macPorts
  where
-  remMacs2 :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> ([MacAddr], Bool)
-  remMacs2 macs macMap = let xs = filter (`notElem` M.keys macMap) macs
-                         in  (xs, null xs)
-  remMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
-  remMacs macs macMap = case filter (`notElem` M.keys macMap) macs of
+  getMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
+  getMacs macs macMap = case filter (`notElem` M.keys macMap) macs of
     [] -> Nothing
     xs -> Just xs
   go ::
