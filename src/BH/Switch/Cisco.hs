@@ -37,6 +37,30 @@ import BH.Main
 import BH.Switch
 import BH.Telnet
 
+-- FIXME: New port and switch types:
+-- swName, (portNum, portSpeed), [(Mac, Vlan)]
+-- swName, portSpec :: PortNum, [(Mac, Vlan)]
+-- Map : (swName, portSpec :: PortNum) -> [(Mac, Vlan)]
+-- I may want to also add:
+-- - vendor to 'MacAddr'
+-- - 'Vlan' to 'MacAddr'
+-- - port mode (access/trunk) to 'SwPort'
+-- - port state (enabled/disabled) to 'SwPort'
+
+-- TODO: queryX functions must return some unified information structure
+-- containing all (missed) info, like vlan, port state, IPs, macs, etc.
+--data SwPortInfo = SwPortInfo
+--                { swPort :: SwPort
+--                , swPortAddrs :: M.Map MacAddr [IP]
+--                }
+
+-- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
+-- - "physical" - mac address used by server. It may be considered bind to
+-- server.
+-- - "virtual" - mac address of virtual machine. It may migrate from server
+-- (switch port) to server, though physical server connection does not change.
+-- - "unknown" - mac address is not assigned to any server.
+
 -- FIXME: Use generic yaml reading func.
 readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfoMap
 readSwInfo file = do

@@ -34,57 +34,22 @@ import BH.IP.Arp
 import BH.Switch.Cisco
 import BH.Telnet
 
--- TODO: queryX functions must return some unified information structure
--- containing all (missed) info, like vlan, port state, IPs, macs, etc.
---data SwPortInfo = SwPortInfo
---                { swPort :: SwPort
---                , swPortAddrs :: M.Map MacAddr [IP]
---                }
-
-data Options = Options {switchPorts :: [SwPort]}
+data Options =
+  Options
+    { authFile :: FilePath
+    , macIpFile :: FilePath
+    , queryHost :: T.Text
+    }
   deriving (Show)
 
--- FIXME: If i want to make authinfo file location to be configurable, i won't
--- be able to apply switch defaults here, in options parser. Then i should
--- parse here 'switch-port' option arguments as plain text, then read config
--- file, and then parse this text arguments into real 'SwPort'. But if i
--- hardcode 'authinfo' file name, i may leave everything as is..
-optParser :: M.Map SwName SwInfo -> O.Parser Options
-optParser swInfo = Options
-    <$> ( some
-            ( O.option
-                (O.eitherReader (A.parseOnly (swPortP' getSwDefaults) . T.pack))
-                (  O.long "switch-port"
-                <> O.short 'p'
-                <> O.metavar "SWITCH/PORT"
-                <> O.help "Switch port to look for."
-                )
-            )
-        )
-  where
-    getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
-    getSwDefaults sn = let m = M.lookup sn swInfo
-                       in  (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
-
-data Options2 a where
-  QuerySwPort :: [SwPort] -> Options2 SwPort
-  QueryMacAddr :: [MacAddr] -> Options2 MacAddr
-  QueryIP :: [IP] -> Options2 IP
-
-data GlobalOptions =
-  GlobalOptions {authFile :: FilePath}
-
-
-optParser2 ::
+optParser ::
     (MonadError String m, MonadIO m) => O.Parser (m ())
-optParser2 =
+optParser =
   initConfig
   <$> globalOptions
   <*> (
     workQueryPorts <$> some
       ( O.strOption
-          --(O.eitherReader (A.parseOnly (swPortP' getSwDefaults) . T.pack))
-          --(O.eitherReader (A.parseOnly swPortP . T.pack))
           (  O.long "switch-port"
           <> O.short 'p'
           <> O.metavar "SWITCH/PORT"
@@ -111,71 +76,39 @@ optParser2 =
       )
     )
  where
-  globalOptions :: O.Parser GlobalOptions
-  globalOptions = GlobalOptions <$>
-    O.strOption
+  globalOptions :: O.Parser Options
+  globalOptions = Options
+    <$> O.strOption
         (  O.long "authfile"
-        <> O.short 'f'
+        <> O.short 'a'
         <> O.metavar "FILENAME"
         <> O.help "File with switches authentication information."
         <> O.value "authinfo.yaml"
         )
+    <*> O.strOption
+        (  O.long "mac-ip-file"
+        <> O.short 'c'
+        <> O.metavar "FILENAME"
+        <> O.help "File with mac to IP cache."
+        <> O.value "mac-ip-cache.yaml"
+        )
+    <*> O.strOption
+        (  O.long "query-host"
+        <> O.short 'H'
+        <> O.metavar "HOSTNAME"
+        <> O.help "ssh hostname of server from where to gather mac/IPs info."
+        <> O.value "certbot"
+        )
 
-main :: IO ()
-main = do
-    -- TODO: I may use single for storing authinfo and other config. This file
-    -- may be encrypted with gpg and edited with sops. Alternatively, i may
-    -- split config..
-    action <- O.customExecParser (O.prefs O.showHelpOnError) $
-      O.info (O.helper <*> optParser2)
-      (  O.fullDesc
-      <> O.header "General program title/description"
-      <> O.progDesc "What does this thing do?"
-      )
-    res <- runExceptT action
-    case res of
-      Right () -> return ()
-      Left err -> print err
-{-main :: IO ()
-main = do
-    -- TODO: I may use single for storing authinfo and other config. This file
-    -- may be encrypted with gpg and edited with sops. Alternatively, i may
-    -- split config..
-    swi <- runExceptT $ readSwInfo "authinfo.yaml"
-    print swi
-    swInfoMap <- case swi of
-      Right s -> return s
-      Left e -> error "huy"
-    Right (macIpMap, ipMacMap) <- runExceptT $ queryLinuxArp "mac-ip-cache.yml" "certbot"
-    opts <- O.customExecParser (O.prefs O.showHelpOnError) $
-      O.info (O.helper <*> optParser swInfoMap)
-      (  O.fullDesc
-      <> O.header "General program title/description"
-      <> O.progDesc "What does this thing do?"
-      )
-    res <- runExceptT . flip runReaderT (Config{..}) $ work opts
-    case res of
-      Right () -> return ()
-      Left err -> print err-}
 
--- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
--- - "physical" - mac address used by server. It may be considered bind to
--- server.
--- - "virtual" - mac address of virtual machine. It may migrate from server
--- (switch port) to server, though physical server connection does not change.
--- - "unknown" - mac address is not assigned to any server.
-
-{-SwPortOptions <$> ..
-MacAddrOptions <$> ..
-IPOptions <$> ..-}
 
 initConfig ::
   (MonadError String m, MonadIO m) =>
-  GlobalOptions -> ReaderT Config m () -> m ()
-initConfig GlobalOptions{..} action = do
-  swInfoMap <- readSwInfo "authinfo.yaml"
+  Options -> ReaderT Config m () -> m ()
+initConfig Options{..} action = do
+  swInfoMap <- readSwInfo authFile
   liftIO $ print swInfoMap
-  (macIpMap, ipMacMap) <- queryLinuxArp "mac-ip-cache.yml" "certbot"
+  (macIpMap, ipMacMap) <- queryLinuxArp macIpFile queryHost
   runReaderT action Config{..}
 
 workQueryPorts ::
@@ -205,11 +138,16 @@ workQueryIPs ::
   [IP] -> m ()
 workQueryIPs ips = undefined
 
-{-workMacs :: Options MacAddr -> ...
-workIPs :: Options IP -> ...-}
-
-work :: (MonadReader Config m, MonadError String m, MonadIO m) => Options -> m ()
-work Options{..} = do
-    liftIO $ print switchPorts
-    queryPorts switchPorts >>= liftIO . print
+main :: IO ()
+main = do
+    main_ <- O.customExecParser (O.prefs O.showHelpOnError) $
+      O.info (O.helper <*> optParser)
+      (  O.fullDesc
+      <> O.header "General program title/description"
+      <> O.progDesc "What does this thing do?"
+      )
+    res <- runExceptT main_
+    case res of
+      Right () -> return ()
+      Left err -> print err
 

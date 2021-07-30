@@ -96,16 +96,6 @@ swPortP' getDefs = do
 
 type PortMacMap = M.Map SwPort (Maybe [MacAddr])
 
--- FIXME: New port and switch types:
--- swName, (portNum, portSpeed), [(Mac, Vlan)]
--- swName, portSpec :: PortNum, [(Mac, Vlan)]
--- Map : (swName, portSpec :: PortNum) -> [(Mac, Vlan)]
--- I may want to also add:
--- - vendor to 'MacAddr'
--- - 'Vlan' to 'MacAddr'
--- - port mode (access/trunk) to 'SwPort'
--- - port state (enabled/disabled) to 'SwPort'
-
 type MacPortMap = M.Map MacAddr (Maybe [SwPort])
 
 type SwConfig = M.Map SwName T.Text
