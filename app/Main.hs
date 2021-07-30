@@ -7,32 +7,17 @@
 module Main where
 
 import Control.Applicative
-import Control.Concurrent
-import Control.Monad (join)
 import Control.Monad.Except
-import Control.Monad.IO.Class
 import Control.Monad.Reader
-import Control.Monad.Trans.Cont
-import Control.Monad.Trans.Except
 import qualified Data.Attoparsec.Text as A
-import Data.Either.Combinators
 import qualified Data.Map as M
-import Data.Maybe
-import qualified Data.Set as S
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Yaml as Y
 import qualified Options.Applicative as O
-import qualified Shelly as Sh
-import System.Directory
-import System.Environment
-import Text.HTML.TagSoup
 
 import BH.IP
 import BH.IP.Arp
 import BH.Main
 import BH.Switch.Cisco
-import BH.Telnet
 
 data Options = Options
   { authFile :: FilePath
@@ -125,11 +110,6 @@ workQueryPorts ts = do
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
   queryPorts swports >>= liftIO . print
- where
-  getSwDefaults :: SwInfoMap -> SwName -> (Maybe PortSpeed, Maybe Int)
-  getSwDefaults swInfo sn =
-    let m = M.lookup sn swInfo
-     in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
 
 workQueryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
