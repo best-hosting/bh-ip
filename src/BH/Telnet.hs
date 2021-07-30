@@ -297,9 +297,10 @@ setPrompt promptP ts = do
         _ -> error "Huh?"
       saveAndCont unparsedTxt k
 
+-- | Run till predicate returns 'Just' with some input.
 runTill ::
   (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
-  TelnetCmd a b () -> (b -> (a, Bool)) -> m b
+  TelnetCmd a b () -> (b -> Maybe a) -> m b
 runTill telnetCmd p = asks M.keys >>= foldM go mempty
   where
     --go ::
@@ -307,11 +308,11 @@ runTill telnetCmd p = asks M.keys >>= foldM go mempty
     --  b -> SwName -> m b
     go z sn =
       case p z of
-        (input, False) -> do
+        Just input -> do
           r <- run input telnetCmd sn
           liftIO $ print $ "From runTill: " ++ show r
           return (r <> z)
-        (_     , True)  -> liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
+        Nothing -> liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
 
 runOn :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> [SwName] -> m b
 runOn input telnetCmd = fmap mconcat . mapM (run input telnetCmd)
