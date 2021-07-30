@@ -124,7 +124,7 @@ workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m ()
-workQueryIPs ips = undefined
+workQueryIPs ips = queryIPs ips >>= liftIO . print
 
 main :: IO ()
 main = do

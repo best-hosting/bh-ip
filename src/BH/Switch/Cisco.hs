@@ -9,10 +9,13 @@ module BH.Switch.Cisco (
   parseMacAddrTable,
   parseCiscoConfig,
   getMacs,
-  queryPorts,
+  findPorts,
   queryPort,
+  queryPorts,
+  queryMac,
   queryMacs,
-  queryMac
+  queryIP,
+  queryIPs
 ) where
 
 import qualified Data.Map as M
@@ -29,6 +32,7 @@ import qualified Data.Set as S
 import qualified Data.Yaml as Y
 import System.Directory
 import Data.List
+import Data.Maybe
 
 import BH.Common
 import BH.IP
@@ -209,4 +213,29 @@ queryMacs macs = do
   go mac swp@(Just _) mz = do
     ips <- macToIPs mac
     M.insert mac (swp, ips) <$> mz
+
+queryIP ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  IP -> m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+queryIP = queryIPs . (: [])
+
+queryIPs ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [IP] -> m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+queryIPs ips = do
+  Config{..} <- ask
+  -- FIXME: macs may be identical. I may avoid this, if i'll use 'Set'.
+  let ipMacs = M.fromList . map (\ip -> (ip, M.lookup ip ipMacMap)) $ ips
+      macs = nub . catMaybes . map snd . M.toList $ ipMacs
+  macPorts <- flip runReaderT swInfoMap $
+    runTill (getMacs macs) findPorts
+  return (M.map (go macPorts) ipMacs)
+ where
+  getMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
+  getMacs macs res = case filter (`notElem` M.keys res) macs of
+    [] -> Nothing
+    xs -> Just xs
+  go :: M.Map MacAddr (Maybe SwPort) -> Maybe MacAddr -> (Maybe MacAddr, Maybe SwPort)
+  go _ Nothing = (Nothing, Nothing)
+  go macPorts z@(Just mac) = (z, join $ M.lookup mac macPorts)
 
