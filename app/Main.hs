@@ -188,7 +188,7 @@ workQueryPorts ts = do
         let m = M.lookup sn swInfoMap
         in  (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  queryPorts (S.fromList swports) >>= liftIO . print
+  queryPorts swports >>= liftIO . print
  where
   getSwDefaults :: SwInfoMap -> SwName -> (Maybe PortSpeed, Maybe Int)
   getSwDefaults swInfo sn =
@@ -211,5 +211,5 @@ workIPs :: Options IP -> ...-}
 work :: (MonadReader Config m, MonadError String m, MonadIO m) => Options -> m ()
 work Options{..} = do
     liftIO $ print switchPorts
-    queryPorts (S.fromList switchPorts) >>= liftIO . print
+    queryPorts switchPorts >>= liftIO . print
 

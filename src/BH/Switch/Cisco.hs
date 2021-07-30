@@ -100,12 +100,8 @@ parseCiscoConfig =
 getMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 getMacs t0 = do
   curSn <- asks (swName . switchInfo)
-  -- FIXME: I may perform this input filter at some upper level, e.g. in
-  -- 'runOn'. E.g. i may exclude from input 'SwPort's not on current switch.
-  -- So, 'runOn :: ... => (SwName -> a) -> TelnetCmd a b () -> [SwName] -> m b' .
-  -- In a similar manner, 'runTill' may also have type with input _depending_
-  -- on previous run result, like 'runTill :: .. => (b -> a) -> TelnetCmd a b
-  -- () -> (b -> Bool) -> m b' or just use (b -> (Bool, a)) as predicate.
+  -- Filter out input ports just to be sure, but, really, this should be done
+  -- by 'runOn' (see 'queryPorts').
   ports <- asks (filter ((== curSn) . portSw) . telnetIn)
   foldM (flip go) t0 ports >>= sendExit
  where
@@ -120,33 +116,34 @@ getMacs t0 = do
       | null xs = mempty
       | otherwise = M.singleton swPort (map elMac xs)
 
--- FIXME: Use list as first arg.
 -- | Query several ports.
 queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
-  S.Set SwPort ->
+  [SwPort] ->
   m (M.Map SwPort [(MacAddr, S.Set IP)])
 queryPorts switches = do
   Config{..} <- ask
   portMacs <-
     flip runReaderT swInfoMap $
-      runOn (S.toList switches) getMacs (S.toList $ S.map portSw switches)
+      runOn getPorts getMacs (map portSw switches)
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
   forM portMacs $ mapM (\m -> (m,) <$> macToIPs m)
+ where
+  getPorts :: SwName -> [SwPort]
+  getPorts sn = filter ((== sn) . portSw) switches
 
 -- | Query single port.
 queryPort ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   SwPort ->
   m (M.Map SwPort [(MacAddr, S.Set IP)])
-queryPort = queryPorts . S.singleton
+queryPort = queryPorts . (: [])
 
 findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
 findPorts t0 = do
     sn <- asks (swName . switchInfo)
-    -- FIXME: Filter out already found macs.
     macs <- asks telnetIn
     foldM (flip (go sn)) t0 macs >>= sendExit
   where
@@ -174,11 +171,11 @@ queryMacs ::
 queryMacs macs = do
   Config{..} <- ask
   macPorts <- flip runReaderT swInfoMap $
-    runTill (getMacs macs) findPorts
+    runTill getMacs findPorts
   M.foldrWithKey go (return mempty) macPorts
  where
-  getMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
-  getMacs macs macMap = case filter (`notElem` M.keys macMap) macs of
+  getMacs :: M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
+  getMacs res = case filter (`notElem` M.keys res) macs of
     [] -> Nothing
     xs -> Just xs
   go ::

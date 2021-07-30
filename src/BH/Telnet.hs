@@ -314,10 +314,16 @@ runTill p telnetCmd = asks M.keys >>= foldM go mempty
           return (r <> z)
         Nothing -> liftIO (putStrLn ("Go ahead " ++ show sn)) >> pure z
 
+-- | Run on specified switches with input depending on switch.
 runOn ::
   (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
-  a -> TelnetCmd a b () -> [SwName] -> m b
-runOn input telnetCmd = fmap mconcat . mapM (run input telnetCmd)
+  (SwName -> a) -> TelnetCmd a b () -> [SwName] -> m b
+runOn getInput telnetCmd = foldM go mempty
+ where
+  --go ::
+  --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  --  b -> SwName -> m b
+  go z sn = (<> z) <$> run (getInput sn) telnetCmd sn
 
 -- | Run on one switch.
 run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> m b

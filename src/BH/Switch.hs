@@ -100,6 +100,11 @@ type PortMacMap = M.Map SwPort (Maybe [MacAddr])
 -- swName, (portNum, portSpeed), [(Mac, Vlan)]
 -- swName, portSpec :: PortNum, [(Mac, Vlan)]
 -- Map : (swName, portSpec :: PortNum) -> [(Mac, Vlan)]
+-- I may want to also add:
+-- - vendor to 'MacAddr'
+-- - 'Vlan' to 'MacAddr'
+-- - port mode (access/trunk) to 'SwPort'
+-- - port state (enabled/disabled) to 'SwPort'
 
 type MacPortMap = M.Map MacAddr (Maybe [SwPort])
 
