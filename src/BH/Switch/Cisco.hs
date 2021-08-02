@@ -171,22 +171,21 @@ queryPort = queryPorts . (: [])
 
 findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
 findPorts t0 = do
-    sn <- asks (swName . switchInfo)
+    SwInfo{..} <- asks switchInfo
     macs <- asks telnetIn
-    foldM (flip (go sn)) t0 macs >>= sendExit
+    foldM (flip (go swName swTrunkPorts)) t0 macs >>= sendExit
   where
-    go :: SwName -> MacAddr -> TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
-    go portSw mac =
+    go :: SwName -> [PortNum] -> MacAddr
+        -> TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
+    go portSw trunks mac =
       sendAndParse (parse <$> parseMacAddrTable)
             (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
       where
         parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
-        parse ps
-          | null ps   = mempty
-          | otherwise =
-            case map elPort ps of
-              [portSpec] -> M.singleton mac $ Just SwPort{..}
-              _ -> error "Huyase tut portov"
+        parse ps = case filter (`notElem` trunks) ps of
+                    [] -> mempty
+                    [p] -> M.singleton mac $ Just SwPort{portSpec = elPort p, ..}
+                    _  -> error "Huyase tut portov"
 
 queryMac :: 
   (MonadReader Config m, MonadError String m, MonadIO m) =>

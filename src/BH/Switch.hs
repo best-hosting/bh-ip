@@ -19,6 +19,7 @@ module BH.Switch (
   ciscoPortNum,
   PortSpeed (..),
   portSpeedP,
+  shortPortSpeed,
 ) where
 
 import qualified Data.Map as M
@@ -36,7 +37,8 @@ newtype SwName = SwName T.Text
   deriving (Eq, Ord, Show)
 
 instance ToJSON SwName where
-  toJSON (SwName v) = String v
+  toJSON (SwName v) = toJSON v
+  toEncoding (SwName v) = toEncoding v
 
 instance FromJSON SwName where
   parseJSON = withText "SwName" (\t -> pure (SwName t))
@@ -50,6 +52,7 @@ data SwInfo = SwInfo
   , swRootPassword :: T.Text
   , swDefaultPortSpeed :: PortSpeed
   , swDefaultPortSlot :: Int
+  , swTrunkPorts :: [PortNum]
   }
   deriving (Show)
 
@@ -63,6 +66,7 @@ instance ToJSON SwInfo where
       , "rootPassword" .= swRootPassword
       , "defaultPortSpeed" .= swDefaultPortSpeed
       , "defaultPortSlot" .= swDefaultPortSlot
+      , "trunkPorts" .= swTrunkPorts
       ]
 
 instance FromJSON SwInfo where
@@ -75,6 +79,7 @@ instance FromJSON SwInfo where
       <*> v .: "rootPassword"
       <*> v .: "defaultPortSpeed"
       <*> v .: "defaultPortSlot"
+      <*> v .:? "trunkPorts" .!= []
 
 type SwInfoMap = M.Map SwName SwInfo
 
@@ -111,7 +116,8 @@ data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
 
 instance ToJSON PortSpeed where
-  toJSON = String . T.pack . show
+  toJSON = toJSON . show
+  toEncoding = toEncoding . show
 
 instance FromJSON PortSpeed where
   parseJSON = withText "PortSpeed" (either fail pure . A.parseOnly portSpeedP)
@@ -122,12 +128,24 @@ portSpeedP =
     <|> A.string "GigabitEthernet" *> pure GigabitEthernet
     A.<?> "port speed"
 
+shortPortSpeed :: PortSpeed -> T.Text
+shortPortSpeed FastEthernet    = "fa"
+shortPortSpeed GigabitEthernet = "gi"
+
 data PortNum = PortNum
   { portSpeed :: PortSpeed
   , portSlot :: Int
   , portNumber :: Int
   }
   deriving (Eq, Ord, Show)
+
+-- FIXME: Provide 'toEncoding' instances derived from Generics.
+instance ToJSON PortNum where
+  toJSON = toJSON . ciscoPortNum
+  toEncoding = toEncoding . ciscoPortNum
+
+instance FromJSON PortNum where
+  parseJSON = withText "PortNum" (either fail pure . A.parseOnly portNumP)
 
 -- | Parse fully specified port number.
 portNumP :: A.Parser PortNum
@@ -143,7 +161,8 @@ portNumP' ::
 portNumP' defSpeed defSlot = do
   p <-
     A.lookAhead $
-      (A.string "Fa" <|> A.string "fa" <|> A.string "Gi" <|> A.string "gi")
+      (A.string "FastEthernet" <|> A.string "Fa" <|> A.string "fa"
+          <|> A.string "GigabitEthernet" <|> A.string "Gi" <|> A.string "gi")
         *> pure p1
         <|> pure p2
   p <*> A.decimal A.<?> "port number"
@@ -153,8 +172,10 @@ portNumP' defSpeed defSlot = do
   p1 :: A.Parser (Int -> PortNum)
   p1 =
     PortNum
-      <$> ( (A.string "Fa" <|> A.string "fa") *> pure FastEthernet
-              <|> (A.string "Gi" <|> A.string "gi") *> pure GigabitEthernet
+      <$> ( (A.string "FastEthernet" <|> A.string "Fa" <|> A.string "fa")
+                  *> pure FastEthernet
+              <|> (A.string "GigabitEthernet" <|> A.string "Gi" <|> A.string "gi")
+                  *> pure GigabitEthernet
           )
       <*> ( A.decimal <* A.string "/"
               <|> maybe (fail "No default port slot") pure defSlot <* optional (A.string "/")
@@ -172,4 +193,4 @@ portNumP' defSpeed defSlot = do
 -- | Print 'PortNum' in a format understand by cisco.
 ciscoPortNum :: PortNum -> T.Text
 ciscoPortNum PortNum{..} =
-  T.pack $ show portSpeed <> " " <> show portSlot <> "/" <> show portNumber
+  shortPortSpeed portSpeed <> T.pack (show portSlot) <> "/" <> T.pack (show portNumber)
