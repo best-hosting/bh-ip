@@ -19,7 +19,6 @@ import BH.IP.Arp
 import BH.Main
 import BH.Switch.Cisco
 
--- TODO: Ignore trunk ports.
 -- TODO: Work on sw-0.
 -- TODO: Pretty print output. I may use yaml for printing results.
 
