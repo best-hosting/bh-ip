@@ -8,10 +8,12 @@ module BH.IP
     , defMacAddr
     , macP
     , showMacAddr
+    , MacInfo(..)
     , IP (..)
     , defIP
     , showIP
     , ipP
+    , IPInfo (..)
     , Vlan (..)
     , vlanP
     )
@@ -143,6 +145,14 @@ macP = do
       <- p
     return MacAddr{..}
 
+data MacInfo = MacInfo
+  { macAddr :: MacAddr
+  , macVlan :: Vlan
+  , macVendor :: T.Text
+  , macIPs :: [IP]
+  }
+  deriving (Show)
+
 -- | Old text-based mac address implementation.
 newtype MacAddr2     = MacAddr2 T.Text
   deriving (Eq, Ord)
@@ -260,6 +270,14 @@ parseIP t = do
           | 0 <= d && d <= 255  -> Right d
           | otherwise           -> Left $ "Incorrect IP2 octet '" ++ show d ++ "'"
         []                      -> Left "Can't read IP2 octet."
+
+data IPInfo = IPInfo
+  { ipAddr :: IP
+  , ipMacAddr :: MacAddr
+  , ipVlan :: Vlan
+  , ipSubnet :: T.Text
+  }
+ deriving (Show)
 
 newtype Vlan = Vlan Int
   deriving (Show)

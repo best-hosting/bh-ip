@@ -10,8 +10,7 @@ module BH.Switch (
   swPortP,
   swPortP',
   showSwPort,
-  PortMacMap,
-  MacPortMap,
+  SwPortInfo (..),
   SwConfig,
   PortInfoEl (..),
   PortNum (..),
@@ -100,6 +99,23 @@ instance FromJSON SwPort where
 instance FromJSONKey SwPort where
   fromJSONKey = FromJSONKeyTextParser (either fail pure . A.parseOnly swPortP)
 
+-- "show interfaces fa0/3 switchport" and there look for "Administrative Mode"
+-- and "Trunking Native Mode VLAN". "show interfaces switchport gi3" for sw0.
+data PortMode = Access
+              | Trunk {defVlan :: Vlan}
+  deriving (Show)
+
+-- "show interfaces fa0/3" and parse the first line. "show interfaces
+-- configuration gi3" for sw0.
+data PortState = Up | NotConnect | Disabled
+  deriving (Show)
+
+data SwPortInfo = SwPortInfo
+  { portState :: PortState
+  , portMode :: PortMode
+  , portAddrs :: [MacInfo]
+  }
+
 -- | Parse fully specified switch port.
 swPortP :: A.Parser SwPort
 swPortP = swPortP' (const (Nothing, Nothing))
@@ -114,10 +130,6 @@ swPortP' getDefs = do
 
 showSwPort :: SwPort -> T.Text
 showSwPort SwPort{..} = getSwName portSw <> "/" <> ciscoPortNum portSpec
-
-type PortMacMap = M.Map SwPort (Maybe [MacAddr])
-
-type MacPortMap = M.Map MacAddr (Maybe [SwPort])
 
 type SwConfig = M.Map SwName T.Text
 

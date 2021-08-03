@@ -191,6 +191,7 @@ parseOutputL l p ts = do
       liftIO $ atomicModifyIORef' stRef (\s -> (setL l (Just res) s, ()))
       case res of
         A.Partial _ -> liftIO $ putStrLn "Partial result.."
+        -- FIXME: Here i should try to parse "invalid command".
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
         A.Done unparsedTxt _ -> do
           liftIO $ putStrLn "Finished output parsing"

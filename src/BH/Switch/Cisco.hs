@@ -147,7 +147,17 @@ findMacs t0 = do
       | null xs = mempty
       | otherwise = M.singleton swPort (map elMac xs)
 
+-- FIXME: Do not use pairs in map value, because printing pair in yaml will
+-- result in list, which i confusing. I may define some type with named
+-- records.
+
 -- | Query several ports.
+queryPorts2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [SwPort] ->
+  m (M.Map SwPort [MacInfo])
+queryPorts2 = undefined
+
 queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [SwPort] ->
