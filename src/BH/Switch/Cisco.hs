@@ -15,11 +15,9 @@ module BH.Switch.Cisco (
   queryMac,
   queryMacs,
   queryIP,
-  queryIPs
+  queryIPs,
 ) where
 
-import qualified Data.Map as M
-import qualified Data.Text as T
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
@@ -28,11 +26,13 @@ import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
 import Data.Either.Combinators
 import Data.Functor
+import Data.List
+import qualified Data.Map as M
+import Data.Maybe
 import qualified Data.Set as S
+import qualified Data.Text as T
 import qualified Data.Yaml as Y
 import System.Directory
-import Data.List
-import Data.Maybe
 
 import BH.Common
 import BH.IP
@@ -171,36 +171,44 @@ queryPort = queryPorts . (: [])
 
 findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
 findPorts t0 = do
-    SwInfo{..} <- asks switchInfo
-    macs <- asks telnetIn
-    foldM (flip (go swName swTrunkPorts)) t0 macs >>= sendExit
-  where
-    go :: SwName -> [PortNum] -> MacAddr
-        -> TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
-    go portSw trunks mac =
-      sendAndParse (parse <$> parseMacAddrTable)
-            (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
-      where
-        parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
-        parse []  = mempty
-        parse [p] = let portSpec = elPort p
-                    in if portSpec `elem` trunks
-                        then mempty
-                        else M.singleton mac $ Just SwPort{..}
-        parse _   = error "Huyase tut portov"
+  SwInfo{..} <- asks switchInfo
+  macs <- asks telnetIn
+  foldM (flip (go swName swTrunkPorts)) t0 macs >>= sendExit
+ where
+  go ::
+    SwName ->
+    [PortNum] ->
+    MacAddr ->
+    TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
+  go portSw trunks mac =
+    sendAndParse
+      (parse <$> parseMacAddrTable)
+      (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+   where
+    parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
+    parse [] = mempty
+    parse [p] =
+      let portSpec = elPort p
+       in if portSpec `elem` trunks
+            then mempty
+            else M.singleton mac $ Just SwPort{..}
+    parse _ = error "Huyase tut portov"
 
-queryMac :: 
+queryMac ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
-  MacAddr -> m (M.Map MacAddr (Maybe SwPort, S.Set IP))
+  MacAddr ->
+  m (M.Map MacAddr (Maybe SwPort, S.Set IP))
 queryMac mac = queryMacs [mac]
 
 queryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] -> m (M.Map MacAddr (Maybe SwPort, S.Set IP))
+  [MacAddr] ->
+  m (M.Map MacAddr (Maybe SwPort, S.Set IP))
 queryMacs macs = do
   Config{..} <- ask
-  macPorts <- flip runReaderT swInfoMap $
-    runTill getMacs findPorts
+  macPorts <-
+    flip runReaderT swInfoMap $
+      runTill getMacs findPorts
   M.foldrWithKey go (return mempty) macPorts
  where
   getMacs :: M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
@@ -209,27 +217,33 @@ queryMacs macs = do
     xs -> Just xs
   go ::
     MonadReader Config m =>
-    MacAddr -> Maybe SwPort -> m (M.Map MacAddr (Maybe SwPort, S.Set IP)) -> m (M.Map MacAddr (Maybe SwPort, S.Set IP))
-  go mac Nothing mz      = M.insert mac (Nothing, mempty) <$> mz
+    MacAddr ->
+    Maybe SwPort ->
+    m (M.Map MacAddr (Maybe SwPort, S.Set IP)) ->
+    m (M.Map MacAddr (Maybe SwPort, S.Set IP))
+  go mac Nothing mz = M.insert mac (Nothing, mempty) <$> mz
   go mac swp@(Just _) mz = do
     ips <- macToIPs mac
     M.insert mac (swp, ips) <$> mz
 
 queryIP ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
-  IP -> m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+  IP ->
+  m (M.Map IP (Maybe MacAddr, Maybe SwPort))
 queryIP = queryIPs . (: [])
 
 queryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [IP] -> m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+  [IP] ->
+  m (M.Map IP (Maybe MacAddr, Maybe SwPort))
 queryIPs ips = do
   Config{..} <- ask
   -- FIXME: macs may be identical. I may avoid this, if i'll use 'Set'.
   let ipMacs = M.fromList . map (\ip -> (ip, M.lookup ip ipMacMap)) $ ips
       macs = nub . mapMaybe snd . M.toList $ ipMacs
-  macPorts <- flip runReaderT swInfoMap $
-    runTill (getMacs macs) findPorts
+  macPorts <-
+    flip runReaderT swInfoMap $
+      runTill (getMacs macs) findPorts
   return (M.map (go macPorts) ipMacs)
  where
   getMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
@@ -239,4 +253,3 @@ queryIPs ips = do
   go :: M.Map MacAddr (Maybe SwPort) -> Maybe MacAddr -> (Maybe MacAddr, Maybe SwPort)
   go _ Nothing = (Nothing, Nothing)
   go macPorts z@(Just mac) = (z, join $ M.lookup mac macPorts)
-
