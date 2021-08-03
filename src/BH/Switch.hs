@@ -9,6 +9,7 @@ module BH.Switch (
   SwPort (..),
   swPortP,
   swPortP',
+  showSwPort,
   PortMacMap,
   MacPortMap,
   SwConfig,
@@ -19,7 +20,7 @@ module BH.Switch (
   ciscoPortNum,
   PortSpeed (..),
   portSpeedP,
-  shortPortSpeed,
+  showPortSpeed,
 ) where
 
 import qualified Data.Map as M
@@ -28,12 +29,13 @@ import Network.Simple.TCP
 
 import Control.Applicative
 import Data.Aeson
+import qualified Data.Aeson.Encoding as J
 import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
 
 import BH.IP
 
-newtype SwName = SwName T.Text
+newtype SwName = SwName {getSwName :: T.Text}
   deriving (Eq, Ord, Show)
 
 instance ToJSON SwName where
@@ -87,6 +89,17 @@ type SwInfoMap = M.Map SwName SwInfo
 data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
+instance ToJSON SwPort where
+  toJSON = toJSON . showSwPort
+  toEncoding = toEncoding . showSwPort
+instance ToJSONKey SwPort where
+  toJSONKey = ToJSONKeyText showSwPort (J.text . showSwPort)
+
+instance FromJSON SwPort where
+  parseJSON = withText "SwPort" (either fail pure . A.parseOnly swPortP)
+instance FromJSONKey SwPort where
+  fromJSONKey = FromJSONKeyTextParser (either fail pure . A.parseOnly swPortP)
+
 -- | Parse fully specified switch port.
 swPortP :: A.Parser SwPort
 swPortP = swPortP' (const (Nothing, Nothing))
@@ -98,6 +111,9 @@ swPortP' getDefs = do
   pn <- SwName <$> A.takeWhile1 (/= '/') <* A.string "/" A.<?> "switch name"
   let (defSpeed, defSlot) = getDefs $ pn
   SwPort pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
+
+showSwPort :: SwPort -> T.Text
+showSwPort SwPort{..} = getSwName portSw <> "/" <> ciscoPortNum portSpec
 
 type PortMacMap = M.Map SwPort (Maybe [MacAddr])
 
@@ -128,9 +144,9 @@ portSpeedP =
     <|> A.string "GigabitEthernet" *> pure GigabitEthernet
     A.<?> "port speed"
 
-shortPortSpeed :: PortSpeed -> T.Text
-shortPortSpeed FastEthernet    = "fa"
-shortPortSpeed GigabitEthernet = "gi"
+showPortSpeed :: PortSpeed -> T.Text
+showPortSpeed FastEthernet    = "fa"
+showPortSpeed GigabitEthernet = "gi"
 
 data PortNum = PortNum
   { portSpeed :: PortSpeed
@@ -193,4 +209,4 @@ portNumP' defSpeed defSlot = do
 -- | Print 'PortNum' in a format understand by cisco.
 ciscoPortNum :: PortNum -> T.Text
 ciscoPortNum PortNum{..} =
-  shortPortSpeed portSpeed <> T.pack (show portSlot) <> "/" <> T.pack (show portNumber)
+  showPortSpeed portSpeed <> T.pack (show portSlot) <> "/" <> T.pack (show portNumber)

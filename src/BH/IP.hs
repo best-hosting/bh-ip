@@ -71,6 +71,7 @@ showsMacAddr MacAddr{..} =
         showOctet :: Int -> ShowS
         showOctet d = showHex (d `div` 16) . showHex (d `mod` 16)
 
+-- FIXME: Change result to 'T.Text' to be more uniform across the lib.
 showMacAddr :: MacAddr -> String
 showMacAddr m = showsMacAddr m ""
 
@@ -221,9 +222,13 @@ instance Read IP where
 
 instance J.ToJSON IP where
     toJSON ip   = J.toJSON (showIP ip)
+instance J.ToJSONKey IP where
+  toJSONKey = J.ToJSONKeyText (T.pack . showIP) (J.string . showIP)
 
 instance J.FromJSON IP where
     parseJSON (J.String t) = either fail return (A.parseOnly ipP t)
+instance J.FromJSONKey IP where
+  fromJSONKey = J.FromJSONKeyTextParser (either fail return . A.parseOnly ipP)
 
 -- | Parser for IP address octet.
 ipOctetP :: A.Parser Int

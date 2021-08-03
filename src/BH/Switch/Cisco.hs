@@ -41,6 +41,9 @@ import BH.Main
 import BH.Switch
 import BH.Telnet
 
+-- TODO: Use HsYAML instead of yaml.
+-- And, probably, yaml-combinators for parsing?
+
 -- FIXME: New port and switch types:
 -- swName, (portNum, portSpeed), [(Mac, Vlan)]
 -- swName, portSpec :: PortNum, [(Mac, Vlan)]

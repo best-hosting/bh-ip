@@ -13,6 +13,8 @@ import qualified Data.Attoparsec.Text as A
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Options.Applicative as O
+import qualified Data.Yaml as Y
+import qualified Data.ByteString as B
 
 import BH.IP
 import BH.IP.Arp
@@ -112,19 +114,19 @@ workQueryPorts ts = do
         let m = M.lookup sn swInfoMap
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  queryPorts swports >>= liftIO . print
+  queryPorts swports >>= liftIO . B.putStr . Y.encode
 
 workQueryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m ()
-workQueryMacs macs = queryMacs macs >>= liftIO . print
+workQueryMacs macs = queryMacs macs >>= liftIO . B.putStr . Y.encode
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m ()
-workQueryIPs ips = queryIPs ips >>= liftIO . print
+workQueryIPs ips = queryIPs ips >>= liftIO . B.putStr . Y.encode
 
 main :: IO ()
 main = do
