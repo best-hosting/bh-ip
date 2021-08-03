@@ -8,7 +8,7 @@ module BH.Switch.Cisco (
   readSwInfo,
   parseMacAddrTable,
   parseCiscoConfig,
-  getMacs,
+  findMacs,
   findPorts,
   queryPort,
   queryPorts,
@@ -125,8 +125,8 @@ parseCiscoConfig =
 -- I'm intresting in receiving all ports in question as input, because then i
 -- may connect to each switch only once and iterate over all asked ports from
 -- this switch.
-getMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
-getMacs t0 = do
+findMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
+findMacs t0 = do
   curSn <- asks (swName . switchInfo)
   -- Filter out input ports just to be sure, but, really, this should be done
   -- by 'runOn' (see 'queryPorts').
@@ -153,7 +153,7 @@ queryPorts switches = do
   Config{..} <- ask
   portMacs <-
     flip runReaderT swInfoMap $
-      runOn getPorts getMacs (map portSw switches)
+      runOn getPorts findMacs (map portSw switches)
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
@@ -225,7 +225,7 @@ queryIPs ips = do
   Config{..} <- ask
   -- FIXME: macs may be identical. I may avoid this, if i'll use 'Set'.
   let ipMacs = M.fromList . map (\ip -> (ip, M.lookup ip ipMacMap)) $ ips
-      macs = nub . catMaybes . map snd . M.toList $ ipMacs
+      macs = nub . mapMaybe snd . M.toList $ ipMacs
   macPorts <- flip runReaderT swInfoMap $
     runTill (getMacs macs) findPorts
   return (M.map (go macPorts) ipMacs)
