@@ -182,10 +182,12 @@ findPorts t0 = do
             (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
       where
         parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
-        parse ps = case filter (`notElem` trunks) ps of
-                    [] -> mempty
-                    [p] -> M.singleton mac $ Just SwPort{portSpec = elPort p, ..}
-                    _  -> error "Huyase tut portov"
+        parse []  = mempty
+        parse [p] = let portSpec = elPort p
+                    in if portSpec `elem` trunks
+                        then mempty
+                        else M.singleton mac $ Just SwPort{..}
+        parse _   = error "Huyase tut portov"
 
 queryMac :: 
   (MonadReader Config m, MonadError String m, MonadIO m) =>
