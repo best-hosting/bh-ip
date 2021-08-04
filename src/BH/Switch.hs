@@ -10,6 +10,8 @@ module BH.Switch (
   swPortP,
   swPortP',
   showSwPort,
+  PortState (..),
+  portStateP,
   SwPortInfo (..),
   SwConfig,
   PortInfoEl (..),
@@ -115,16 +117,17 @@ data PortState = Up | NotConnect | Disabled
 
 portStateP :: PortNum -> A.Parser PortState
 portStateP PortNum{..} = do
-  x <- (,)
-            <$> ( (A.string portNumStr A.<?> "wrong port") *> A.string " is "
-                    *> A.takeWhile1 isWords
-                    <* A.string ", "
-                    A.<?> "port status"
-                )
-            <*> ( A.string "line protocol is " *> A.skipWhile isWords
-                    *> between (A.string "(") (A.string ")") (A.takeWhile1 isAlpha)
-                  A.<?> "line protocol"
-                )
+  x <-
+    (,)
+      <$> ( (A.string portNumStr A.<?> "wrong port") *> A.string " is "
+              *> A.takeWhile1 isWords
+              <* A.string ", "
+              A.<?> "port status"
+          )
+      <*> ( A.string "line protocol is " *> A.skipWhile isWords
+              *> between (A.string "(") (A.string ")") (A.takeWhile1 isAlpha)
+              A.<?> "line protocol"
+          )
   toPortState x
  where
   portNumStr :: T.Text
@@ -256,4 +259,3 @@ showCiscoPortShort PortNum{..} =
 showCiscoPort :: PortNum -> T.Text
 showCiscoPort PortNum{..} =
   T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
-
