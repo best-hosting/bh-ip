@@ -103,15 +103,15 @@ instance FromJSON SwPort where
 instance FromJSONKey SwPort where
   fromJSONKey = FromJSONKeyTextParser (either fail pure . A.parseOnly swPortP)
 
--- "show interfaces fa0/3 switchport" and there look for "Administrative Mode"
--- and "Trunking Native Mode VLAN". "show interfaces switchport gi3" for sw0.
+-- FIXME: "show interfaces fa0/3 switchport" and there look for
+-- "Administrative Mode" and "Trunking Native Mode VLAN". "show interfaces
+-- switchport gi3" and "show interfaces status gi3" for sw0.
 data PortMode
   = Access
   | Trunk {defVlan :: Vlan}
   deriving (Show)
 
--- "show interfaces fa0/3" and parse the first line. "show interfaces
--- configuration gi3" for sw0.
+-- FIXME: "show interfaces configuration gi3" for sw0.
 data PortState = Up | NotConnect | Disabled
   deriving (Show)
 
