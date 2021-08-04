@@ -22,16 +22,18 @@ module BH.Switch (
   showPortSpeed,
 ) where
 
-import qualified Data.Map as M
-import qualified Data.Text as T
-import Network.Simple.TCP
-
 import Control.Applicative
+import Control.Applicative.Combinators
 import Data.Aeson
 import qualified Data.Aeson.Encoding as J
 import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
+import Data.Char
+import qualified Data.Map as M
+import qualified Data.Text as T
+import Network.Simple.TCP
 
+import BH.Common
 import BH.IP
 
 newtype SwName = SwName {getSwName :: T.Text}
@@ -101,14 +103,38 @@ instance FromJSONKey SwPort where
 
 -- "show interfaces fa0/3 switchport" and there look for "Administrative Mode"
 -- and "Trunking Native Mode VLAN". "show interfaces switchport gi3" for sw0.
-data PortMode = Access
-              | Trunk {defVlan :: Vlan}
+data PortMode
+  = Access
+  | Trunk {defVlan :: Vlan}
   deriving (Show)
 
 -- "show interfaces fa0/3" and parse the first line. "show interfaces
 -- configuration gi3" for sw0.
 data PortState = Up | NotConnect | Disabled
   deriving (Show)
+
+portStateP :: PortNum -> A.Parser PortState
+portStateP PortNum{..} = do
+  x <- (,)
+            <$> ( (A.string portNumStr A.<?> "wrong port") *> A.string " is "
+                    *> A.takeWhile1 isWords
+                    <* A.string ", "
+                    A.<?> "port status"
+                )
+            <*> ( A.string "line protocol is " *> A.skipWhile isWords
+                    *> between (A.string "(") (A.string ")") (A.takeWhile1 isAlpha)
+                  A.<?> "line protocol"
+                )
+  toPortState x
+ where
+  portNumStr :: T.Text
+  portNumStr = T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
+  toPortState :: (T.Text, T.Text) -> A.Parser PortState
+  toPortState t
+    | t == ("up", "connected") = pure Up
+    | t == ("down", "notconnect") = pure NotConnect
+    | t == ("administratively down", "disabled") = pure Disabled
+    | otherwise = fail $ "Unrecognized port state: '" <> show t <> "'"
 
 data SwPortInfo = SwPortInfo
   { portState :: PortState
@@ -157,7 +183,7 @@ portSpeedP =
     A.<?> "port speed"
 
 showPortSpeed :: PortSpeed -> T.Text
-showPortSpeed FastEthernet    = "fa"
+showPortSpeed FastEthernet = "fa"
 showPortSpeed GigabitEthernet = "gi"
 
 data PortNum = PortNum
@@ -189,8 +215,11 @@ portNumP' ::
 portNumP' defSpeed defSlot = do
   p <-
     A.lookAhead $
-      (A.string "FastEthernet" <|> A.string "Fa" <|> A.string "fa"
-          <|> A.string "GigabitEthernet" <|> A.string "Gi" <|> A.string "gi")
+      ( A.string "FastEthernet" <|> A.string "Fa" <|> A.string "fa"
+          <|> A.string "GigabitEthernet"
+          <|> A.string "Gi"
+          <|> A.string "gi"
+      )
         *> pure p1
         <|> pure p2
   p <*> A.decimal A.<?> "port number"
@@ -201,9 +230,9 @@ portNumP' defSpeed defSlot = do
   p1 =
     PortNum
       <$> ( (A.string "FastEthernet" <|> A.string "Fa" <|> A.string "fa")
-                  *> pure FastEthernet
+              *> pure FastEthernet
               <|> (A.string "GigabitEthernet" <|> A.string "Gi" <|> A.string "gi")
-                  *> pure GigabitEthernet
+                *> pure GigabitEthernet
           )
       <*> ( A.decimal <* A.string "/"
               <|> maybe (fail "No default port slot") pure defSlot <* optional (A.string "/")
@@ -218,6 +247,7 @@ portNumP' defSpeed defSlot = do
       <*> maybe (fail "No default port slot") pure defSlot A.<?> "slot number"
 
 -- FIXME: Some cisco switches does not have slots.
+
 -- | Print 'PortNum' in a format understand by cisco.
 ciscoPortNum :: PortNum -> T.Text
 ciscoPortNum PortNum{..} =

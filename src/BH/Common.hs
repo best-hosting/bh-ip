@@ -10,6 +10,9 @@ module BH.Common
     , symbolA
     , maybeErr
     , (<<>>)
+    , anyP
+    , allP
+    , isWords
     )
   where
 
@@ -19,6 +22,7 @@ import Data.Functor.Identity
 import qualified Data.Attoparsec.Text as A
 import Control.Monad.Except
 import Control.Applicative
+import Data.Char
 
 -- See https://www.twanvl.nl/blog/haskell/cps-functional-references .
 type LensC a b   = forall f. Functor f => (b -> f b) -> a -> f a
@@ -45,3 +49,11 @@ infixr 4 <<>>
 (<<>>) :: (Applicative f, Monoid a) => f a -> f a -> f a
 (<<>>) = liftA2 (<>)
 
+anyP :: [a -> Bool] -> a -> Bool
+anyP ps x = any ($ x) ps
+
+allP :: [a -> Bool] -> a -> Bool
+allP ps x = all ($ x) ps
+
+isWords :: Char -> Bool
+isWords = anyP [isAlpha, A.isHorizontalSpace]
