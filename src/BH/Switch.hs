@@ -16,10 +16,10 @@ module BH.Switch (
   PortNum (..),
   portNumP,
   portNumP',
-  ciscoPortNum,
+  showCiscoPortShort,
   PortSpeed (..),
   portSpeedP,
-  showPortSpeed,
+  showPortSpeedShort,
 ) where
 
 import Control.Applicative
@@ -155,7 +155,7 @@ swPortP' getDefs = do
   SwPort pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
 
 showSwPort :: SwPort -> T.Text
-showSwPort SwPort{..} = getSwName portSw <> "/" <> ciscoPortNum portSpec
+showSwPort SwPort{..} = getSwName portSw <> "/" <> showCiscoPortShort portSpec
 
 type SwConfig = M.Map SwName T.Text
 
@@ -182,9 +182,9 @@ portSpeedP =
     <|> A.string "GigabitEthernet" *> pure GigabitEthernet
     A.<?> "port speed"
 
-showPortSpeed :: PortSpeed -> T.Text
-showPortSpeed FastEthernet = "fa"
-showPortSpeed GigabitEthernet = "gi"
+showPortSpeedShort :: PortSpeed -> T.Text
+showPortSpeedShort FastEthernet = "fa"
+showPortSpeedShort GigabitEthernet = "gi"
 
 data PortNum = PortNum
   { portSpeed :: PortSpeed
@@ -195,8 +195,8 @@ data PortNum = PortNum
 
 -- FIXME: Provide 'toEncoding' instances derived from Generics.
 instance ToJSON PortNum where
-  toJSON = toJSON . ciscoPortNum
-  toEncoding = toEncoding . ciscoPortNum
+  toJSON = toJSON . showCiscoPortShort
+  toEncoding = toEncoding . showCiscoPortShort
 
 instance FromJSON PortNum where
   parseJSON = withText "PortNum" (either fail pure . A.parseOnly portNumP)
@@ -249,6 +249,11 @@ portNumP' defSpeed defSlot = do
 -- FIXME: Some cisco switches does not have slots.
 
 -- | Print 'PortNum' in a format understand by cisco.
-ciscoPortNum :: PortNum -> T.Text
-ciscoPortNum PortNum{..} =
-  showPortSpeed portSpeed <> T.pack (show portSlot) <> "/" <> T.pack (show portNumber)
+showCiscoPortShort :: PortNum -> T.Text
+showCiscoPortShort PortNum{..} =
+  showPortSpeedShort portSpeed <> T.pack (show portSlot) <> "/" <> T.pack (show portNumber)
+
+showCiscoPort :: PortNum -> T.Text
+showCiscoPort PortNum{..} =
+  T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
+
