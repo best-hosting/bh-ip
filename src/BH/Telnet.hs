@@ -89,7 +89,6 @@ data TelnetInfo a b = TelnetInfo { switchInfo   :: SwInfo
                                  , telnetRef    :: IORef (TelnetState a b)
                                  }
 
-
 data TelCmd    = TelCmd {cmdText :: T.Text, cmdEcho :: Bool}
   deriving (Show)
 
@@ -111,6 +110,16 @@ shiftW f x = shiftT (\k -> f (k, x))
 sendCmd :: (Show b, Monoid b) => TelCmd -> TelnetCmd a b T.Text
 sendCmd = sendAndParse (pure mempty)
 
+-- FIXME: The reason, that i can't parse to anything, except final result is
+-- because final result is _hardcoded_ in type-sig. Though, 'Text' is always
+-- 'sendAndParse' return. But it should be the opposite: result should be
+-- returned, but 'Text' should be passed over internally. Then i may supply
+-- parser to any type.
+--
+-- With current situation all 'sendX' calls assume, that they directly parse
+-- into final result. But there may be situation, where i just want _to get_
+-- parse result without amending it to final result in any way. And this is
+-- not possible now.
 sendAndParse :: (Show b, Monoid b) => A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParse p cmd t0 = do
     stRef <- asks telnetRef

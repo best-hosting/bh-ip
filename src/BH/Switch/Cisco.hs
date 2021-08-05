@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RankNTypes #-}
 
 module BH.Switch.Cisco (
   module BH.Switch,
@@ -96,6 +97,8 @@ topHeaderA =
     <* A.skipSpace
     A.<?> "top header"
 
+-- FIXME: Rename to 'macAddrTableP'. I should not prepend "cisco" here,
+-- because this is entire module is cisco-only.
 parseMacAddrTable :: A.Parser [PortInfoEl]
 parseMacAddrTable = do
   void $ optional topHeaderA
@@ -128,6 +131,11 @@ parseCiscoConfig =
 -- I'm intresting in receiving all ports in question as input, because then i
 -- may connect to each switch only once and iterate over all asked ports from
 -- this switch.
+-- FIXME: Change input to [PortNum]. This module shouldn't care about
+-- different switches. In fact, it's quite hard to change ReaderT context. If
+-- i want to parametrize over input and require only 'PortNum' part of it, i
+-- may use lens 'LensC a PortNum' and then just use it. Then correct switch
+-- filtering should be hardcoded into lens in caller function.
 findMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
 findMacs t0 = do
   curSn <- asks (swName . switchInfo)
@@ -140,12 +148,50 @@ findMacs t0 = do
   go swPort@SwPort{..} =
     sendAndParse
       (parse <$> parseMacAddrTable)
-      (cmd $ "show mac address-table interface " <> ciscoPortNum portSpec)
+      (cmd $ "show mac address-table interface " <> showCiscoPortShort portSpec)
    where
     parse :: [PortInfoEl] -> M.Map SwPort [MacAddr]
     parse xs
       | null xs = mempty
       | otherwise = M.singleton swPort (map elMac xs)
+
+findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
+findPorts t0 = do
+  SwInfo{..} <- asks switchInfo
+  macs <- asks telnetIn
+  foldM (flip (go swName swTrunkPorts)) t0 macs >>= sendExit
+ where
+  go ::
+    SwName ->
+    [PortNum] ->
+    MacAddr ->
+    TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
+  go portSw trunks mac =
+    sendAndParse
+      (parse <$> parseMacAddrTable)
+      (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+   where
+    parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
+    parse [] = mempty
+    parse [p] =
+      let portSpec = elPort p
+       in if portSpec `elem` trunks
+            then mempty
+            else M.singleton mac $ Just SwPort{..}
+    parse _ = error "Huyase tut portov"
+
+findPortState :: LensC a PortNum -> TelnetCmd [a] b (M.Map PortNum PortState)
+findPortState l t0 = do
+  ports <- asks (getL l . telnetIn)
+  foldM (flip go) t0 ports
+  undefined
+ where
+  go :: PortNum -> T.Text -> TelnetCmd [a] b (M.Map PortNum PortState)
+  go pn = sendAndParse (parse <$> portStateP pn)
+            (cmd $ "show interfaces " <> showCiscoPort pn)
+   where
+    parse :: PortState -> M.Map PortNum PortState
+    parse = M.singleton pn
 
 -- FIXME: Do not use pairs in map value, because printing pair in yaml will
 -- result in list, which i confusing. I may define some type with named
@@ -181,31 +227,6 @@ queryPort ::
   SwPort ->
   m (M.Map SwPort [(MacAddr, S.Set IP)])
 queryPort = queryPorts . (: [])
-
-findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
-findPorts t0 = do
-  SwInfo{..} <- asks switchInfo
-  macs <- asks telnetIn
-  foldM (flip (go swName swTrunkPorts)) t0 macs >>= sendExit
- where
-  go ::
-    SwName ->
-    [PortNum] ->
-    MacAddr ->
-    TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
-  go portSw trunks mac =
-    sendAndParse
-      (parse <$> parseMacAddrTable)
-      (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
-   where
-    parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
-    parse [] = mempty
-    parse [p] =
-      let portSpec = elPort p
-       in if portSpec `elem` trunks
-            then mempty
-            else M.singleton mac $ Just SwPort{..}
-    parse _ = error "Huyase tut portov"
 
 queryMac ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>

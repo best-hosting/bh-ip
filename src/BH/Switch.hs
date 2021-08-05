@@ -19,6 +19,7 @@ module BH.Switch (
   portNumP,
   portNumP',
   showCiscoPortShort,
+  showCiscoPort,
   PortSpeed (..),
   portSpeedP,
   showPortSpeedShort,
@@ -112,6 +113,7 @@ data PortMode
   deriving (Show)
 
 -- FIXME: "show interfaces configuration gi3" for sw0.
+-- FIXME: Move all cisco-related code to Sw.Cisco module.
 data PortState = Up | NotConnect | Disabled
   deriving (Show)
 
