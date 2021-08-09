@@ -180,18 +180,18 @@ findPorts t0 = do
             else M.singleton mac $ Just SwPort{..}
     parse _ = error "Huyase tut portov"
 
-findPortState :: LensC a PortNum -> TelnetCmd [a] b (M.Map PortNum PortState)
+{-findPortState :: LensC a PortNum -> TelnetCmd [a] b (M.Map PortNum PortState, T.Text)
 findPortState l t0 = do
   ports <- asks (getL l . telnetIn)
-  foldM (flip go) t0 ports
+  foldM (\t p -> go p t) mempty ports
   undefined
  where
-  go :: PortNum -> T.Text -> TelnetCmd [a] b (M.Map PortNum PortState)
-  go pn = sendAndParse (parse <$> portStateP pn)
-            (cmd $ "show interfaces " <> showCiscoPort pn)
+  go :: PortNum -> (M.Map PortNum PortState, T.Text) -> TelnetCtx [a] b (M.Map PortNum PortState, T.Text)
+  go pn (mz, t) = sendAndParse (parse <$> portStateP pn)
+            (cmd $ "show interfaces " <> showCiscoPort pn) t
    where
     parse :: PortState -> M.Map PortNum PortState
-    parse = M.singleton pn
+    parse = M.singleton pn-}
 
 -- FIXME: Do not use pairs in map value, because printing pair in yaml will
 -- result in list, which i confusing. I may define some type with named
