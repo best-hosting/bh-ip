@@ -115,22 +115,21 @@ sendCmd = sendAndParse (pure mempty)
 -- 'sendAndParse' return. But it should be the opposite: result should be
 -- returned, but 'Text' should be passed over internally. Then i may supply
 -- parser to any type.
---
 -- With current situation all 'sendX' calls assume, that they directly parse
 -- into final result. But there may be situation, where i just want _to get_
 -- parse result without amending it to final result in any way. And this is
--- not possible now.
+-- not possible now. [telnet_runtime][difficult]
 sendAndParse :: (Show b, Monoid b) => A.Parser b -> TelCmd -> TelnetCmd a b T.Text
 sendAndParse p cmd t0 = do
     stRef <- asks telnetRef
     st <- liftIO (readIORef stRef)
-    -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed.
+    -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed. [parsing]
     sendParseWithPrompt (takeTillPromptP (telnetPrompt st)) p cmd t0
 
 -- FIXME: This prompt parser will match prompt inside a string. That's
 -- incorrect. Make it more strict. May be require newline at the beginning.
 -- And, probably, at the end. Though the latter may cause problems with
--- partial parsers.
+-- partial parsers. [parsing]
 takeTillPromptP :: T.Text -> A.Parser T.Text
 takeTillPromptP prompt =
     A.string prompt <|> A.takeTill A.isEndOfLine *> A.endOfLine *> takeTillPromptP prompt
@@ -200,7 +199,7 @@ parseOutputL l p ts = do
       liftIO $ atomicModifyIORef' stRef (\s -> (setL l (Just res) s, ()))
       case res of
         A.Partial _ -> liftIO $ putStrLn "Partial result.."
-        -- FIXME: Here i should try to parse "invalid command".
+        -- FIXME: Here i should try to parse "invalid command". [parsing]
         A.Fail i xs err -> error $ "Naebnulos vse: " <> T.unpack i <> concat xs <> err
         A.Done unparsedTxt _ -> do
           liftIO $ putStrLn "Finished output parsing"
@@ -247,8 +246,8 @@ passwordPromptP = (A.endOfLine <|> pure ()) *> A.string "Password:"
 
 -- FIXME: I need a way to indicate, that there is no more input available
 -- and this should terminate all partial parser to fail. Otherwise, the
--- session will just hang on partials.
--- FIXME: Really check prompt.
+-- session will just hang on partials. [parsing] [telnet_runtime]
+-- FIXME: Really check prompt. [parsing]
 checkRootP :: Monoid b => A.Parser b
 checkRootP = A.lookAhead (A.takeTill (== '#') *> A.string "#" $> mempty) <|> fail "Not a root"
 
@@ -280,7 +279,7 @@ telnetPromptP = go
     -- passing empty input. Without '<* A.endOfInput' i may match chars in the
     -- middle.. So, to really fix this, i need to either signal somehow the
     -- _last_ chunk of input or just restart entire cycle with empty input,
-    -- when input end is reached.
+    -- when input end is reached. [parsing] [telnet_runtime]
     go :: A.Parser T.Text
     --go  = A.lookAhead (A.takeWhile1 notEndOfPrompt <* (A.char '#' <|> A.char '>') <* A.endOfInput)
     go  = A.lookAhead (A.takeWhile1 notEndOfPrompt <* (A.char '#' <|> A.char '>'))
