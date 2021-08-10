@@ -155,6 +155,25 @@ findMacs t0 = do
       | null xs = mempty
       | otherwise = M.singleton swPort (map elMac xs)
 
+{-findMacs2 :: TelnetCmd [SwPort] (M.Map SwPort SwPortInfo) ()
+findMacs2 t0 = do
+  curSn <- asks (swName . switchInfo)
+  -- Filter out input ports just to be sure, but, really, this should be done
+  -- by 'runOn' (see 'queryPorts').
+  ports <- asks (filter ((== curSn) . portSw) . telnetIn)
+  foldM (flip go) t0 ports >>= sendExit
+ where
+  go :: SwPort -> TelnetCmd [SwPort] (M.Map SwPort SwPortInfo) T.Text
+  go swPort@SwPort{..} =
+    sendAndParse
+      (parse <$> parseMacAddrTable)
+      (cmd $ "show mac address-table interface " <> showCiscoPortShort portSpec)
+   where
+    parse :: [PortInfoEl] -> M.Map SwPort SwPortInfo
+    parse xs
+      | null xs = mempty
+      | otherwise = M.singleton swPort (map elMac xs)-}
+
 findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
 findPorts t0 = do
   SwInfo{..} <- asks switchInfo

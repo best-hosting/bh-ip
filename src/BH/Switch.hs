@@ -15,6 +15,7 @@ module BH.Switch (
   SwPortInfo (..),
   SwConfig,
   PortInfoEl (..),
+  toMacInfo,
   PortNum (..),
   portNumP,
   portNumP',
@@ -143,8 +144,8 @@ portStateP PortNum{..} = do
 
 data SwPortInfo = SwPortInfo
   { portState :: PortState
-  , portMode :: PortMode
-  , portAddrs :: [MacInfo]
+  , --, portMode :: PortMode
+    portAddrs :: [MacInfo]
   }
 
 -- | Parse fully specified switch port.
@@ -170,6 +171,9 @@ data PortInfoEl = PortInfoEl
   , elPort :: PortNum
   }
   deriving (Show)
+
+toMacInfo :: PortInfoEl -> MacInfo
+toMacInfo PortInfoEl{..} = MacInfo{macAddr = elMac, macVlan = elVlan, macIPs = []}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)

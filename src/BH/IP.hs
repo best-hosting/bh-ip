@@ -148,7 +148,7 @@ macP = do
 data MacInfo = MacInfo
   { macAddr :: MacAddr
   , macVlan :: Vlan
-  , macVendor :: T.Text
+  --, macVendor :: T.Text
   , macIPs :: [IP]
   }
   deriving (Show)

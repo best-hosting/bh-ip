@@ -161,6 +161,8 @@ executable t3
     , mtl
     , containers
     , optparse-applicative
+    , transformers
+    , attoparsec
   default-language: Haskell2010
 
 test-suite bh-ip-test

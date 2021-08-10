@@ -12,6 +12,9 @@ import Data.IORef
 import System.IO.Unsafe
 import qualified Data.Attoparsec.Text as A
 import Data.Typeable
+import Data.Monoid
+
+import BH.Common
 
 data Option a = Option
   { optName :: String
@@ -99,6 +102,12 @@ data TState2 = forall c. Typeable c => TState2
                 { tResume2 :: Maybe (() -> StateT T.Text (ReaderT (IORef TState2) IO) ())
                 , tResult2 :: Maybe (A.Result c)
                 , tInt2 :: Int
+                }
+
+data TState3 c = TState3
+                { tResume3 :: Maybe (() -> StateT T.Text (ReaderT (IORef (TState3 c)) IO) ())
+                , tResult3 :: c
+                , tInt3 :: Int
                 }
 
 tRef :: IORef TState
@@ -190,11 +199,11 @@ fRunner = do
       TState2 Nothing  _ _ -> liftIO (putStrLn "Start cmd.")  >> prog3
       TState2 (Just c) _ _ -> liftIO (putStrLn "Continue cmd.") >> lift (c ())
 
-prog2 :: ContT () (StateT T.Text (ReaderT (IORef TState2) IO)) ()
-prog2 = shiftT f1 >> shiftT f2 >> shiftT f3 >>= liftIO . print
+{-prog2 :: ContT () (StateT T.Text (ReaderT (IORef TState2) IO)) ()
+prog2 = shiftT f1 >> shiftT f2 >> shiftT f3 >>= liftIO . print-}
 
 prog3 :: ContT () (StateT T.Text (ReaderT (IORef TState2) IO)) ()
-prog3 = fParse (A.string "abcdef") >>= \x -> liftIO (print $ "final result " <> show x)
+prog3 = fParse (Just <$> A.string "abcdef") >>= \x -> liftIO (print $ "final result " <> show x)
 
 f1 :: (() -> StateT T.Text (ReaderT (IORef TState2) IO) ())
       -> ContT () (StateT T.Text (ReaderT (IORef TState2) IO)) ()
@@ -216,7 +225,7 @@ f2 k = do
   ref <- ask
   liftIO $ atomicModifyIORef' ref (\s -> (s{tResume2 = Just k, tInt2 = i}, ()))
 
-f3 :: (() -> StateT T.Text (ReaderT (IORef TState2) IO) ())
+{-f3 :: (() -> StateT T.Text (ReaderT (IORef TState2) IO) ())
       -> ContT () (StateT T.Text (ReaderT (IORef TState2) IO)) ()
 f3 k = do
   let i = 3
@@ -224,7 +233,7 @@ f3 k = do
   liftIO $ print $ "c: " <> show ts
   --put (T.tail ts)
   ref <- ask
-  liftIO $ atomicModifyIORef' ref (\s -> (s{tResume2 = Just k, tInt2 = i}, ()))
+  liftIO $ atomicModifyIORef' ref (\s -> (s{tResume2 = Just k, tInt2 = i}, ()))-}
 
 fParse :: (Typeable c, Show c) => A.Parser c -> ContT () (StateT T.Text (ReaderT (IORef TState2) IO)) c
 fParse p = shiftT $ \k -> do
@@ -233,7 +242,7 @@ fParse p = shiftT $ \k -> do
   liftIO $ print $ "x: " <> show ts
   ref <- ask
   TState2{..} <- liftIO (readIORef ref)
-  let res = maybe (A.parse p) A.feed (join $ cast tResult2) ts
+  let res = maybe (A.parse p) A.feed (tResult2 >>= cast) ts
   --liftIO . print $ A.feed res ""
   liftIO $ atomicModifyIORef' ref (\TState2{..} -> (TState2{tResult2 = Just res, tInt2 = tInt2 + 1, ..}, ()))
   --liftIO $ atomicModifyIORef' ref (\s -> (s{tResult2 = Just res, tInt2 = i}, ()))
@@ -244,5 +253,91 @@ fParse p = shiftT $ \k -> do
       liftIO $ putStrLn "Finished output parsing"
       liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
       shiftT f2
+      lift (k r)
+
+data TResult3 = TResult3 { tString :: First (A.Result T.Text), tMaybe :: First (A.Result Int)}
+  deriving (Show)
+
+tResult3Str :: LensC TResult3 (Maybe (A.Result T.Text))
+tResult3Str g z@TResult3{..} = (\x' -> z{tString = First x'}) <$> g (getFirst tString)
+
+tResult3M :: LensC TResult3 (Maybe (A.Result Int))
+tResult3M g z@TResult3{..} = (\x' -> z{tMaybe = First x'}) <$> g (getFirst tMaybe)
+
+instance Semigroup TResult3 where
+  x <> y = x{tString = tString x <> tString y, tMaybe = tMaybe x <> tMaybe y}
+
+instance Monoid TResult3 where
+  mempty = TResult3{tString = First Nothing, tMaybe = First Nothing}
+  mappend = (<>)
+
+-- FIXME: Write 'any type' result holder for use with cast, like in prog3.
+
+f0' :: IO ((), T.Text)
+f0' = do
+  ref <- newIORef TState3{tResume3 = Nothing, tResult3 = mempty, tInt3 = 0}
+  flip runReaderT ref . flip runStateT "abc" . evalContT $ fRunner' -- f3
+  flip runReaderT ref . flip runStateT "abc" . evalContT $ fRunner' -- parse str
+  flip runReaderT ref . flip runStateT "def" . evalContT $ fRunner' -- finish parse
+  flip runReaderT ref . flip runStateT "xyz" . evalContT $ fRunner' -- f3
+  flip runReaderT ref . flip runStateT "1234" . evalContT $ fRunner' -- parse int
+  flip runReaderT ref . flip runStateT " " . evalContT $ fRunner' -- finish parse
+  flip runReaderT ref . flip runStateT "huynya" . evalContT $ fRunner' -- f3
+  return ((), "")
+
+fRunner' :: ContT () (StateT T.Text (ReaderT (IORef (TState3 TResult3)) IO)) ()
+fRunner' = do
+    tRef <- ask
+    st <- liftIO (readIORef tRef)
+    let n = tInt3 st
+    liftIO $ print $ "Runner: " <> show n
+    case st of
+      TState3 Nothing  _ _ -> liftIO (putStrLn "Start cmd.")  >> prog3'
+      TState3 (Just c) _ _ -> liftIO (putStrLn "Continue cmd.") >> lift (c ())
+
+prog3' :: ContT () (StateT T.Text (ReaderT (IORef (TState3 TResult3)) IO)) ()
+prog3' = do
+  x <- fParse3 tResult3Str (A.string "abcdef")
+  liftIO (print $ "final string " <> show x)
+  x <- fParse3 tResult3M (A.decimal)
+  liftIO (print $ "final number " <> show x)
+
+f3 :: (() -> StateT T.Text (ReaderT (IORef (TState3 c)) IO) ())
+      -> ContT () (StateT T.Text (ReaderT (IORef (TState3 c)) IO)) ()
+f3 k = do
+  let i = 1
+  ts <- get
+  liftIO $ print $ "f3: " <> show ts
+  ref <- ask
+  liftIO $ atomicModifyIORef' ref (\s -> (s{tResume3 = Just k, tInt3 = i}, ()))
+
+fParse3 ::
+  (Monoid c, Show d) =>
+  LensC c (Maybe (A.Result d))
+  -> A.Parser d
+  -> ContT () (StateT T.Text (ReaderT (IORef (TState3 c)) IO)) d
+fParse3 l p = shiftT $ \k -> do
+  shiftT f3
+  ts <- get
+  liftIO $ print $ "x3: " <> show ts
+  ref <- ask
+  TState3{..} <- liftIO (readIORef ref)
+  let res = maybe (A.parse p) (A.feed) (getL l tResult3) ts
+  --liftIO . print $ A.feed res ""
+  liftIO $ atomicModifyIORef' ref (\TState3{..} ->
+    (TState3
+      { tResult3 = setL l (Just res) tResult3
+      , tInt3 = tInt3 + 1
+      , ..}
+    , ()
+    )
+   )
+  case res of
+    A.Partial _ -> liftIO $ putStrLn "Partial result.."
+    A.Fail i xs err -> error $ "Naebnulos vse: " <> show res
+    A.Done unparsedTxt r -> do
+      liftIO $ putStrLn "Finished output parsing"
+      liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
+      shiftT f3
       lift (k r)
 
