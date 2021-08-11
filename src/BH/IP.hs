@@ -36,6 +36,7 @@ import GHC.Generics (Generic)
 import BH.Common
 
 
+-- TODO: Use 'ip' package instead of this module.
 -- TODO: May be add 'vlan' field to 'IP' ? And 'vendor' field to 'MacAddr' type ?
 -- May it's better leave 'MacAddr' and 'IP' as "pure" addresses and create
 -- wrapper type containing more info, like MacInfo{ macVlan :: Vlan, macAddr

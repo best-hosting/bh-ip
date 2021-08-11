@@ -13,6 +13,8 @@ import System.IO.Unsafe
 import qualified Data.Attoparsec.Text as A
 import Data.Typeable
 import Data.Monoid
+import Data.Maybe
+import Data.Type.Equality
 
 import BH.Common
 
@@ -327,6 +329,75 @@ fParse3 l p = shiftT $ \k -> do
   liftIO $ atomicModifyIORef' ref (\TState3{..} ->
     (TState3
       { tResult3 = setL l (Just res) tResult3
+      , tInt3 = tInt3 + 1
+      , ..}
+    , ()
+    )
+   )
+  case res of
+    A.Partial _ -> liftIO $ putStrLn "Partial result.."
+    A.Fail i xs err -> error $ "Naebnulos vse: " <> show res
+    A.Done unparsedTxt r -> do
+      liftIO $ putStrLn "Finished output parsing"
+      liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
+      shiftT f3
+      lift (k r)
+
+data TResult3T = forall c. TResult3T {tRes3T :: Maybe (A.Result c)}
+  deriving (Typeable)
+
+instance Semigroup TResult3T where
+  z@TResult3T{tRes3T = Just x} <> _ = z
+  TResult3T{tRes3T = Nothing} <> z = z
+
+instance Monoid TResult3T where
+  mempty = TResult3T{tRes3T = Nothing}
+  mappend = (<>)
+
+f0'T :: IO ((), T.Text)
+f0'T = do
+  ref <- newIORef TState3{tResume3 = Nothing, tResult3 = mempty, tInt3 = 0}
+  flip runReaderT ref . flip runStateT "abc" . evalContT $ fRunner'T -- f3
+  flip runReaderT ref . flip runStateT "abc" . evalContT $ fRunner'T -- parse str
+  flip runReaderT ref . flip runStateT "def" . evalContT $ fRunner'T -- finish parse
+  flip runReaderT ref . flip runStateT "xyz" . evalContT $ fRunner'T -- f3
+  flip runReaderT ref . flip runStateT "1234" . evalContT $ fRunner'T -- parse int
+  flip runReaderT ref . flip runStateT " " . evalContT $ fRunner'T -- finish parse
+  flip runReaderT ref . flip runStateT "huynya" . evalContT $ fRunner'T -- f3
+  return ((), "")
+
+fRunner'T :: ContT () (StateT T.Text (ReaderT (IORef (TState3 TResult3T)) IO)) ()
+fRunner'T = do
+    tRef <- ask
+    st <- liftIO (readIORef tRef)
+    let n = tInt3 st
+    liftIO $ print $ "Runner: " <> show n
+    case st of
+      TState3 Nothing  _ _ -> liftIO (putStrLn "Start cmd.")  >> prog3'T
+      TState3 (Just c) _ _ -> liftIO (putStrLn "Continue cmd.") >> lift (c ())
+
+prog3'T :: ContT () (StateT T.Text (ReaderT (IORef (TState3 TResult3T)) IO)) ()
+prog3'T = do
+  x <- fParse3T (A.string "abcdef")
+  liftIO (print $ "final string " <> show x)
+  x <- fParse3T (A.decimal)
+  liftIO (print $ "final number " <> show (x :: Int))
+
+fParse3T ::
+  (Monoid c, Typeable c, Show d, Typeable d) =>
+  A.Parser d
+  -> ContT () (StateT T.Text (ReaderT (IORef (TState3 c)) IO)) d
+fParse3T p = shiftT $ \k -> do
+  shiftT f3
+  ts <- get
+  liftIO $ print $ "x3: " <> show ts
+  ref <- ask
+  TState3{..} <- liftIO (readIORef ref)
+  let res = maybe (A.parse p) (A.feed) (join $ cast tResult3) ts
+  --liftIO . print $ A.feed res ""
+  liftIO $ atomicModifyIORef' ref (\TState3{..} ->
+    (TState3
+      { tResult3 = fromMaybe mempty (cast (Just res))
       , tInt3 = tInt3 + 1
       , ..}
     , ()
