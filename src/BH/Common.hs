@@ -6,6 +6,8 @@ module BH.Common
     , getL
     , modifyL
     , setL
+    , maybeL
+    , nothingL
     , lexemeA
     , symbolA
     , maybeErr
@@ -35,6 +37,14 @@ modifyL l g = runIdentity . l (Identity . g)
 
 setL :: LensC a b -> b -> a -> a
 setL l x = modifyL l (const x)
+
+maybeL :: LensC (Maybe a) a
+maybeL g Nothing  = Just <$> g undefined
+maybeL g (Just x) = Just <$> g x
+
+-- | Always get and set 'Nothing' (value is not changed on 'set').
+nothingL :: LensC a (Maybe b)
+nothingL g x = (const x) <$> g Nothing
 
 symbolA :: T.Text -> A.Parser T.Text
 symbolA   = lexemeA . A.string

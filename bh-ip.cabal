@@ -34,8 +34,8 @@ library
       BH.Telnet2
       BH.Switch.Cisco
       BH.Main
-  other-modules:
       BH.Common
+  other-modules:
       BH.SwitchMega
       Paths_bh_ip
   hs-source-dirs:
@@ -163,6 +163,7 @@ executable t3
     , optparse-applicative
     , transformers
     , attoparsec
+    , bh-ip
   default-language: Haskell2010
 
 test-suite bh-ip-test

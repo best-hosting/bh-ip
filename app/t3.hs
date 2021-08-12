@@ -360,10 +360,6 @@ f0'T = do
   flip runReaderT ref . flip runStateT "abc" . evalContT $ fRunner'T -- f3
   flip runReaderT ref . flip runStateT "abc" . evalContT $ fRunner'T -- parse str
   flip runReaderT ref . flip runStateT "def" . evalContT $ fRunner'T -- finish parse
-  flip runReaderT ref . flip runStateT "xyz" . evalContT $ fRunner'T -- f3
-  flip runReaderT ref . flip runStateT "1234" . evalContT $ fRunner'T -- parse int
-  flip runReaderT ref . flip runStateT " " . evalContT $ fRunner'T -- finish parse
-  flip runReaderT ref . flip runStateT "huynya" . evalContT $ fRunner'T -- f3
   return ((), "")
 
 fRunner'T :: ContT () (StateT T.Text (ReaderT (IORef (TState3 TResult3T)) IO)) ()
@@ -411,4 +407,7 @@ fParse3T p = shiftT $ \k -> do
       liftIO $ print $ "Unparsed text left: '" <> unparsedTxt <> "'"
       shiftT f3
       lift (k r)
+
+newtype A = A Int
+  deriving (Show)
 
