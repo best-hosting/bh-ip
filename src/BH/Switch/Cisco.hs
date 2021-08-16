@@ -182,6 +182,20 @@ findMacs = do
       (T2.cmd $ "show mac address-table interface " <> showCiscoPortShort port)
     return (M.singleton port (map elMac pInfo) <> z)
 
+findMacs2 :: T2.TelnetRunM TelnetParserResult [PortNum] (M.Map SwPort [MacInfo]) ()
+findMacs2 = do
+  portSw <- asks (swName . T2.switchInfo)
+  ports  <- asks (T2.telnetIn)
+  res <- foldM go2 mempty ports
+  T2.putResult (M.mapKeys (\p -> SwPort{portSpec = p, ..}) res)
+
+go2 :: M.Map PortNum [MacInfo] -> PortNum -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum [MacInfo])
+go2 z port = do
+  pInfo <- T2.sendAndParse pResPortInfoL
+    parseMacAddrTable
+    (T2.cmd $ "show mac address-table interface " <> showCiscoPortShort port)
+  return (M.singleton port (map toMacInfo pInfo) <> z)
+
 findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
 findPorts t0 = do
   SwInfo{..} <- asks switchInfo
@@ -259,7 +273,7 @@ queryPorts2 switches = do
   getPorts :: SwName -> [SwPort]
   getPorts sn = filter ((== sn) . portSw) switches-}
 
-queryPorts ::
+{-queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [SwPort] ->
   m (M.Map SwPort [(MacAddr, S.Set IP)])
@@ -274,13 +288,31 @@ queryPorts switches = do
   forM portMacs $ mapM (\m -> (m,) <$> macToIPs m)
  where
   getPorts :: SwName -> [PortNum]
+  getPorts sn = map portSpec . filter ((== sn) . portSw) $ switches-}
+
+queryPorts ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [SwPort] ->
+  m (M.Map SwPort [MacInfo])
+queryPorts switches = do
+  Config{..} <- ask
+  portMacs <-
+    flip runReaderT swInfoMap $
+      T2.runOn getPorts (findMacs2 >> T2.sendExit) (map portSw switches)
+  liftIO $ putStrLn "Gathered ac map:"
+  liftIO $ print portMacs
+  liftIO $ putStrLn "Finally, ips..."
+  forM portMacs . mapM $ \MacInfo{..} ->
+    (\ys -> MacInfo{macIPs = ys, ..}) <$> macToIPs macAddr
+ where
+  getPorts :: SwName -> [PortNum]
   getPorts sn = map portSpec . filter ((== sn) . portSw) $ switches
 
 -- | Query single port.
 queryPort ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   SwPort ->
-  m (M.Map SwPort [(MacAddr, S.Set IP)])
+  m (M.Map SwPort [MacInfo])
 queryPort = queryPorts . (: [])
 
 queryMac ::

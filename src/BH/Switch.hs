@@ -177,7 +177,7 @@ data PortInfoEl = PortInfoEl
   deriving (Show)
 
 toMacInfo :: PortInfoEl -> MacInfo
-toMacInfo PortInfoEl{..} = MacInfo{macAddr = elMac, macVlan = elVlan, macIPs = []}
+toMacInfo PortInfoEl{..} = MacInfo{macAddr = elMac, macVlan = elVlan, macIPs = mempty}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)

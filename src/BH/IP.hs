@@ -32,6 +32,7 @@ import Text.ParserCombinators.ReadP
 import Control.Applicative
 import Control.DeepSeq
 import GHC.Generics (Generic)
+import qualified Data.Set as S
 
 import BH.Common
 
@@ -152,9 +153,17 @@ data MacInfo = MacInfo
   { macAddr :: MacAddr
   , macVlan :: Vlan
   --, macVendor :: T.Text
-  , macIPs :: [IP]
+  , macIPs :: S.Set IP
   }
   deriving (Show)
+
+instance J.ToJSON MacInfo where
+  toJSON MacInfo {..} =
+    J.object $
+      [ "mac"  J..= macAddr
+      , "vlan" J..= macVlan
+      , "ips"  J..= macIPs
+      ]
 
 -- | Old text-based mac address implementation.
 newtype MacAddr2     = MacAddr2 T.Text
@@ -284,6 +293,9 @@ data IPInfo = IPInfo
 
 newtype Vlan = Vlan Int
   deriving (Show)
+
+instance J.ToJSON Vlan where
+  toJSON (Vlan x) = J.toJSON x
 
 -- | Parser for vlan number.
 vlanP :: A.Parser Vlan
