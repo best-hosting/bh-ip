@@ -31,7 +31,7 @@ instance Monoid TStr where
 tStrL :: LensC TStr (Maybe (A.Result (M.Map SwName T.Text)))
 tStrL g TStr{..} = TStr <$> g tStr
 
-saveSwitch2 :: A.Parser (M.Map SwName T.Text) -> T2.TelnetRunM () (M.Map SwName T.Text) TStr ()
+saveSwitch2 :: A.Parser (M.Map SwName T.Text) -> T2.TelnetRunM TStr () (M.Map SwName T.Text) ()
 saveSwitch2 p = do
     T2.sendCmd (T2.cmd "write")
     T2.sendCmd (T2.cmd "terminal length 0")
@@ -45,7 +45,7 @@ saveSwitch p ts =
     sendAndParse p (cmd "show running") >>=
     sendExit
 
-getParser2 :: T2.TelnetRunM () (M.Map SwName T.Text) TStr (A.Parser (M.Map SwName T.Text))
+getParser2 :: T2.TelnetRunM TStr () (M.Map SwName T.Text) (A.Parser (M.Map SwName T.Text))
 getParser2 = do
     curSn <- asks (swName . T2.switchInfo)
     return (M.singleton curSn <$> parseCiscoConfig)
@@ -58,7 +58,7 @@ getParser = do
 saveSw :: TelnetCmd () (M.Map SwName T.Text) ()
 saveSw ts = getParser >>= flip saveSwitch ts
 
-saveSw2 :: T2.TelnetRunM () (M.Map SwName T.Text) TStr ()
+saveSw2 :: T2.TelnetRunM TStr () (M.Map SwName T.Text) ()
 saveSw2 = getParser2 >>= saveSwitch2
 
 main :: IO ()
