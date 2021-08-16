@@ -85,7 +85,7 @@ defTelnetState  = TelnetState { telnetResume = Nothing
                               }
 
 -- FIXME: Do i really need it here? Or just hardcode in 'run' ?
-telnetStateRef :: (Show b, Monoid b, Monoid p) => IORef (TelnetState p a b)
+telnetStateRef :: (Monoid p, Monoid b) => IORef (TelnetState p a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
@@ -160,13 +160,13 @@ parseEcho :: A.Parser T.Text -- ^ Parser for command output.
 parseEcho = parseOutput telnetEchoResultL
 
 parseResult ::
-  (Show b, Monoid b, Show d) =>
+  Show d =>
   LensC p (Maybe (A.Result d)) -> A.Parser d -> TelnetRunM p a b d
 parseResult l = parseOutput (telnetParserResultL . l)
 
 -- FIXME: Some of 'Show' constraints are probably not required, but i'll leave
 -- them as is for simplifying debugging until this'll become a problem.
-sendParseWithPrompt :: (Show b, Monoid b, Show d) => A.Parser T.Text
+sendParseWithPrompt :: Show d => A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> LensC p (Maybe (A.Result d)) -> A.Parser d
                         -> TelCmd -> TelnetRunM p a b d
@@ -207,7 +207,7 @@ takeTillPromptP prompt =
 -- parse result without amending it to final result in any way. And this is
 -- not possible now. [telnet_runtime][difficult]
 sendAndParse ::
-  (Show b, Monoid b, Show d)
+  Show d
   => LensC p (Maybe (A.Result d))
   -> A.Parser d
   -> TelCmd -> TelnetRunM p a b d
@@ -217,20 +217,19 @@ sendAndParse l p comm = do
     -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed. [parsing]
     sendParseWithPrompt (takeTillPromptP (telnetPrompt st)) l p comm
 
-putResult :: Monoid b => b -> TelnetRunM p a b ()
+putResult :: b -> TelnetRunM p a b ()
 putResult res = do
     stRef <- asks telnetRef
-    st    <- liftIO (readIORef stRef)
-    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res <> telnetResult st}, ()))
+    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res}, ()))
 
-sendCmd :: (Show b, Monoid b) => TelCmd -> TelnetRunM p a b ()
+sendCmd :: TelCmd -> TelnetRunM p a b ()
 sendCmd = sendAndParse nothingL (pure ())
 
 {--- | Send telnet command and wait until it'll be echo-ed back.
-sendExit :: (Show b, Monoid b) => TelnetRunM p a b ()
+sendExit :: TelnetRunM p a b ()
 sendExit = sendCmd (cmd "exit")-}
 
-runCmd :: (Show b, Monoid b) => TelnetRunM p a b () -> TelnetRunM p a b ()
+runCmd :: TelnetRunM p a b () -> TelnetRunM p a b ()
 runCmd comm = do
     tRef <- asks telnetRef
     r0 <- liftIO (readIORef tRef)
@@ -296,7 +295,7 @@ setPrompt promptP = do
       saveAndCont
       lift (k ())
 
-loginCmd :: (Show b, Monoid b) => TelnetRunM p a b ()
+loginCmd :: TelnetRunM p a b ()
 loginCmd = shiftT $ \k -> do
     SwInfo {..} <- asks switchInfo
     -- shiftT stops execution, if supplied continuation is _not_ called. I
@@ -309,8 +308,7 @@ loginCmd = shiftT $ \k -> do
     saveAndCont
     lift (k ())
 
-telnetH :: (Show b, Monoid b)
-  => (TL.TelnetPtr -> TelnetInfo p a b) -> TelnetRunM p a b () -> Socket -> TL.EventHandler
+telnetH :: (TL.TelnetPtr -> TelnetInfo p a b) -> TelnetRunM p a b () -> Socket -> TL.EventHandler
 telnetH ti telnetCmd _ con (TL.Received b)
   = do
     putStr ("R(" ++ show (B8.length b) ++ "):'") *> B8.putStrLn b *> putStrLn "'"
@@ -337,7 +335,7 @@ telnetH _ _ _ _ _ = pure ()
 -- I need to pass default state as argument here to bind type variable 'b'
 -- used in default state to resulting 'b'. Otherwise, default state used in
 -- 'atomicWriteIORef' call won't typecheck.
-run' :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b, Monoid p)
+run' :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => IORef (TelnetState p a b) -> a -> TelnetRunM p a b () -> SwName -> m b
 run' tRef input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
@@ -371,18 +369,18 @@ run' tRef input telnetCmd sn = do
                   ]
 
 -- | Run on one switch.
-run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b, Monoid p)
+run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => a -> TelnetRunM p a b () -> SwName -> m b
 run = run' telnetStateRef
 
 -- | Run till predicate returns 'Just' with some input.
 runTill ::
-  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b, Monoid p)
+  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => (b -> Maybe a) -> TelnetRunM p a b () -> m b
 runTill p telnetCmd = asks M.keys >>= foldM go mempty
   where
     --go ::
-    --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+    --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b) =>
     --  b -> SwName -> m b
     go z sn =
       case p z of
@@ -394,13 +392,12 @@ runTill p telnetCmd = asks M.keys >>= foldM go mempty
 
 -- | Run on specified switches with input depending on switch.
 runOn ::
-  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b, Monoid p)
+  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => (SwName -> a) -> TelnetRunM p a b () -> [SwName] -> m b
 runOn getInput telnetCmd = foldM go mempty
  where
   --go ::
-  --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b) =>
   --  b -> SwName -> m b
   go z sn = (<> z) <$> run (getInput sn) telnetCmd sn
-
 
