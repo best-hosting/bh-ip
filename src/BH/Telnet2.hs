@@ -57,7 +57,7 @@ import BH.Switch
 
 
 type TelnetRunM p a b = ContT () (ReaderT (TelnetInfo p a b) (StateT T.Text IO))
-type TelnetCtxM p a b = ReaderT (TelnetInfo p a b) (StateT T.Text IO)
+type TelnetM p a b = ReaderT (TelnetInfo p a b) (StateT T.Text IO)
 
 data TelnetState p a b  = TelnetState
                             { telnetResult :: b
@@ -113,7 +113,7 @@ shiftW :: Monad m => ((a -> m r, b) -> ContT r m r) -> b -> ContT r m a
 shiftW f x = shiftT (\k -> f (k, x))
 
 -- | Save resume continuation.
-saveResume :: (() -> TelnetCtxM p a b ()) -> TelnetRunM p a b ()
+saveResume :: (() -> TelnetM p a b ()) -> TelnetRunM p a b ()
 saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef' tRef (\r -> (r{telnetResume = Just k}, ()))
