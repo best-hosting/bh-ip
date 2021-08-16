@@ -146,6 +146,8 @@ macP = do
       <- p
     return MacAddr{..}
 
+-- FIXME: Humans works with IPs, not with mac addresses. So, it's more natural
+-- to have IP-mac relation, than mac-[IP] .
 data MacInfo = MacInfo
   { macAddr :: MacAddr
   , macVlan :: Vlan

@@ -8,6 +8,7 @@ module BH.Telnet2
     , cmd
     , cmdNoEcho
     , putResult
+    , modifyResult
     , TelnetRunM
     , TelnetInfo (..)
     , saveResume
@@ -21,11 +22,12 @@ module BH.Telnet2
     , sendCmd
     , telnetPromptP
     , setPrompt
-    , loginCmd
     , runCmd
     , run
     , runOn
     , runTill
+    , loginCmd
+    , sendExit
     )
   where
 
@@ -222,12 +224,18 @@ putResult res = do
     stRef <- asks telnetRef
     liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res}, ()))
 
+modifyResult :: (b -> b) -> TelnetRunM p a b ()
+modifyResult f = do
+    stRef <- asks telnetRef
+    st <- liftIO (readIORef stRef)
+    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = f (telnetResult st)}, ()))
+
 sendCmd :: TelCmd -> TelnetRunM p a b ()
 sendCmd = sendAndParse nothingL (pure ())
 
-{--- | Send telnet command and wait until it'll be echo-ed back.
+-- | Send telnet command and wait until it'll be echo-ed back.
 sendExit :: TelnetRunM p a b ()
-sendExit = sendCmd (cmd "exit")-}
+sendExit = sendCmd (cmd "exit")
 
 runCmd :: TelnetRunM p a b () -> TelnetRunM p a b ()
 runCmd comm = do

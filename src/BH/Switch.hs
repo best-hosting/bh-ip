@@ -24,6 +24,9 @@ module BH.Switch (
   PortSpeed (..),
   portSpeedP,
   showPortSpeedShort,
+  TelnetParserResult,
+  pResPortInfoL,
+  pResTextL,
 ) where
 
 import Control.Applicative
@@ -36,6 +39,7 @@ import Data.Char
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Network.Simple.TCP
+import Data.Monoid
 
 import BH.Common
 import BH.IP
@@ -265,3 +269,28 @@ showCiscoPortShort PortNum{..} =
 showCiscoPort :: PortNum -> T.Text
 showCiscoPort PortNum{..} =
   T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
+
+data TelnetParserResult = TelnetParserResult
+    { pResPortInfo :: First (A.Result [PortInfoEl])
+    , pResText :: First (A.Result T.Text)
+    }
+  deriving (Show)
+
+instance Semigroup TelnetParserResult where
+  x <> y = TelnetParserResult
+            { pResPortInfo = pResPortInfo x <> pResPortInfo y
+            , pResText = pResText x <> pResText y
+            }
+
+instance Monoid TelnetParserResult where
+  mempty = TelnetParserResult
+            { pResPortInfo = mempty
+            , pResText = mempty
+            }
+
+pResPortInfoL :: LensC TelnetParserResult (Maybe (A.Result [PortInfoEl]))
+pResPortInfoL g z@TelnetParserResult{pResPortInfo = First x} = (\x' -> z{pResPortInfo = First x'}) <$> g x
+
+pResTextL :: LensC TelnetParserResult (Maybe (A.Result T.Text))
+pResTextL g z@TelnetParserResult{pResText = First x} = (\x' -> z{pResText = First x'}) <$> g x
+
