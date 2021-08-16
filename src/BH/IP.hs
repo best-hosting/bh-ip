@@ -21,8 +21,8 @@ module BH.IP
 
 import Data.Char
 import qualified Data.Text as T
-import qualified Data.Aeson as J
-import qualified Data.Aeson.Encoding as J
+import Data.Aeson
+import qualified Data.Aeson.Encoding as JE
 import qualified Data.Attoparsec.Text as A
 import qualified Data.Attoparsec.Combinator as A
 import Numeric
@@ -94,15 +94,15 @@ instance Read MacAddr where
           <*> readHexP <* expect (Symbol ":")
           <*> readHexP
 
-instance J.ToJSON MacAddr where
-    toJSON mac = J.toJSON (showMacAddr mac)
-instance J.ToJSONKey MacAddr where
-    toJSONKey = J.ToJSONKeyText (T.pack . showMacAddr) (J.string . showMacAddr)
+instance ToJSON MacAddr where
+    toJSON mac = toJSON (showMacAddr mac)
+instance ToJSONKey MacAddr where
+    toJSONKey = ToJSONKeyText (T.pack . showMacAddr) (JE.string . showMacAddr)
 
-instance J.FromJSON MacAddr where
-    parseJSON (J.String t) = either fail return (A.parseOnly macP t)
-instance J.FromJSONKey MacAddr where
-    fromJSONKey = J.FromJSONKeyTextParser (either fail return . A.parseOnly macP)
+instance FromJSON MacAddr where
+    parseJSON (Data.Aeson.String t) = either fail return (A.parseOnly macP t)
+instance FromJSONKey MacAddr where
+    fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly macP)
 
 -- | Parse single mac octet.
 macOctetP1 :: A.Parser Int
@@ -157,12 +157,12 @@ data MacInfo = MacInfo
   }
   deriving (Show)
 
-instance J.ToJSON MacInfo where
+instance ToJSON MacInfo where
   toJSON MacInfo {..} =
-    J.object $
-      [ "mac"  J..= macAddr
-      , "vlan" J..= macVlan
-      , "ips"  J..= macIPs
+    object $
+      [ "mac"  .= macAddr
+      , "vlan" .= macVlan
+      , "ips"  .= macIPs
       ]
 
 -- | Old text-based mac address implementation.
@@ -193,15 +193,15 @@ instance Show MacAddr2 where
                         . zip [1..12]
                         $ t
 
-instance J.ToJSON MacAddr2 where
-    toJSON mac = J.toJSON (show mac)
-instance J.ToJSONKey MacAddr2 where
-    toJSONKey = J.ToJSONKeyText (T.pack . show) (J.string . show)
+instance ToJSON MacAddr2 where
+    toJSON mac = toJSON (show mac)
+instance ToJSONKey MacAddr2 where
+    toJSONKey = ToJSONKeyText (T.pack . show) (JE.string . show)
 
-instance J.FromJSON MacAddr2 where
-    parseJSON (J.String t) = either fail return (parseMacAddr2 t)
-instance J.FromJSONKey MacAddr2 where
-    fromJSONKey = J.FromJSONKeyTextParser (either fail return . parseMacAddr2)
+instance FromJSON MacAddr2 where
+    parseJSON (Data.Aeson.String t) = either fail return (parseMacAddr2 t)
+instance FromJSONKey MacAddr2 where
+    fromJSONKey = FromJSONKeyTextParser (either fail return . parseMacAddr2)
 
 
 data IP = IP
@@ -242,15 +242,15 @@ instance Read IP where
            <*> readDecP <* expect (Symbol ".")
            <*> readDecP
 
-instance J.ToJSON IP where
-    toJSON ip   = J.toJSON (showIP ip)
-instance J.ToJSONKey IP where
-  toJSONKey = J.ToJSONKeyText (T.pack . showIP) (J.string . showIP)
+instance ToJSON IP where
+    toJSON ip   = toJSON (showIP ip)
+instance ToJSONKey IP where
+  toJSONKey = ToJSONKeyText (T.pack . showIP) (JE.string . showIP)
 
-instance J.FromJSON IP where
-    parseJSON (J.String t) = either fail return (A.parseOnly ipP t)
-instance J.FromJSONKey IP where
-  fromJSONKey = J.FromJSONKeyTextParser (either fail return . A.parseOnly ipP)
+instance FromJSON IP where
+    parseJSON (Data.Aeson.String t) = either fail return (A.parseOnly ipP t)
+instance FromJSONKey IP where
+  fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly ipP)
 
 -- | Parser for IP address octet.
 ipOctetP :: A.Parser Int
@@ -294,8 +294,8 @@ data IPInfo = IPInfo
 newtype Vlan = Vlan Int
   deriving (Show)
 
-instance J.ToJSON Vlan where
-  toJSON (Vlan x) = J.toJSON x
+instance ToJSON Vlan where
+  toJSON (Vlan x) = toJSON x
 
 -- | Parser for vlan number.
 vlanP :: A.Parser Vlan
