@@ -11,7 +11,7 @@ module BH.Switch (
   swPortP',
   showSwPort,
   PortState (..),
-  portStateP,
+  PortMode (..),
   SwPortInfo (..),
   SwConfig,
   PortInfoEl (..),
@@ -27,6 +27,7 @@ module BH.Switch (
   TelnetParserResult,
   pResPortInfoL,
   pResTextL,
+  pResPortStateL,
 ) where
 
 import Control.Applicative
@@ -122,35 +123,21 @@ data PortMode
 data PortState = Up | NotConnect | Disabled
   deriving (Show)
 
-portStateP :: PortNum -> A.Parser PortState
-portStateP PortNum{..} = do
-  x <-
-    (,)
-      <$> ( (A.string portNumStr A.<?> "wrong port") *> A.string " is "
-              *> A.takeWhile1 isWords
-              <* A.string ", "
-              A.<?> "port status"
-          )
-      <*> ( A.string "line protocol is " *> A.skipWhile isWords
-              *> between (A.string "(") (A.string ")") (A.takeWhile1 isAlpha)
-              A.<?> "line protocol"
-          )
-  toPortState x
- where
-  portNumStr :: T.Text
-  portNumStr = T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
-  toPortState :: (T.Text, T.Text) -> A.Parser PortState
-  toPortState t
-    | t == ("up", "connected") = pure Up
-    | t == ("down", "notconnect") = pure NotConnect
-    | t == ("administratively down", "disabled") = pure Disabled
-    | otherwise = fail $ "Unrecognized port state: '" <> show t <> "'"
-
+instance ToJSON PortState where
+  toJSON = toJSON . show
 data SwPortInfo = SwPortInfo
   { portState :: PortState
   , --, portMode :: PortMode
     portAddrs :: [MacInfo]
   }
+  deriving (Show)
+
+instance ToJSON SwPortInfo where
+  toJSON SwPortInfo{..} =
+    object $
+      [ "state" .= portState
+      , "addrs" .= portAddrs
+      ]
 
 -- | Parse fully specified switch port.
 swPortP :: A.Parser SwPort
@@ -273,6 +260,7 @@ showCiscoPort PortNum{..} =
 data TelnetParserResult = TelnetParserResult
     { pResPortInfo :: First (A.Result [PortInfoEl])
     , pResText :: First (A.Result T.Text)
+    , pResPortState :: First (A.Result PortState)
     }
   deriving (Show)
 
@@ -293,4 +281,7 @@ pResPortInfoL g z@TelnetParserResult{pResPortInfo = First x} = (\x' -> z{pResPor
 
 pResTextL :: LensC TelnetParserResult (Maybe (A.Result T.Text))
 pResTextL g z@TelnetParserResult{pResText = First x} = (\x' -> z{pResText = First x'}) <$> g x
+
+pResPortStateL :: LensC TelnetParserResult (Maybe (A.Result PortState))
+pResPortStateL g z@TelnetParserResult{pResPortState = First x} = (\x' -> z{pResPortState = First x'}) <$> g x
 
