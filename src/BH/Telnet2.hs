@@ -401,8 +401,8 @@ runTill p telnetCmd = asks M.keys >>= foldM go mempty
 -- | Run on specified switches with input depending on switch.
 runOn ::
   (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
-  => (SwName -> a) -> TelnetRunM p a b () -> [SwName] -> m b
-runOn getInput telnetCmd = foldM go mempty
+  => (SwName -> a) -> [SwName] -> TelnetRunM p a b () -> m b
+runOn getInput switches telnetCmd = foldM go mempty switches
  where
   --go ::
   --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b) =>

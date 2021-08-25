@@ -23,6 +23,8 @@ import BH.Switch.Cisco
 
 -- TODO: Work on sw-0.
 -- TODO: Pretty print output. I may use yaml for printing results.
+-- TODO: Use `show cdp neighbors` to build switch connection tree. And
+-- visualize with diagrams.
 
 data Options = Options
   { authFile :: FilePath

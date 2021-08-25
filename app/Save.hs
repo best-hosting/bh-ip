@@ -54,9 +54,9 @@ main    = do
     res <- runExceptT . flip runReaderT swInfo $
       if null sns
         --then runOn (const ()) saveSw (M.keys swInfo)
-        then T2.runOn (const ()) saveSwitch2 (M.keys swInfo)
+        then T2.runOn (const ()) (M.keys swInfo) saveSwitch2
         --else runOn (const ()) saveSw sns
-        else T2.runOn (const ()) saveSwitch2 sns
+        else T2.runOn (const ()) sns saveSwitch2
     case res of
       Right m -> do
         forM_ (M.toList m) $ \(SwName s, cf) -> do
