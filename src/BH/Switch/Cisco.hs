@@ -189,16 +189,8 @@ findMacs t0 = do
 -- as first argument, not s Reader: '[PortNum] -> TelnetRunM p a b (M.Map
 -- PortNum ..)' and return result as usual. And do all combining in queryX
 -- functions.
-findMacs :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum SwPortInfo)
-findMacs ports = do
-  T2.sendCmd (T2.cmd "terminal length 0")
-  pState   <- findPortState ports
-  pMacInfo <- foldM go mempty ports
-  return $
-    M.merge M.dropMissing M.dropMissing
-      (M.zipWithMatched (\_ portState portAddrs -> SwPortInfo{..}))
-      pState
-      pMacInfo
+findMacs :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum [MacInfo])
+findMacs = foldM go mempty
  where
   go :: M.Map PortNum [MacInfo] -> PortNum -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum [MacInfo])
   go z port = flip (M.insert port) z . map toMacInfo
@@ -255,15 +247,16 @@ queryPorts switches = do
     . T2.runOn getPorts (map portSw switches)
     $ do
         portSw <- asks (swName . T2.switchInfo)
-        ports <- asks T2.telnetIn
+        ports  <- asks T2.telnetIn
+        T2.sendCmd (T2.cmd "terminal length 0")
         pState   <- findPortState ports
-        pMacInfo <- foldM go mempty ports
-        return $
-          M.merge M.dropMissing M.dropMissing
-            (M.zipWithMatched (\_ portState portAddrs -> SwPortInfo{..}))
-            pState
-            pMacInfo
-        T2.putResult . M.mapKeys (\p -> SwPort{portSpec = p, ..})
+        pMacInfo <- findMacs ports
+        let res :: M.Map PortNum SwPortInfo
+            res = M.merge M.dropMissing M.dropMissing
+                    (M.zipWithMatched (\_ portState portAddrs -> SwPortInfo{..}))
+                    pState
+                    pMacInfo
+        T2.putResult (M.mapKeys (\p -> SwPort{portSpec = p, ..}) res)
         T2.sendExit
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
