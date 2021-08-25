@@ -38,6 +38,7 @@ import qualified Data.Yaml as Y
 import System.Directory
 import Data.Char
 import Control.Applicative.Combinators
+import Data.Maybe
 
 import BH.Common
 import BH.IP
@@ -224,6 +225,28 @@ findPorts t0 = do
       (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
    where
     parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
+    parse [] = mempty
+    parse [p] =
+      let portSpec = elPort p
+       in if portSpec `elem` trunks
+            then mempty
+            else M.singleton mac $ Just SwPort{..}
+    parse _ = error "Huyase tut portov"
+
+findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr [MacInfo])
+findPorts2 = foldM go mempty
+ where
+  go ::
+    M.Map MacAddr (Maybe PortNum) ->
+    MacAddr ->
+    T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr [MacInfo])
+  go z mac =
+    flip (M.insert mac) z . listToMaybe . map elPort
+      <$> T2.sendAndParse pResPortInfoL
+      parseMacAddrTable
+      (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+   where
+    parse :: [PortInfoEl] -> [MacInfo]
     parse [] = mempty
     parse [p] =
       let portSpec = elPort p

@@ -166,6 +166,9 @@ data PortInfoEl = PortInfoEl
 toMacInfo :: PortInfoEl -> MacInfo
 toMacInfo PortInfoEl{..} = MacInfo{macAddr = elMac, macVlan = elVlan, macIPs = mempty}
 
+toSwPortInfo :: [PortInfoEl] -> SwPortInfo
+toSwPortInfo x@PortInfoEl{..} = SwPortInfo{portState = Up, portAddrs = [toMacInfo x]}
+
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
 
@@ -268,12 +271,14 @@ instance Semigroup TelnetParserResult where
   x <> y = TelnetParserResult
             { pResPortInfo = pResPortInfo x <> pResPortInfo y
             , pResText = pResText x <> pResText y
+            , pResPortState = pResPortState x <> pResPortState y
             }
 
 instance Monoid TelnetParserResult where
   mempty = TelnetParserResult
             { pResPortInfo = mempty
             , pResText = mempty
+            , pResPortState = mempty
             }
 
 pResPortInfoL :: LensC TelnetParserResult (Maybe (A.Result [PortInfoEl]))
