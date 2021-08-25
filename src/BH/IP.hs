@@ -149,6 +149,8 @@ macP = do
 
 -- FIXME: Humans works with IPs, not with mac addresses. So, it's more natural
 -- to have IP-mac relation, than mac-[IP] .
+-- FIXME: Rename 'MacInfo' to 'MacData' and create 'type MacInfo = M.Map
+-- MacAddr MacData'.
 data MacInfo = MacInfo
   { macAddr :: MacAddr
   , macVlan :: Vlan
