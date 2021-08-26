@@ -128,7 +128,7 @@ instance ToJSON PortState where
 data SwPortInfo = SwPortInfo
   { portState :: PortState
   , --, portMode :: PortMode
-    portAddrs :: [MacInfo]
+    portAddrs :: MacInfo
   }
   deriving (Show)
 
@@ -164,10 +164,10 @@ data PortInfoEl = PortInfoEl
   deriving (Show)
 
 toMacInfo :: PortInfoEl -> MacInfo
-toMacInfo PortInfoEl{..} = MacInfo{macAddr = elMac, macVlan = elVlan, macIPs = mempty}
+toMacInfo PortInfoEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
-toSwPortInfo :: [PortInfoEl] -> SwPortInfo
-toSwPortInfo x@PortInfoEl{..} = SwPortInfo{portState = Up, portAddrs = [toMacInfo x]}
+{-toSwPortInfo :: [PortInfoEl] -> SwPortInfo
+toSwPortInfo ps = SwPortInfo{portState = Up, portAddrs = map toMacInfo ps}-}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)

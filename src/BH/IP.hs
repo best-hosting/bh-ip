@@ -8,7 +8,8 @@ module BH.IP
     , defMacAddr
     , macP
     , showMacAddr
-    , MacInfo(..)
+    , MacInfo
+    , MacData(..)
     , IP (..)
     , defIP
     , showIP
@@ -33,6 +34,7 @@ import Control.Applicative
 import Control.DeepSeq
 import GHC.Generics (Generic)
 import qualified Data.Set as S
+import qualified Data.Map as M
 
 import BH.Common
 
@@ -151,19 +153,18 @@ macP = do
 -- to have IP-mac relation, than mac-[IP] .
 -- FIXME: Rename 'MacInfo' to 'MacData' and create 'type MacInfo = M.Map
 -- MacAddr MacData'.
-data MacInfo = MacInfo
-  { macAddr :: MacAddr
-  , macVlan :: Vlan
+type MacInfo = M.Map MacAddr MacData
+data MacData = MacData
+  { macVlan :: Vlan
   --, macVendor :: T.Text
   , macIPs :: S.Set IP
   }
   deriving (Show)
 
-instance ToJSON MacInfo where
-  toJSON MacInfo {..} =
+instance ToJSON MacData where
+  toJSON MacData {..} =
     object $
-      [ "mac"  .= macAddr
-      , "vlan" .= macVlan
+      [ "vlan" .= macVlan
       , "ips"  .= macIPs
       ]
 
