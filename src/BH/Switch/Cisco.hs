@@ -263,7 +263,7 @@ findPorts2 = foldM go mempty
 queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [SwPort] ->
-  m (M.Map SwPort SwPortInfo)
+  m SwPortInfo
 queryPorts switches = do
   Config{..} <- ask
   portMacs <- flip runReaderT swInfoMap
@@ -271,21 +271,21 @@ queryPorts switches = do
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
-  forM portMacs $ \SwPortInfo{..} ->
-    (\addrs -> SwPortInfo{portAddrs = addrs, ..}) <$> resolveIPs portAddrs
+  forM portMacs $ \SwPortData{..} ->
+    (\addrs -> SwPortData{portAddrs = addrs, ..}) <$> resolveIPs portAddrs
  where
   getPorts :: SwName -> [PortNum]
   getPorts sn = map portSpec . filter ((== sn) . portSw) $ switches
-  queryPorts' :: T2.TelnetRunM TelnetParserResult [PortNum] (M.Map SwPort SwPortInfo) ()
+  queryPorts' :: T2.TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
   queryPorts' = do
     portSw <- asks (swName . T2.switchInfo)
     ports  <- asks T2.telnetIn
     T2.sendCmd (T2.cmd "terminal length 0")
     pState   <- findPortState ports
     pMacInfo <- findMacs ports
-    let res :: M.Map PortNum SwPortInfo
+    let res :: M.Map PortNum SwPortData
         res = M.merge M.dropMissing M.dropMissing
-                (M.zipWithMatched (\_ portState portAddrs -> SwPortInfo{..}))
+                (M.zipWithMatched (\_ portState portAddrs -> SwPortData{..}))
                 pState
                 pMacInfo
     T2.putResult (M.mapKeys (\p -> SwPort{portSpec = p, ..}) res)
@@ -295,7 +295,7 @@ queryPorts switches = do
 queryPort ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   SwPort ->
-  m (M.Map SwPort SwPortInfo)
+  m SwPortInfo
 queryPort = queryPorts . (: [])
 
 queryMac ::

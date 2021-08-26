@@ -12,7 +12,8 @@ module BH.Switch (
   showSwPort,
   PortState (..),
   PortMode (..),
-  SwPortInfo (..),
+  SwPortInfo,
+  SwPortData (..),
   SwConfig,
   PortInfoEl (..),
   toMacInfo,
@@ -125,15 +126,17 @@ data PortState = Up | NotConnect | Disabled
 
 instance ToJSON PortState where
   toJSON = toJSON . show
-data SwPortInfo = SwPortInfo
+
+type SwPortInfo = M.Map SwPort SwPortData
+data SwPortData = SwPortData
   { portState :: PortState
   , --, portMode :: PortMode
     portAddrs :: MacInfo
   }
   deriving (Show)
 
-instance ToJSON SwPortInfo where
-  toJSON SwPortInfo{..} =
+instance ToJSON SwPortData where
+  toJSON SwPortData{..} =
     object $
       [ "state" .= portState
       , "addrs" .= portAddrs
@@ -166,8 +169,8 @@ data PortInfoEl = PortInfoEl
 toMacInfo :: PortInfoEl -> MacInfo
 toMacInfo PortInfoEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
-{-toSwPortInfo :: [PortInfoEl] -> SwPortInfo
-toSwPortInfo ps = SwPortInfo{portState = Up, portAddrs = map toMacInfo ps}-}
+{-toSwPortInfo :: [PortInfoEl] -> SwPortData
+toSwPortInfo ps = SwPortData{portState = Up, portAddrs = map toMacInfo ps}-}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
