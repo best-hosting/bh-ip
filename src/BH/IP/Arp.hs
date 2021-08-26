@@ -229,15 +229,14 @@ queryLinuxArp cacheFile host =
   readCache cacheFile >>= updateArpCache cacheFile host
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.
-macToIPs :: MonadReader Config m => MacAddr -> m (S.Set IP)
-macToIPs mac = fromMaybe mempty . M.lookup mac <$> asks macIpMap
+macToIPs :: MacIpMap -> MacAddr -> S.Set IP
+macToIPs macIpMap mac = fromMaybe mempty (M.lookup mac macIpMap)
 
 resolveIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveIPs macIpMap = M.foldrWithKey go mempty
  where
   go :: MacAddr -> MacData -> MacInfo -> MacInfo
-  go mac y z = let ips = fromMaybe mempty (M.lookup mac macIpMap)
-               in  M.insert mac (setL macIPsL ips y) z
+  go mac y z = M.insert mac (setL macIPsL (macToIPs macIpMap mac) y) z
 
 -- TODO: Query IP using nmap/ip neigh, if not found.
 ipToMac :: MonadReader Config m => IP -> m (Maybe MacAddr)

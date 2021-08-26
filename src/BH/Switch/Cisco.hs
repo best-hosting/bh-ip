@@ -16,7 +16,6 @@ module BH.Switch.Cisco (
   queryPorts,
   queryMac,
   queryMacs,
-  queryMacs2,
   queryIP,
   queryIPs,
 ) where
@@ -297,10 +296,10 @@ queryPort = queryPorts . (: [])
 queryMac ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   MacAddr ->
-  m (M.Map MacAddr (Maybe SwPort, S.Set IP))
+  m (M.Map MacAddr SwPortInfo)
 queryMac mac = queryMacs [mac]
 
-queryMacs ::
+{-queryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m (M.Map MacAddr (Maybe SwPort, S.Set IP))
@@ -324,16 +323,16 @@ queryMacs macs = do
   go mac Nothing mz = M.insert mac (Nothing, mempty) <$> mz
   go mac swp@(Just _) mz = do
     ips <- macToIPs mac
-    M.insert mac (swp, ips) <$> mz
+    M.insert mac (swp, ips) <$> mz-}
 
 resolveIPs2 :: MacIpMap -> SwPortInfo -> SwPortInfo
 resolveIPs2 macIpMap = M.map $ modifyL portAddrsL (resolveIPs macIpMap)
 
-queryMacs2 ::
+queryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m (M.Map MacAddr SwPortInfo)
-queryMacs2 macs = do
+queryMacs macs = do
   Config{..} <- ask
   macPorts <- flip runReaderT swInfoMap $ T2.runTill getMacs queryMacs'
   return (M.map (resolveIPs2 macIpMap) macPorts)
@@ -353,16 +352,6 @@ queryMacs2 macs = do
         res = M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) pInfo
     T2.putResult res
     T2.sendExit
-  go ::
-    MonadReader Config m =>
-    MacAddr ->
-    Maybe SwPort ->
-    m (M.Map MacAddr (Maybe SwPort, S.Set IP)) ->
-    m (M.Map MacAddr (Maybe SwPort, S.Set IP))
-  go mac Nothing mz = M.insert mac (Nothing, mempty) <$> mz
-  go mac swp@(Just _) mz = do
-    ips <- macToIPs mac
-    M.insert mac (swp, ips) <$> mz
 
 queryIP ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>

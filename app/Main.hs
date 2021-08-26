@@ -122,7 +122,7 @@ workQueryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m ()
-workQueryMacs macs = queryMacs2 macs >>= liftIO . B.putStr . Y.encode
+workQueryMacs macs = queryMacs macs >>= liftIO . B.putStr . Y.encode
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
