@@ -15,6 +15,7 @@ module BH.Switch (
   SwPortInfo,
   PortInfo,
   SwPortData (..),
+  portAddrsL,
   SwConfig,
   PortInfoEl (..),
   toMacInfo,
@@ -144,6 +145,9 @@ data SwPortData = SwPortData
     portAddrs :: MacInfo
   }
   deriving (Eq, Show)
+
+portAddrsL :: LensC SwPortData MacInfo
+portAddrsL g z@SwPortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
 
 instance ToJSON SwPortData where
   toJSON SwPortData{..} =

@@ -230,18 +230,14 @@ queryLinuxArp cacheFile host =
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.
 macToIPs :: MonadReader Config m => MacAddr -> m (S.Set IP)
-macToIPs mac = do
-  Config{..} <- ask
-  return . fromMaybe mempty $ M.lookup mac macIpMap
+macToIPs mac = fromMaybe mempty . M.lookup mac <$> asks macIpMap
 
--- FIXME: Replace this resolveX with lenses and traverse.
-resolveIPs :: MonadReader Config m => MacInfo -> m MacInfo
-resolveIPs = M.foldrWithKey go (return mempty)
+resolveIPs :: MacIpMap -> MacInfo -> MacInfo
+resolveIPs macIpMap = M.foldrWithKey go mempty
  where
-  go :: MonadReader Config m => MacAddr -> MacData -> m MacInfo -> m MacInfo
-  go macAddr MacData{..} mz = do
-    macData <- (\ips -> MacData{macIPs = ips, ..}) <$> macToIPs macAddr
-    M.insert macAddr macData <$> mz
+  go :: MacAddr -> MacData -> MacInfo -> MacInfo
+  go mac y z = let ips = fromMaybe mempty (M.lookup mac macIpMap)
+               in  M.insert mac (setL macIPsL ips y) z
 
 -- TODO: Query IP using nmap/ip neigh, if not found.
 ipToMac :: MonadReader Config m => IP -> m (Maybe MacAddr)

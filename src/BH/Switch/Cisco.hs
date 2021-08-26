@@ -268,8 +268,7 @@ queryPorts switches = do
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
-  forM portMacs $ \SwPortData{..} ->
-    (\addrs -> SwPortData{portAddrs = addrs, ..}) <$> resolveIPs portAddrs
+  return (resolveIPs2 macIpMap portMacs)
  where
   getPorts :: SwName -> [PortNum]
   getPorts sn = map portSpec . filter ((== sn) . portSw) $ switches
@@ -327,9 +326,8 @@ queryMacs macs = do
     ips <- macToIPs mac
     M.insert mac (swp, ips) <$> mz
 
-resolveIPs2 :: MonadReader Config m => SwPortInfo -> m SwPortInfo
-resolveIPs2 = mapM $ \SwPortData{..} ->
-                (\addrs -> SwPortData{portAddrs = addrs, ..}) <$> resolveIPs portAddrs
+resolveIPs2 :: MacIpMap -> SwPortInfo -> SwPortInfo
+resolveIPs2 macIpMap = M.map $ modifyL portAddrsL (resolveIPs macIpMap)
 
 queryMacs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
@@ -338,7 +336,7 @@ queryMacs2 ::
 queryMacs2 macs = do
   Config{..} <- ask
   macPorts <- flip runReaderT swInfoMap $ T2.runTill getMacs queryMacs'
-  forM macPorts resolveIPs2
+  return (M.map (resolveIPs2 macIpMap) macPorts)
  where
   getMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
   getMacs res

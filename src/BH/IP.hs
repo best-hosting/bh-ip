@@ -10,6 +10,7 @@ module BH.IP
     , showMacAddr
     , MacInfo
     , MacData(..)
+    , macIPsL
     , IP (..)
     , defIP
     , showIP
@@ -160,6 +161,9 @@ data MacData = MacData
   , macIPs :: S.Set IP
   }
   deriving (Eq, Show)
+
+macIPsL :: LensC MacData (S.Set IP)
+macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
 instance ToJSON MacData where
   toJSON MacData {..} =
