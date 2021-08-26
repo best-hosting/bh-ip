@@ -16,6 +16,7 @@ module BH.Switch.Cisco (
   queryPorts,
   queryMac,
   queryMacs,
+  queryMacs2,
   queryIP,
   queryIPs,
 ) where
@@ -233,27 +234,23 @@ findPorts t0 = do
             else M.singleton mac $ Just SwPort{..}
     parse _ = error "Huyase tut portov"
 
-{-findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr MacInfo)
-findPorts2 = foldM go mempty
+-- FIXME: Query all info about found port.
+findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
+findPorts2 macs = do
+  SwInfo{..} <- asks T2.switchInfo
+  foldM (go swTrunkPorts) mempty macs
  where
   go ::
-    M.Map MacAddr (Maybe PortNum) ->
+    [PortNum]
+    -> M.Map MacAddr PortInfo ->
     MacAddr ->
-    T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr [MacInfo])
-  go z mac =
-    flip (M.insert mac) z . listToMaybe . map elPort
-      <$> T2.sendAndParse pResPortInfoL
-      parseMacAddrTable
-      (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
-   where
-    parse :: [PortInfoEl] -> [MacInfo]
-    parse [] = mempty
-    parse [p] =
-      let portSpec = elPort p
-       in if portSpec `elem` trunks
-            then mempty
-            else M.singleton mac $ Just SwPort{..}
-    parse _ = error "Huyase tut portov"-}
+    T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
+  go trunks z mac =
+    let notTrunks = filter ((`notElem` trunks) . elPort)
+    in  flip (M.insert mac) z . foldMap toSwPortInfo . notTrunks
+          <$> T2.sendAndParse pResPortInfoL
+          parseMacAddrTable
+          (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
 
 -- FIXME: Do not use pairs in map value, because printing pair in yaml will
 -- result in list, which i confusing. I may define some type with named
@@ -283,7 +280,7 @@ queryPorts switches = do
     T2.sendCmd (T2.cmd "terminal length 0")
     pState   <- findPortState ports
     pMacInfo <- findMacs ports
-    let res :: M.Map PortNum SwPortData
+    let res :: PortInfo
         res = M.merge M.dropMissing M.dropMissing
                 (M.zipWithMatched (\_ portState portAddrs -> SwPortData{..}))
                 pState
@@ -319,6 +316,45 @@ queryMacs macs = do
   getMacs res = case filter (`notElem` M.keys res) macs of
     [] -> Nothing
     xs -> Just xs
+  go ::
+    MonadReader Config m =>
+    MacAddr ->
+    Maybe SwPort ->
+    m (M.Map MacAddr (Maybe SwPort, S.Set IP)) ->
+    m (M.Map MacAddr (Maybe SwPort, S.Set IP))
+  go mac Nothing mz = M.insert mac (Nothing, mempty) <$> mz
+  go mac swp@(Just _) mz = do
+    ips <- macToIPs mac
+    M.insert mac (swp, ips) <$> mz
+
+resolveIPs2 :: MonadReader Config m => SwPortInfo -> m SwPortInfo
+resolveIPs2 = mapM $ \SwPortData{..} ->
+                (\addrs -> SwPortData{portAddrs = addrs, ..}) <$> resolveIPs portAddrs
+
+queryMacs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] ->
+  m (M.Map MacAddr SwPortInfo)
+queryMacs2 macs = do
+  Config{..} <- ask
+  macPorts <- flip runReaderT swInfoMap $ T2.runTill getMacs queryMacs'
+  forM macPorts resolveIPs2
+ where
+  getMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
+  getMacs res
+    | res == M.empty = Just macs
+    | otherwise = case M.keys . M.filter (== M.empty) $ res of
+                    [] -> Nothing
+                    xs -> Just xs
+  queryMacs' :: T2.TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr SwPortInfo) ()
+  queryMacs' = do
+    portSw <- asks (swName . T2.switchInfo)
+    macs  <- asks T2.telnetIn
+    pInfo <- findPorts2 macs
+    let res :: M.Map MacAddr SwPortInfo
+        res = M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) pInfo
+    T2.putResult res
+    T2.sendExit
   go ::
     MonadReader Config m =>
     MacAddr ->

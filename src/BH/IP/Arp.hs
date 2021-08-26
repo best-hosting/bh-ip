@@ -234,6 +234,7 @@ macToIPs mac = do
   Config{..} <- ask
   return . fromMaybe mempty $ M.lookup mac macIpMap
 
+-- FIXME: Replace this resolveX with lenses and traverse.
 resolveIPs :: MonadReader Config m => MacInfo -> m MacInfo
 resolveIPs = M.foldrWithKey go (return mempty)
  where

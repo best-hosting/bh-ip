@@ -13,10 +13,12 @@ module BH.Switch (
   PortState (..),
   PortMode (..),
   SwPortInfo,
+  PortInfo,
   SwPortData (..),
   SwConfig,
   PortInfoEl (..),
   toMacInfo,
+  toSwPortInfo,
   PortNum (..),
   portNumP,
   portNumP',
@@ -57,6 +59,12 @@ instance FromJSON SwName where
   parseJSON = withText "SwName" (\t -> pure (SwName t))
 
 -- FIXME: 'swHost' should be 'Either HostName IP'.
+-- FIXME: Rename 'SwInfo' to 'SwData' and remove 'swName' field. And create
+-- 'SwInfo :: M.Map SwName SwData' (i.e. 'SwInfoMap' now). But.. i use this
+-- data as "single element" in 'TelnetInfo' and query 'swName' quite often.
+-- That means, even if i rename it to 'SwData', i need 'swName' field here.
+-- Moreover, if i add 'macAddr' back into 'MacData' this will greatly simplify
+-- 'resolveIPs', because i no longer need 'foldrWithKey'..
 data SwInfo = SwInfo
   { swName :: SwName
   , swHost :: HostName
@@ -122,18 +130,20 @@ data PortMode
 -- FIXME: "show interfaces configuration gi3" for sw0.
 -- FIXME: Move all cisco-related code to Sw.Cisco module.
 data PortState = Up | NotConnect | Disabled
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance ToJSON PortState where
   toJSON = toJSON . show
 
+-- FIXME: Rename 'SwPortData' to 'PortData' .
 type SwPortInfo = M.Map SwPort SwPortData
+type PortInfo = M.Map PortNum SwPortData
 data SwPortData = SwPortData
   { portState :: PortState
   , --, portMode :: PortMode
     portAddrs :: MacInfo
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance ToJSON SwPortData where
   toJSON SwPortData{..} =
@@ -169,8 +179,9 @@ data PortInfoEl = PortInfoEl
 toMacInfo :: PortInfoEl -> MacInfo
 toMacInfo PortInfoEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
-{-toSwPortInfo :: [PortInfoEl] -> SwPortData
-toSwPortInfo ps = SwPortData{portState = Up, portAddrs = map toMacInfo ps}-}
+toSwPortInfo :: PortInfoEl -> M.Map PortNum SwPortData
+toSwPortInfo x@PortInfoEl{..} = M.singleton elPort $
+  SwPortData{portState = Up, portAddrs = toMacInfo x}
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)

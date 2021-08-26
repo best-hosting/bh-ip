@@ -159,7 +159,7 @@ data MacData = MacData
   --, macVendor :: T.Text
   , macIPs :: S.Set IP
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance ToJSON MacData where
   toJSON MacData {..} =
@@ -295,7 +295,7 @@ data IPInfo = IPInfo
  deriving (Show)
 
 newtype Vlan = Vlan Int
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance ToJSON Vlan where
   toJSON (Vlan x) = toJSON x
