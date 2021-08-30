@@ -10,6 +10,7 @@ module BH.Switch.Cisco (
   parseMacAddrTable,
   parseCiscoConfig,
   parsePortState,
+  findMac,
   findMacs,
   findPorts,
   queryPort,
@@ -190,15 +191,26 @@ findMacs t0 = do
 -- as first argument, not s Reader: '[PortNum] -> TelnetRunM p a b (M.Map
 -- PortNum ..)' and return result as usual. And do all combining in queryX
 -- functions.
-findMacs :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum MacInfo)
-findMacs = foldM go mempty
- where
-  go :: M.Map PortNum MacInfo -> PortNum -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum MacInfo)
-  go z port = flip (M.insert port) z . foldMap toMacInfo
+findMac :: PortNum -> T2.TelnetRunM TelnetParserResult a b MacInfo
+findMac p =
+  foldMap toMacInfo
     <$> T2.sendAndParse pResPortInfoL
           parseMacAddrTable
-          (T2.cmd $ "show mac address-table interface " <> showCiscoPortShort port)
+          (T2.cmd $ "show mac address-table interface " <> showCiscoPortShort p)
 
+findMac' :: PortNum -> T2.TelnetRunM TelnetParserResult a b SwPortData
+findMac' p = do
+  portAddrs <- findMac p
+  portState <- findPortState' p
+  return SwPortData{..}
+
+findMacs :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum MacInfo)
+findMacs = foldr (\p mz -> M.insert p <$> findMac p <*> mz) (pure mempty)
+
+findMacs' :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b PortInfo
+findMacs' = foldr (\p mz -> M.insert p <$> findMac' p <*> mz) (pure mempty)
+
+-- FIXME: Rewrite to `foldM findPortState` form.
 findPortState :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum PortState)
 findPortState = foldM go mempty
  where
@@ -207,6 +219,12 @@ findPortState = foldM go mempty
     <$> T2.sendAndParse pResPortStateL
           (parsePortState port)
           (T2.cmd $ "show interfaces " <> showCiscoPort port)
+
+findPortState' :: PortNum -> T2.TelnetRunM TelnetParserResult a b PortState
+findPortState' p =
+  T2.sendAndParse pResPortStateL
+          (parsePortState p)
+          (T2.cmd $ "show interfaces " <> showCiscoPort p)
 
 findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
 findPorts t0 = do
@@ -242,24 +260,40 @@ findPorts t0 = do
 findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
 findPorts2 macs = do
   SwInfo{..} <- asks T2.switchInfo
-  foldM (go swTrunkPorts) mempty macs
+  foldM (go2 swTrunkPorts) mempty macs
  where
   go ::
     [PortNum]
     -> M.Map MacAddr PortInfo ->
     MacAddr ->
     T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-  go trunks res mac = do
+  go trunks acc mac = do
     let notTrunks = filter ((`notElem` trunks) . elPort)
     ps <- notTrunks
           <$> T2.sendAndParse pResPortInfoL
               parseMacAddrTable
               (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
     case ps of
-      []  -> return res
+      []  -> return acc
       (_:_) -> return
         . M.insert mac (foldr (M.unionWith (<>) . toSwPortInfo) mempty ps)
-        $ res
+        $ acc
+
+  go2 ::
+    [PortNum]
+    -> M.Map MacAddr PortInfo ->
+    MacAddr ->
+    T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
+  go2 trunks acc mac = do
+    let notTrunks = filter ((`notElem` trunks) . elPort)
+    ps <- notTrunks
+          <$> T2.sendAndParse pResPortInfoL
+              parseMacAddrTable
+              (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+    case ps of
+      []  -> return acc
+      (_:_) -> do
+        M.insert mac <$> foldr (\p mz -> M.insertWith (<>) p <$> findMac' p <*> mz) (pure mempty) (map elPort ps) <*> pure acc
 
 -- FIXME: Do not use pairs in map value, because printing pair in yaml will
 -- result in list, which i confusing. I may define some type with named

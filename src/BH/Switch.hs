@@ -186,6 +186,8 @@ data PortInfoEl = PortInfoEl
 toMacInfo :: PortInfoEl -> MacInfo
 toMacInfo PortInfoEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
+-- FIXME: Rename to to 'toPortInfo', since there is different type
+-- 'SwPortInfo'.
 toSwPortInfo :: PortInfoEl -> PortInfo
 toSwPortInfo x@PortInfoEl{..} = M.singleton elPort $
   SwPortData{portState = Up, portAddrs = toMacInfo x}
