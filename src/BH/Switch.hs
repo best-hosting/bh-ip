@@ -156,6 +156,9 @@ instance ToJSON SwPortData where
       , "addrs" .= portAddrs
       ]
 
+instance Semigroup SwPortData where
+    x <> y = SwPortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
+
 -- | Parse fully specified switch port.
 swPortP :: A.Parser SwPort
 swPortP = swPortP' (const (Nothing, Nothing))
@@ -183,7 +186,7 @@ data PortInfoEl = PortInfoEl
 toMacInfo :: PortInfoEl -> MacInfo
 toMacInfo PortInfoEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
-toSwPortInfo :: PortInfoEl -> M.Map PortNum SwPortData
+toSwPortInfo :: PortInfoEl -> PortInfo
 toSwPortInfo x@PortInfoEl{..} = M.singleton elPort $
   SwPortData{portState = Up, portAddrs = toMacInfo x}
 

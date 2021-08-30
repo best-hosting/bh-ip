@@ -233,6 +233,11 @@ findPorts t0 = do
             else M.singleton mac $ Just SwPort{..}
     parse _ = error "Huyase tut portov"
 
+-- FIXME: The same mac may be used in different vlans. Should i handle this
+-- correctly? That means, i should have maps indexed by (MacAddr, Vlan)
+-- tuple.
+-- FIXME: The same mac may be seen on different ports. Should i handle thie
+-- too?
 -- FIXME: Query all info about found port.
 findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
 findPorts2 macs = do
@@ -244,12 +249,17 @@ findPorts2 macs = do
     -> M.Map MacAddr PortInfo ->
     MacAddr ->
     T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-  go trunks z mac =
+  go trunks res mac = do
     let notTrunks = filter ((`notElem` trunks) . elPort)
-    in  flip (M.insert mac) z . foldMap toSwPortInfo . notTrunks
+    ps <- notTrunks
           <$> T2.sendAndParse pResPortInfoL
-          parseMacAddrTable
-          (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+              parseMacAddrTable
+              (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+    case ps of
+      []  -> return res
+      (_:_) -> return
+        . M.insert mac (foldr (M.unionWith (<>) . toSwPortInfo) mempty ps)
+        $ res
 
 -- FIXME: Do not use pairs in map value, because printing pair in yaml will
 -- result in list, which i confusing. I may define some type with named
