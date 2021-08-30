@@ -256,7 +256,6 @@ findPorts t0 = do
 -- tuple.
 -- FIXME: The same mac may be seen on different ports. Should i handle thie
 -- too?
--- FIXME: Query all info about found port.
 findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
 findPorts2 macs = do
   SwInfo{..} <- asks T2.switchInfo
