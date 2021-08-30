@@ -256,43 +256,25 @@ findPorts t0 = do
 -- tuple.
 -- FIXME: The same mac may be seen on different ports. Should i handle thie
 -- too?
-findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-findPorts2 macs = do
+findPort :: MacAddr -> T2.TelnetRunM TelnetParserResult a b PortInfo
+findPort mac = do
   SwInfo{..} <- asks T2.switchInfo
-  foldM (go2 swTrunkPorts) mempty macs
- where
-  go ::
-    [PortNum]
-    -> M.Map MacAddr PortInfo ->
-    MacAddr ->
-    T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-  go trunks acc mac = do
-    let notTrunks = filter ((`notElem` trunks) . elPort)
-    ps <- notTrunks
-          <$> T2.sendAndParse pResPortInfoL
-              parseMacAddrTable
-              (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
-    case ps of
-      []  -> return acc
-      (_:_) -> return
-        . M.insert mac (foldr (M.unionWith (<>) . toSwPortInfo) mempty ps)
-        $ acc
+  let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
+  ps <- notTrunks
+        <$> T2.sendAndParse pResPortInfoL
+            parseMacAddrTable
+            (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+  case ps of
+    []    -> return mempty
+    (_:_) ->
+      let upPort portAddrs = SwPortData{portState = Up, ..}
+      in  foldr
+            (\p mz -> M.insertWith (<>) p <$> (upPort <$> findMac p) <*> mz)
+            (pure mempty)
+            (map elPort ps)
 
-  go2 ::
-    [PortNum]
-    -> M.Map MacAddr PortInfo ->
-    MacAddr ->
-    T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-  go2 trunks acc mac = do
-    let notTrunks = filter ((`notElem` trunks) . elPort)
-    ps <- notTrunks
-          <$> T2.sendAndParse pResPortInfoL
-              parseMacAddrTable
-              (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
-    case ps of
-      []  -> return acc
-      (_:_) -> do
-        M.insert mac <$> foldr (\p mz -> M.insertWith (<>) p <$> findMac' p <*> mz) (pure mempty) (map elPort ps) <*> pure acc
+findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
+findPorts2 = foldr (\p mz -> M.insert p <$> findPort p <*> mz) (pure mempty)
 
 -- FIXME: Do not use pairs in map value, because printing pair in yaml will
 -- result in list, which i confusing. I may define some type with named
@@ -342,32 +324,6 @@ queryMac ::
   m (M.Map MacAddr SwPortInfo)
 queryMac mac = queryMacs [mac]
 
-{-queryMacs ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] ->
-  m (M.Map MacAddr (Maybe SwPort, S.Set IP))
-queryMacs macs = do
-  Config{..} <- ask
-  macPorts <-
-    flip runReaderT swInfoMap $
-      runTill getMacs findPorts
-  M.foldrWithKey go (return mempty) macPorts
- where
-  getMacs :: M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
-  getMacs res = case filter (`notElem` M.keys res) macs of
-    [] -> Nothing
-    xs -> Just xs
-  go ::
-    MonadReader Config m =>
-    MacAddr ->
-    Maybe SwPort ->
-    m (M.Map MacAddr (Maybe SwPort, S.Set IP)) ->
-    m (M.Map MacAddr (Maybe SwPort, S.Set IP))
-  go mac Nothing mz = M.insert mac (Nothing, mempty) <$> mz
-  go mac swp@(Just _) mz = do
-    ips <- macToIPs mac
-    M.insert mac (swp, ips) <$> mz-}
-
 resolveIPs2 :: MacIpMap -> SwPortInfo -> SwPortInfo
 resolveIPs2 macIpMap = M.map $ modifyL portAddrsL (resolveIPs macIpMap)
 
@@ -395,6 +351,20 @@ queryMacs macs = do
         res = M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) pInfo
     T2.putResult res
     T2.sendExit
+
+queryIPs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [IP] ->
+  m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+queryIPs2 ips = do
+  Config{..} <- ask
+  let macs = mapMaybe (\x -> M.lookup x ipMacMap) ips
+  macPorts <- queryMacs macs
+  foldr (\x z -> M.insert x (fromMaybe mempty (M.lookup x ipMacMap >>= \m -> M.lookup m macPorts)) z) mempty ips
+ where
+  go :: IpMacMap -> IP -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
+  go mm ip acc = fromMaybe mempty $ do
+    mac <- M.lookup ip mm
 
 queryIP ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
