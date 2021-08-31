@@ -352,11 +352,11 @@ queryMacs macs = do
     T2.putResult res
     T2.sendExit
 
-queryIPs2 ::
+queryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m (M.Map IP SwPortInfo)
-queryIPs2 ips = do
+queryIPs ips = do
   Config{..} <- ask
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macPorts <- queryMacs macs
@@ -366,44 +366,9 @@ queryIPs2 ips = do
         M.lookup mac macPorts
   return (foldr go mempty ips)
 
-queryIPs3 ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [IP] ->
-  m (M.Map IP SwPortInfo)
-queryIPs3 ips = do
-  Config{..} <- ask
-  let ipMacs = M.fromList . map (\x -> (x, M.lookup x ipMacMap)) $ ips
-  macPorts <- queryMacs (mapMaybe id . M.elems $ ipMacs)
-  let go :: IP -> Maybe MacAddr -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
-      go ip mmac acc = flip (M.insert ip) acc . fromMaybe mempty $ do
-        mac <- mmac
-        M.lookup mac macPorts
-  return (M.foldrWithKey go mempty ipMacs)
-
 queryIP ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   IP ->
-  m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+  m (M.Map IP SwPortInfo)
 queryIP = queryIPs . (: [])
 
-queryIPs ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [IP] ->
-  m (M.Map IP (Maybe MacAddr, Maybe SwPort))
-queryIPs ips = do
-  Config{..} <- ask
-  -- FIXME: macs may be identical. I may avoid this, if i'll use 'Set'.
-  let ipMacs = M.fromList . map (\ip -> (ip, M.lookup ip ipMacMap)) $ ips
-      macs = nub . mapMaybe snd . M.toList $ ipMacs
-  macPorts <-
-    flip runReaderT swInfoMap $
-      runTill (getMacs macs) findPorts
-  return (M.map (go macPorts) ipMacs)
- where
-  getMacs :: [MacAddr] -> M.Map MacAddr (Maybe SwPort) -> Maybe [MacAddr]
-  getMacs macs res = case filter (`notElem` M.keys res) macs of
-    [] -> Nothing
-    xs -> Just xs
-  go :: M.Map MacAddr (Maybe SwPort) -> Maybe MacAddr -> (Maybe MacAddr, Maybe SwPort)
-  go _ Nothing = (Nothing, Nothing)
-  go macPorts z@(Just mac) = (z, join $ M.lookup mac macPorts)
