@@ -17,7 +17,6 @@ module BH.Switch (
   PortInfo,
   PortData (..),
   portAddrsL,
-  SwConfig,
   MacTableEl (..),
   toMacInfo,
   PortNum (..),
@@ -120,7 +119,6 @@ readSwInfo file = do
   toSwInfo :: [SwData] -> SwInfo
   toSwInfo = M.fromList . map (\x -> (swName x, x))
 
--- TODO: Add and check for 'disabled' port state.
 data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
@@ -144,16 +142,16 @@ data PortMode
   deriving (Show)
 
 -- FIXME: "show interfaces configuration gi3" for sw0.
--- FIXME: Move all cisco-related code to Sw.Cisco module.
 data PortState = Up | NotConnect | Disabled
   deriving (Eq, Show)
 
 instance ToJSON PortState where
   toJSON = toJSON . show
 
--- FIXME: Rename 'PortData' to 'PortData' .
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
+
+-- TODO: Read port mode (access/trunk) to 'PortData'.
 data PortData = PortData
   { portState :: PortState
   , --, portMode :: PortMode
@@ -188,8 +186,6 @@ swPortP' getDefs = do
 
 showSwPort :: SwPort -> T.Text
 showSwPort SwPort{..} = getSwName portSw <> "/" <> showCiscoPortShort portSpec
-
-type SwConfig = M.Map SwName T.Text
 
 data MacTableEl = MacTableEl
   { elVlan :: Vlan

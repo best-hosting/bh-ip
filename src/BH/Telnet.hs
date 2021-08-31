@@ -63,7 +63,7 @@ type TelnetM p a b = ReaderT (TelnetInfo p a b) (StateT T.Text IO)
 
 data TelnetState p a b  = TelnetState
                             { telnetResult :: b
-                            , telnetResume  :: Maybe (() -> ReaderT (TelnetInfo p a b) (StateT T.Text IO) ())
+                            , telnetResume  :: Maybe (() -> TelnetM p a b ())
                             , tInt :: Int
                             , telnetEchoResult   :: Maybe (A.Result T.Text)
                               -- ^ Input already read for checking command echo.
@@ -120,10 +120,20 @@ saveResume k = do
     tRef <- asks telnetRef
     liftIO $ atomicModifyIORef' tRef (\r -> (r{telnetResume = Just k}, ()))
 
--- FIXME: Rename to 'saveResume'. I don't need 'saveResume' at all.
 -- | Save resume continuation and call it immediately.
 saveAndCont :: TelnetRunM p a b ()
 saveAndCont = shiftT (\k -> saveResume k >> lift (k ()))
+
+putResult :: b -> TelnetRunM p a b ()
+putResult res = do
+    stRef <- asks telnetRef
+    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res}, ()))
+
+modifyResult :: (b -> b) -> TelnetRunM p a b ()
+modifyResult f = do
+    stRef <- asks telnetRef
+    st <- liftIO (readIORef stRef)
+    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = f (telnetResult st)}, ()))
 
 parseOutput :: Show d => LensC (TelnetState p a b) (Maybe (A.Result d))
                 -> A.Parser d
@@ -168,6 +178,7 @@ parseResult l = parseOutput (telnetParserResultL . l)
 
 -- FIXME: Some of 'Show' constraints are probably not required, but i'll leave
 -- them as is for simplifying debugging until this'll become a problem.
+-- [logging]
 sendParseWithPrompt :: Show d => A.Parser T.Text
                         -- ^ Cmd prompt parser.
                         -> LensC p (Maybe (A.Result d)) -> A.Parser d
@@ -199,15 +210,6 @@ takeTillPromptP :: T.Text -> A.Parser T.Text
 takeTillPromptP prompt =
     A.string prompt <|> A.takeTill A.isEndOfLine *> A.endOfLine *> takeTillPromptP prompt
 
--- FIXME: The reason, that i can't parse to anything, except final result is
--- because final result is _hardcoded_ in type-sig. Though, 'Text' is always
--- 'sendAndParse' return. But it should be the opposite: result should be
--- returned, but 'Text' should be passed over internally. Then i may supply
--- parser to any type.
--- With current situation all 'sendX' calls assume, that they directly parse
--- into final result. But there may be situation, where i just want _to get_
--- parse result without amending it to final result in any way. And this is
--- not possible now. [telnet_runtime][difficult]
 sendAndParse ::
   Show d
   => LensC p (Maybe (A.Result d))
@@ -218,17 +220,6 @@ sendAndParse l p comm = do
     st <- liftIO (readIORef stRef)
     -- FIXME: Previous parser should consume \r\n, so '<|>' will not be needed. [parsing]
     sendParseWithPrompt (takeTillPromptP (telnetPrompt st)) l p comm
-
-putResult :: b -> TelnetRunM p a b ()
-putResult res = do
-    stRef <- asks telnetRef
-    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = res}, ()))
-
-modifyResult :: (b -> b) -> TelnetRunM p a b ()
-modifyResult f = do
-    stRef <- asks telnetRef
-    st <- liftIO (readIORef stRef)
-    liftIO $ atomicModifyIORef' stRef (\x -> (x{telnetResult = f (telnetResult st)}, ()))
 
 sendCmd :: TelCmd -> TelnetRunM p a b ()
 sendCmd = sendAndParse nothingL (pure ())

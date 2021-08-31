@@ -34,12 +34,13 @@ import BH.Main.Types
 import BH.Common
 import BH.IP
 
+-- TODO: Parse nmap xml with xeno [pkg].
 -- TODO: Implement cache update strategy, where new entries are merged with
 -- old cache. Note, though, that in this case i'd better build 'IpMacMap'
 -- first, because it defines 1-1 relation and if some IP's mac address has
 -- changed, it'll be correctly updated. If i use 1-many relation (like in
 -- 'MacIpMap') finding this IP, who no longer has this mac, will be much more
--- tricky.
+-- tricky. [cache][arp]
 --
 -- I don't think, that i should merge old cache with new data. Old cache may
 -- contain no longer valid entires (e.g. port is blocked or server shutdown).
@@ -48,7 +49,7 @@ import BH.IP
 
 -- TODO: "ip neigh" usually finds much less IPs, than nmap. Also, subsequent
 -- nmap runs may miss one-two IPs. So, i should either just use "nmap" or use
--- both and merge results.
+-- both and merge results.[arp][nmap]
 
 -- Use "ip neigh" for buliding arp/IP cache.
 
@@ -189,13 +190,13 @@ nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
 -- FIXME: Can i generalize following 'readCache' and 'updateArpCache'
 -- functions to just read _any_ yaml cache and update it upon some conditions?
 -- This cache may include regular ansible invetory. Also, replace 'readSwInfo'
--- with generic version of this.
+-- with generic version of this. [cache]
 
 -- | Read arp cache file.
 readCache :: (MonadIO m, MonadError String m) => FilePath -> m MacIpMap
 readCache cacheFile = do
   b <- liftIO (doesFileExist cacheFile)
-  -- FIXME: Update cache, if it's too old.
+  -- FIXME: Update cache, if it's too old. [cache]
   if b
     then
       catchError
@@ -227,7 +228,7 @@ queryLinuxArp ::
 queryLinuxArp cacheFile host =
   readCache cacheFile >>= updateArpCache cacheFile host
 
--- TODO: Query Mac using nmap/ip neigh, if not found.
+-- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 resolveIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveIPs macIpMap = M.foldrWithKey go mempty
  where
@@ -236,7 +237,7 @@ resolveIPs macIpMap = M.foldrWithKey go mempty
     let ips = fromMaybe mempty (M.lookup mac macIpMap)
     in  M.insert mac (setL macIPsL ips y) z
 
--- TODO: Query IP using nmap/ip neigh, if not found.
+-- TODO: Query IP using nmap/ip neigh, if not found. [nmap][arp]
 ipToMac :: MonadReader Config m => IP -> m (Maybe MacAddr)
 ipToMac ip = do
   Config{..} <- ask

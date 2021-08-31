@@ -15,7 +15,8 @@ module BH.IP
     , defIP
     , showIP
     , ipP
-    , IPInfo (..)
+    , IPInfo
+    , IPData (..)
     , Vlan (..)
     , vlanP
     )
@@ -40,11 +41,7 @@ import qualified Data.Map as M
 import BH.Common
 
 
--- TODO: Use 'ip' package instead of this module.
--- TODO: May be add 'vlan' field to 'IP' ? And 'vendor' field to 'MacAddr' type ?
--- May it's better leave 'MacAddr' and 'IP' as "pure" addresses and create
--- wrapper type containing more info, like MacInfo{ macVlan :: Vlan, macAddr
--- :: MacAddr} and IPInfo {ipVlan :: Vlan, ipAddr ;: IP} .
+-- TODO: Use 'ip' package instead of this module. [pkg]
 
 data MacAddr    = MacAddr
                     { macOctet1 :: Int
@@ -150,10 +147,8 @@ macP = do
       <- p
     return MacAddr{..}
 
--- FIXME: Humans works with IPs, not with mac addresses. So, it's more natural
+-- TODO: Humans works with IPs, not with mac addresses. So, it's more natural
 -- to have IP-mac relation, than mac-[IP] .
--- FIXME: Rename 'MacInfo' to 'MacData' and create 'type MacInfo = M.Map
--- MacAddr MacData'.
 type MacInfo = M.Map MacAddr MacData
 data MacData = MacData
   { macVlan :: Vlan
@@ -290,9 +285,11 @@ parseIP t = do
           | otherwise           -> Left $ "Incorrect IP2 octet '" ++ show d ++ "'"
         []                      -> Left "Can't read IP2 octet."
 
-data IPInfo = IPInfo
-  { ipAddr :: IP
-  , ipMacAddr :: MacAddr
+-- TODO: Subnets and vlans for IPs.
+type IPInfo = M.Map IP IPData
+
+data IPData = IPData
+  { ipMacAddr :: MacAddr
   , ipVlan :: Vlan
   , ipSubnet :: T.Text
   }

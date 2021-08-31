@@ -6,9 +6,9 @@
 
 module BH.Switch.Cisco (
   module BH.Switch,
-  parseMacAddrTable,
-  parseCiscoConfig,
-  parsePortState,
+  macTableP,
+  switchConfigP,
+  portStateP,
   findPortMacs,
   findPortState,
   findPortData,
@@ -34,18 +34,9 @@ import BH.Switch
 
 import BH.Telnet
 
--- TODO: Use HsYAML instead of yaml.
--- And, probably, yaml-combinators for parsing?
+-- TODO: Use HsYAML instead of yaml.  And, probably, yaml-combinators for
+-- parsing? [pkg]
 
--- FIXME: New port and switch types:
--- swName, (portNum, portSpeed), [(Mac, Vlan)]
--- swName, portSpec :: PortNum, [(Mac, Vlan)]
--- Map : (swName, portSpec :: PortNum) -> [(Mac, Vlan)]
--- I may want to also add:
--- - vendor to 'MacAddr'
--- - 'Vlan' to 'MacAddr'
--- - port mode (access/trunk) to 'SwPort'
--- - port state (enabled/disabled) to 'SwPort'
 
 -- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
 -- - "physical" - mac address used by server. It may be considered bind to
@@ -71,10 +62,8 @@ topHeaderA =
     <* A.skipSpace
     A.<?> "top header"
 
--- FIXME: Rename to 'macAddrTableP'. I should not prepend "cisco" here,
--- because this is entire module is cisco-only.
-parseMacAddrTable :: A.Parser [MacTableEl]
-parseMacAddrTable = do
+macTableP :: A.Parser [MacTableEl]
+macTableP = do
   void $ optional topHeaderA
   portP <-
     symbolA "Vlan" *> symbolA "Mac Address"
@@ -95,15 +84,15 @@ parseMacAddrTable = do
       -- 'endOfLine'.
       <* (void A.endOfLine <|> A.endOfInput)
 
-parseCiscoConfig :: A.Parser T.Text
-parseCiscoConfig =
+switchConfigP :: A.Parser T.Text
+switchConfigP =
   A.takeTill A.isEndOfLine
     <<>> ( A.string "\r\nend\r\n"
-            <|> A.takeWhile1 A.isEndOfLine <<>> parseCiscoConfig
+            <|> A.takeWhile1 A.isEndOfLine <<>> switchConfigP
          )
 
-parsePortState :: PortNum -> A.Parser PortState
-parsePortState PortNum{..} = do
+portStateP :: PortNum -> A.Parser PortState
+portStateP PortNum{..} = do
   x <-
     (,)
       <$> ( (A.string portNumStr A.<?> "wrong port") *> A.string " is "
@@ -131,13 +120,13 @@ findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b MacInfo
 findPortMacs p =
   foldMap toMacInfo
     <$> sendAndParse pResPortInfoL
-          parseMacAddrTable
+          macTableP
           (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
 
 findPortState :: PortNum -> TelnetRunM TelnetParserResult a b PortState
 findPortState p =
   sendAndParse pResPortStateL
-          (parsePortState p)
+          (portStateP p)
           (cmd $ "show interfaces " <> showCiscoPort p)
 
 -- | Find all mac addresses visible on port and return 'PortData'.
@@ -161,7 +150,7 @@ findMacPort mac = do
   let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
   ps <- notTrunks
         <$> sendAndParse pResPortInfoL
-            parseMacAddrTable
+            macTableP
             (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
   case ps of
     []    -> return mempty

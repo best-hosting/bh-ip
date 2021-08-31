@@ -19,7 +19,7 @@ saveSwitch = do
     curSn <- asks (swName . switchData)
     sendCmd (cmd "write")
     sendCmd (cmd "terminal length 0")
-    cf <- sendAndParse pResTextL parseCiscoConfig (cmd "show running")
+    cf <- sendAndParse pResTextL switchConfigP (cmd "show running")
     modifyResult (M.singleton curSn cf <>)
     sendCmd (cmd "exit")
 
