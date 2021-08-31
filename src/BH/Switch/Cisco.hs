@@ -355,16 +355,30 @@ queryMacs macs = do
 queryIPs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
-  m (M.Map IP (Maybe MacAddr, Maybe SwPort))
+  m (M.Map IP SwPortInfo)
 queryIPs2 ips = do
   Config{..} <- ask
-  let macs = mapMaybe (\x -> M.lookup x ipMacMap) ips
+  let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macPorts <- queryMacs macs
-  foldr (\x z -> M.insert x (fromMaybe mempty (M.lookup x ipMacMap >>= \m -> M.lookup m macPorts)) z) mempty ips
- where
-  go :: IpMacMap -> IP -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
-  go mm ip acc = fromMaybe mempty $ do
-    mac <- M.lookup ip mm
+  let go :: IP -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
+      go ip acc = flip (M.insert ip) acc . fromMaybe mempty $ do
+        mac <- M.lookup ip ipMacMap
+        M.lookup mac macPorts
+  return (foldr go mempty ips)
+
+queryIPs3 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [IP] ->
+  m (M.Map IP SwPortInfo)
+queryIPs3 ips = do
+  Config{..} <- ask
+  let ipMacs = M.fromList . map (\x -> (x, M.lookup x ipMacMap)) $ ips
+  macPorts <- queryMacs (mapMaybe id . M.elems $ ipMacs)
+  let go :: IP -> Maybe MacAddr -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
+      go ip mmac acc = flip (M.insert ip) acc . fromMaybe mempty $ do
+        mac <- mmac
+        M.lookup mac macPorts
+  return (M.foldrWithKey go mempty ipMacs)
 
 queryIP ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
