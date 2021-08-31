@@ -10,9 +10,12 @@ module BH.Switch.Cisco (
   parseMacAddrTable,
   parseCiscoConfig,
   parsePortState,
-  findMac,
-  findMacs,
-  findPorts,
+  findPortMacs,
+  findPortState,
+  findPortData,
+  findPortInfo,
+  findMacPort,
+  findMacsPort,
   queryPort,
   queryPorts,
   queryMac,
@@ -46,7 +49,6 @@ import BH.IP
 import BH.IP.Arp
 import BH.Main
 import BH.Switch
-import BH.Telnet
 
 import qualified BH.Telnet2 as T2
 
@@ -62,13 +64,6 @@ import qualified BH.Telnet2 as T2
 -- - 'Vlan' to 'MacAddr'
 -- - port mode (access/trunk) to 'SwPort'
 -- - port state (enabled/disabled) to 'SwPort'
-
--- TODO: queryX functions must return some unified information structure
--- containing all (missed) info, like vlan, port state, IPs, macs, etc.
---data SwPortInfo = SwPortInfo
---                { swPort :: SwPort
---                , swPortAddrs :: M.Map MacAddr [IP]
---                }
 
 -- TODO: MacAddr makes a pair with host. But MacAddr may be of several types:
 -- - "physical" - mac address used by server. It may be considered bind to
@@ -160,104 +155,37 @@ parsePortState PortNum{..} = do
     | t == ("administratively down", "disabled") = pure Disabled
     | otherwise = fail $ "Unrecognized port state: '" <> show t <> "'"
 
--- I'm intresting in receiving all ports in question as input, because then i
--- may connect to each switch only once and iterate over all asked ports from
--- this switch.
--- FIXME: Change input to [PortNum]. This module shouldn't care about
--- different switches. In fact, it's quite hard to change ReaderT context. If
--- i want to parametrize over input and require only 'PortNum' part of it, i
--- may use lens 'LensC a PortNum' and then just use it. Then correct switch
--- filtering should be hardcoded into lens in caller function.
-{-findMacs :: TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) ()
-findMacs t0 = do
-  curSn <- asks (swName . switchInfo)
-  -- Filter out input ports just to be sure, but, really, this should be done
-  -- by 'runOn' (see 'queryPorts').
-  ports <- asks (filter ((== curSn) . portSw) . telnetIn)
-  foldM (flip go) t0 ports >>= sendExit
- where
-  go :: SwPort -> TelnetCmd [SwPort] (M.Map SwPort [MacAddr]) T.Text
-  go swPort@SwPort{..} =
-    sendAndParse
-      (parse <$> parseMacAddrTable)
-      (cmd $ "show mac address-table interface " <> showCiscoPortShort portSpec)
-   where
-    parse :: [PortInfoEl] -> M.Map SwPort [MacAddr]
-    parse xs
-      | null xs = mempty
-      | otherwise = M.singleton swPort (map elMac xs)-}
-
--- FIXME: May be make this findX functions the most parametric: accept input
--- as first argument, not s Reader: '[PortNum] -> TelnetRunM p a b (M.Map
--- PortNum ..)' and return result as usual. And do all combining in queryX
--- functions.
-findMac :: PortNum -> T2.TelnetRunM TelnetParserResult a b MacInfo
-findMac p =
+-- | Find all mac addresses visible on port.
+findPortMacs :: PortNum -> T2.TelnetRunM TelnetParserResult a b MacInfo
+findPortMacs p =
   foldMap toMacInfo
     <$> T2.sendAndParse pResPortInfoL
           parseMacAddrTable
           (T2.cmd $ "show mac address-table interface " <> showCiscoPortShort p)
 
-findMac' :: PortNum -> T2.TelnetRunM TelnetParserResult a b SwPortData
-findMac' p = do
-  portAddrs <- findMac p
-  portState <- findPortState' p
-  return SwPortData{..}
-
-findMacs :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum MacInfo)
-findMacs = foldr (\p mz -> M.insert p <$> findMac p <*> mz) (pure mempty)
-
-findMacs' :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b PortInfo
-findMacs' = foldr (\p mz -> M.insert p <$> findMac' p <*> mz) (pure mempty)
-
--- FIXME: Rewrite to `foldM findPortState` form.
-findPortState :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum PortState)
-findPortState = foldM go mempty
- where
-  go :: M.Map PortNum PortState -> PortNum -> T2.TelnetRunM TelnetParserResult a b (M.Map PortNum PortState)
-  go z port = flip (M.insert port) z
-    <$> T2.sendAndParse pResPortStateL
-          (parsePortState port)
-          (T2.cmd $ "show interfaces " <> showCiscoPort port)
-
-findPortState' :: PortNum -> T2.TelnetRunM TelnetParserResult a b PortState
-findPortState' p =
+findPortState :: PortNum -> T2.TelnetRunM TelnetParserResult a b PortState
+findPortState p =
   T2.sendAndParse pResPortStateL
           (parsePortState p)
           (T2.cmd $ "show interfaces " <> showCiscoPort p)
 
-findPorts :: TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) ()
-findPorts t0 = do
-  SwInfo{..} <- asks switchInfo
-  macs <- asks telnetIn
-  foldM (flip (go swName swTrunkPorts)) t0 macs >>= sendExit
- where
-  go ::
-    SwName ->
-    [PortNum] ->
-    MacAddr ->
-    TelnetCmd [MacAddr] (M.Map MacAddr (Maybe SwPort)) T.Text
-  go portSw trunks mac =
-    sendAndParse
-      (parse <$> parseMacAddrTable)
-      (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
-   where
-    parse :: [PortInfoEl] -> M.Map MacAddr (Maybe SwPort)
-    parse [] = mempty
-    parse [p] =
-      let portSpec = elPort p
-       in if portSpec `elem` trunks
-            then mempty
-            else M.singleton mac $ Just SwPort{..}
-    parse _ = error "Huyase tut portov"
+-- | Find all mac addresses visible on port and return 'SwPortData'.
+findPortData :: PortNum -> T2.TelnetRunM TelnetParserResult a b SwPortData
+findPortData p = do
+  portAddrs <- findPortMacs p
+  portState <- findPortState p
+  return SwPortData{..}
+
+findPortInfo :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b PortInfo
+findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempty)
 
 -- FIXME: The same mac may be used in different vlans. Should i handle this
 -- correctly? That means, i should have maps indexed by (MacAddr, Vlan)
--- tuple.
+-- tuple. [network]
 -- FIXME: The same mac may be seen on different ports. Should i handle thie
--- too?
-findPort :: MacAddr -> T2.TelnetRunM TelnetParserResult a b PortInfo
-findPort mac = do
+-- too? [network]
+findMacPort :: MacAddr -> T2.TelnetRunM TelnetParserResult a b PortInfo
+findMacPort mac = do
   SwInfo{..} <- asks T2.switchInfo
   let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
   ps <- notTrunks
@@ -269,16 +197,12 @@ findPort mac = do
     (_:_) ->
       let upPort portAddrs = SwPortData{portState = Up, ..}
       in  foldr
-            (\p mz -> M.insertWith (<>) p <$> (upPort <$> findMac p) <*> mz)
+            (\p mz -> M.insertWith (<>) p <$> (upPort <$> findPortMacs p) <*> mz)
             (pure mempty)
             (map elPort ps)
 
-findPorts2 :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-findPorts2 = foldr (\p mz -> M.insert p <$> findPort p <*> mz) (pure mempty)
-
--- FIXME: Do not use pairs in map value, because printing pair in yaml will
--- result in list, which i confusing. I may define some type with named
--- records.
+findMacsPort :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
+findMacsPort = foldr (\p mz -> M.insert p <$> findMacPort p <*> mz) (pure mempty)
 
 -- | Query several ports.
 queryPorts ::
@@ -301,14 +225,8 @@ queryPorts switches = do
     portSw <- asks (swName . T2.switchInfo)
     ports  <- asks T2.telnetIn
     T2.sendCmd (T2.cmd "terminal length 0")
-    pState   <- findPortState ports
-    pMacInfo <- findMacs ports
-    let res :: PortInfo
-        res = M.merge M.dropMissing M.dropMissing
-                (M.zipWithMatched (\_ portState portAddrs -> SwPortData{..}))
-                pState
-                pMacInfo
-    T2.putResult (M.mapKeys (\p -> SwPort{portSpec = p, ..}) res)
+    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ports
+    T2.putResult res
     T2.sendExit
 
 -- | Query single port.
@@ -346,11 +264,15 @@ queryMacs macs = do
   queryMacs' = do
     portSw <- asks (swName . T2.switchInfo)
     macs  <- asks T2.telnetIn
-    pInfo <- findPorts2 macs
-    let res :: M.Map MacAddr SwPortInfo
-        res = M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) pInfo
+    res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort macs
     T2.putResult res
     T2.sendExit
+
+queryIP ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  IP ->
+  m (M.Map IP SwPortInfo)
+queryIP = queryIPs . (: [])
 
 queryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
@@ -365,10 +287,4 @@ queryIPs ips = do
         mac <- M.lookup ip ipMacMap
         M.lookup mac macPorts
   return (foldr go mempty ips)
-
-queryIP ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  IP ->
-  m (M.Map IP SwPortInfo)
-queryIP = queryIPs . (: [])
 
