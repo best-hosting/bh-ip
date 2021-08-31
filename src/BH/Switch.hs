@@ -14,12 +14,11 @@ module BH.Switch (
   PortMode (..),
   SwPortInfo,
   PortInfo,
-  SwPortData (..),
+  PortData (..),
   portAddrsL,
   SwConfig,
-  PortInfoEl (..),
+  MacTableEl (..),
   toMacInfo,
-  toSwPortInfo,
   PortNum (..),
   portNumP,
   portNumP',
@@ -136,28 +135,28 @@ data PortState = Up | NotConnect | Disabled
 instance ToJSON PortState where
   toJSON = toJSON . show
 
--- FIXME: Rename 'SwPortData' to 'PortData' .
-type SwPortInfo = M.Map SwPort SwPortData
-type PortInfo = M.Map PortNum SwPortData
-data SwPortData = SwPortData
+-- FIXME: Rename 'PortData' to 'PortData' .
+type SwPortInfo = M.Map SwPort PortData
+type PortInfo = M.Map PortNum PortData
+data PortData = PortData
   { portState :: PortState
   , --, portMode :: PortMode
     portAddrs :: MacInfo
   }
   deriving (Eq, Show)
 
-portAddrsL :: LensC SwPortData MacInfo
-portAddrsL g z@SwPortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
+portAddrsL :: LensC PortData MacInfo
+portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
 
-instance ToJSON SwPortData where
-  toJSON SwPortData{..} =
+instance ToJSON PortData where
+  toJSON PortData{..} =
     object $
       [ "state" .= portState
       , "addrs" .= portAddrs
       ]
 
-instance Semigroup SwPortData where
-    x <> y = SwPortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
+instance Semigroup PortData where
+    x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
 
 -- | Parse fully specified switch port.
 swPortP :: A.Parser SwPort
@@ -176,21 +175,15 @@ showSwPort SwPort{..} = getSwName portSw <> "/" <> showCiscoPortShort portSpec
 
 type SwConfig = M.Map SwName T.Text
 
-data PortInfoEl = PortInfoEl
+data MacTableEl = MacTableEl
   { elVlan :: Vlan
   , elMac :: MacAddr
   , elPort :: PortNum
   }
   deriving (Show)
 
-toMacInfo :: PortInfoEl -> MacInfo
-toMacInfo PortInfoEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
-
--- FIXME: Rename to to 'toPortInfo', since there is different type
--- 'SwPortInfo'.
-toSwPortInfo :: PortInfoEl -> PortInfo
-toSwPortInfo x@PortInfoEl{..} = M.singleton elPort $
-  SwPortData{portState = Up, portAddrs = toMacInfo x}
+toMacInfo :: MacTableEl -> MacInfo
+toMacInfo MacTableEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
@@ -284,7 +277,7 @@ showCiscoPort PortNum{..} =
   T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
 
 data TelnetParserResult = TelnetParserResult
-    { pResPortInfo :: First (A.Result [PortInfoEl])
+    { pResPortInfo :: First (A.Result [MacTableEl])
     , pResText :: First (A.Result T.Text)
     , pResPortState :: First (A.Result PortState)
     }
@@ -304,7 +297,7 @@ instance Monoid TelnetParserResult where
             , pResPortState = mempty
             }
 
-pResPortInfoL :: LensC TelnetParserResult (Maybe (A.Result [PortInfoEl]))
+pResPortInfoL :: LensC TelnetParserResult (Maybe (A.Result [MacTableEl]))
 pResPortInfoL g z@TelnetParserResult{pResPortInfo = First x} = (\x' -> z{pResPortInfo = First x'}) <$> g x
 
 pResTextL :: LensC TelnetParserResult (Maybe (A.Result T.Text))

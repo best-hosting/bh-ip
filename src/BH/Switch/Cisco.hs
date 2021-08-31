@@ -102,7 +102,7 @@ topHeaderA =
 
 -- FIXME: Rename to 'macAddrTableP'. I should not prepend "cisco" here,
 -- because this is entire module is cisco-only.
-parseMacAddrTable :: A.Parser [PortInfoEl]
+parseMacAddrTable :: A.Parser [MacTableEl]
 parseMacAddrTable = do
   void $ optional topHeaderA
   portP <-
@@ -115,7 +115,7 @@ parseMacAddrTable = do
       <* A.endOfLine
   many $
     A.takeWhile A.isHorizontalSpace
-      *> (PortInfoEl <$> lexemeA vlanP <*> lexemeA macP <*> portP)
+      *> (MacTableEl <$> lexemeA vlanP <*> lexemeA macP <*> portP)
       -- 'endOfInput' should never match here, because mac table must be
       -- always followed by telnet prompt and 'many' parser should not match
       -- with prompt. On the other hand, matching (or using 'lookAhead') with
@@ -169,12 +169,12 @@ findPortState p =
           (parsePortState p)
           (T2.cmd $ "show interfaces " <> showCiscoPort p)
 
--- | Find all mac addresses visible on port and return 'SwPortData'.
-findPortData :: PortNum -> T2.TelnetRunM TelnetParserResult a b SwPortData
+-- | Find all mac addresses visible on port and return 'PortData'.
+findPortData :: PortNum -> T2.TelnetRunM TelnetParserResult a b PortData
 findPortData p = do
   portAddrs <- findPortMacs p
   portState <- findPortState p
-  return SwPortData{..}
+  return PortData{..}
 
 findPortInfo :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b PortInfo
 findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempty)
@@ -195,7 +195,7 @@ findMacPort mac = do
   case ps of
     []    -> return mempty
     (_:_) ->
-      let upPort portAddrs = SwPortData{portState = Up, ..}
+      let upPort portAddrs = PortData{portState = Up, ..}
       in  foldr
             (\p mz -> M.insertWith (<>) p <$> (upPort <$> findPortMacs p) <*> mz)
             (pure mempty)
