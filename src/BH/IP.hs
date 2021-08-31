@@ -75,9 +75,8 @@ showsMacAddr MacAddr{..} =
         showOctet :: Int -> ShowS
         showOctet d = showHex (d `div` 16) . showHex (d `mod` 16)
 
--- FIXME: Change result to 'T.Text' to be more uniform across the lib.
-showMacAddr :: MacAddr -> String
-showMacAddr m = showsMacAddr m ""
+showMacAddr :: MacAddr -> T.Text
+showMacAddr m = T.pack $ showsMacAddr m ""
 
 instance Show MacAddr where
     showsPrec d m = showParen (d > 10) $ showString "MacAddr " . showsMacAddr m
@@ -97,7 +96,7 @@ instance Read MacAddr where
 instance ToJSON MacAddr where
     toJSON mac = toJSON (showMacAddr mac)
 instance ToJSONKey MacAddr where
-    toJSONKey = ToJSONKeyText (T.pack . showMacAddr) (JE.string . showMacAddr)
+    toJSONKey = ToJSONKeyText (showMacAddr) (JE.text . showMacAddr)
 
 instance FromJSON MacAddr where
     parseJSON (Data.Aeson.String t) = either fail return (A.parseOnly macP t)

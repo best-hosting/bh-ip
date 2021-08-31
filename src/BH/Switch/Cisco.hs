@@ -151,7 +151,7 @@ findMacPort mac = do
   ps <- notTrunks
         <$> sendAndParse pResPortInfoL
             macTableP
-            (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+            (cmd $ "show mac address-table address " <> showMacAddr mac)
   case ps of
     []    -> return mempty
     (_:_) ->
