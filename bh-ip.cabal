@@ -31,7 +31,6 @@ library
       BH.IP.Arp
       BH.Switch
       BH.Telnet
-      BH.Telnet2
       BH.Switch.Cisco
       BH.Main
       BH.Main.Types

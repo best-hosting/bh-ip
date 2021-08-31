@@ -19,29 +19,20 @@ module BH.Switch.Cisco (
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Except
 import Control.Monad.Reader
 import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
-import Data.Either.Combinators
 import Data.Functor
-import Data.List
 import qualified Data.Map as M
-import qualified Data.Map.Merge.Strict as M
-import Data.Maybe
-import qualified Data.Set as S
 import qualified Data.Text as T
-import System.Directory
 import Data.Char
 import Control.Applicative.Combinators
-import Data.Maybe
 
 import BH.Common
 import BH.IP
-import BH.IP.Arp
 import BH.Switch
 
-import qualified BH.Telnet2 as T2
+import BH.Telnet
 
 -- TODO: Use HsYAML instead of yaml.
 -- And, probably, yaml-combinators for parsing?
@@ -136,27 +127,27 @@ parsePortState PortNum{..} = do
     | otherwise = fail $ "Unrecognized port state: '" <> show t <> "'"
 
 -- | Find all mac addresses visible on port.
-findPortMacs :: PortNum -> T2.TelnetRunM TelnetParserResult a b MacInfo
+findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b MacInfo
 findPortMacs p =
   foldMap toMacInfo
-    <$> T2.sendAndParse pResPortInfoL
+    <$> sendAndParse pResPortInfoL
           parseMacAddrTable
-          (T2.cmd $ "show mac address-table interface " <> showCiscoPortShort p)
+          (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
 
-findPortState :: PortNum -> T2.TelnetRunM TelnetParserResult a b PortState
+findPortState :: PortNum -> TelnetRunM TelnetParserResult a b PortState
 findPortState p =
-  T2.sendAndParse pResPortStateL
+  sendAndParse pResPortStateL
           (parsePortState p)
-          (T2.cmd $ "show interfaces " <> showCiscoPort p)
+          (cmd $ "show interfaces " <> showCiscoPort p)
 
 -- | Find all mac addresses visible on port and return 'PortData'.
-findPortData :: PortNum -> T2.TelnetRunM TelnetParserResult a b PortData
+findPortData :: PortNum -> TelnetRunM TelnetParserResult a b PortData
 findPortData p = do
   portAddrs <- findPortMacs p
   portState <- findPortState p
   return PortData{..}
 
-findPortInfo :: [PortNum] -> T2.TelnetRunM TelnetParserResult a b PortInfo
+findPortInfo :: [PortNum] -> TelnetRunM TelnetParserResult a b PortInfo
 findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempty)
 
 -- FIXME: The same mac may be used in different vlans. Should i handle this
@@ -164,14 +155,14 @@ findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempt
 -- tuple. [network]
 -- FIXME: The same mac may be seen on different ports. Should i handle thie
 -- too? [network]
-findMacPort :: MacAddr -> T2.TelnetRunM TelnetParserResult a b PortInfo
+findMacPort :: MacAddr -> TelnetRunM TelnetParserResult a b PortInfo
 findMacPort mac = do
-  SwData{..} <- asks T2.switchData
+  SwData{..} <- asks switchData
   let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
   ps <- notTrunks
-        <$> T2.sendAndParse pResPortInfoL
+        <$> sendAndParse pResPortInfoL
             parseMacAddrTable
-            (T2.cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
+            (cmd $ "show mac address-table address " <> T.pack (showMacAddr mac))
   case ps of
     []    -> return mempty
     (_:_) ->
@@ -181,6 +172,6 @@ findMacPort mac = do
             (pure mempty)
             (map elPort ps)
 
-findMacsPort :: [MacAddr] -> T2.TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
+findMacsPort :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
 findMacsPort = foldr (\p mz -> M.insert p <$> findMacPort p <*> mz) (pure mempty)
 
