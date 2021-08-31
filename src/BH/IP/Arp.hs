@@ -30,9 +30,9 @@ import qualified Shelly as Sh
 import System.Directory
 import Text.XML.Light
 
+import BH.Main.Types
 import BH.Common
 import BH.IP
-import BH.Main
 
 -- TODO: Implement cache update strategy, where new entries are merged with
 -- old cache. Note, though, that in this case i'd better build 'IpMacMap'
