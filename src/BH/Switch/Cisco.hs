@@ -6,7 +6,6 @@
 
 module BH.Switch.Cisco (
   module BH.Switch,
-  readSwInfo,
   parseMacAddrTable,
   parseCiscoConfig,
   parsePortState,
@@ -32,7 +31,6 @@ import qualified Data.Map.Merge.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 import qualified Data.Text as T
-import qualified Data.Yaml as Y
 import System.Directory
 import Data.Char
 import Control.Applicative.Combinators
@@ -64,17 +62,6 @@ import qualified BH.Telnet2 as T2
 -- - "virtual" - mac address of virtual machine. It may migrate from server
 -- (switch port) to server, though physical server connection does not change.
 -- - "unknown" - mac address is not assigned to any server.
-
--- FIXME: Use generic yaml reading func.
-readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfoMap
-readSwInfo file = do
-  b <- liftIO (doesFileExist file)
-  if b
-    then (liftIO (Y.decodeFileEither file) >>= liftEither . mapLeft show) <&> toSwInfoMap
-    else throwError ("File with switch info not found " <> file)
- where
-  toSwInfoMap :: [SwInfo] -> SwInfoMap
-  toSwInfoMap = M.fromList . map (\x -> (swName x, x))
 
 -- | Dashes underlining header of _one_ column. Trailing spaces are consumed,
 -- but newline does _not_ .
@@ -179,7 +166,7 @@ findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempt
 -- too? [network]
 findMacPort :: MacAddr -> T2.TelnetRunM TelnetParserResult a b PortInfo
 findMacPort mac = do
-  SwInfo{..} <- asks T2.switchInfo
+  SwData{..} <- asks T2.switchData
   let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
   ps <- notTrunks
         <$> T2.sendAndParse pResPortInfoL

@@ -91,7 +91,7 @@ telnetStateRef :: (Monoid p, Monoid b) => IORef (TelnetState p a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
-data TelnetInfo p a b = TelnetInfo { switchInfo   :: SwInfo
+data TelnetInfo p a b = TelnetInfo { switchData   :: SwData
                                  , telnetConn   :: TL.TelnetPtr
                                  , telnetIn     :: a
                                  , telnetRef    :: IORef (TelnetState p a b)
@@ -305,7 +305,7 @@ setPrompt promptP = do
 
 loginCmd :: TelnetRunM p a b ()
 loginCmd = shiftT $ \k -> do
-    SwInfo {..} <- asks switchInfo
+    SwData {..} <- asks switchData
     -- shiftT stops execution, if supplied continuation is _not_ called. I
     -- don't need any other "suspend mechanisms" apart from plain 'return'!
     sendParseWithPrompt userNamePromptP nothingL (pure ()) (cmd swUser)
@@ -343,15 +343,15 @@ telnetH _ _ _ _ _ = pure ()
 -- I need to pass default state as argument here to bind type variable 'b'
 -- used in default state to resulting 'b'. Otherwise, default state used in
 -- 'atomicWriteIORef' call won't typecheck.
-run' :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
+run' :: (MonadReader SwInfo m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => IORef (TelnetState p a b) -> a -> TelnetRunM p a b () -> SwName -> m b
 run' tRef input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
-      Just swInfo@SwInfo{swHost = h} -> liftIO $ do
+      Just swData@SwData{swHost = h} -> liftIO $ do
         print $ "Connect to " ++ show h
         let ti con = TelnetInfo
-                        { switchInfo = swInfo
+                        { switchData = swData
                         , telnetRef = tRef
                         , telnetIn = input
                         , telnetConn = con
@@ -377,18 +377,18 @@ run' tRef input telnetCmd sn = do
                   ]
 
 -- | Run on one switch.
-run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
+run :: (MonadReader SwInfo m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => a -> TelnetRunM p a b () -> SwName -> m b
 run = run' telnetStateRef
 
 -- | Run till predicate returns 'Just' with some input.
 runTill ::
-  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
+  (MonadReader SwInfo m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => (b -> Maybe a) -> TelnetRunM p a b () -> m b
 runTill p telnetCmd = asks M.keys >>= foldM go mempty
   where
     --go ::
-    --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b) =>
+    --  (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b) =>
     --  b -> SwName -> m b
     go z sn =
       case p z of
@@ -400,12 +400,12 @@ runTill p telnetCmd = asks M.keys >>= foldM go mempty
 
 -- | Run on specified switches with input depending on switch.
 runOn ::
-  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
+  (MonadReader SwInfo m, MonadError String m, MonadIO m, Monoid p, Monoid b, Show b)
   => (SwName -> a) -> [SwName] -> TelnetRunM p a b () -> m b
 runOn getInput switches telnetCmd = foldM go mempty switches
  where
   --go ::
-  --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b) =>
+  --  (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b) =>
   --  b -> SwName -> m b
   go z sn = (<> z) <$> run (getInput sn) telnetCmd sn
 

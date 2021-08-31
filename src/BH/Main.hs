@@ -35,7 +35,7 @@ queryPorts ::
   m SwPortInfo
 queryPorts switches = do
   Config{..} <- ask
-  portMacs <- flip runReaderT swInfoMap
+  portMacs <- flip runReaderT swInfo
     $ T2.runOn getPorts (map portSw switches) queryPorts'
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
@@ -46,7 +46,7 @@ queryPorts switches = do
   getPorts sn = map portSpec . filter ((== sn) . portSw) $ switches
   queryPorts' :: T2.TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
   queryPorts' = do
-    portSw <- asks (swName . T2.switchInfo)
+    portSw <- asks (swName . T2.switchData)
     ports  <- asks T2.telnetIn
     T2.sendCmd (T2.cmd "terminal length 0")
     res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ports
@@ -75,7 +75,7 @@ queryMacs ::
   m (M.Map MacAddr SwPortInfo)
 queryMacs macs = do
   Config{..} <- ask
-  macPorts <- flip runReaderT swInfoMap $ T2.runTill getMacs queryMacs'
+  macPorts <- flip runReaderT swInfo $ T2.runTill getMacs queryMacs'
   return (M.map (resolveIPs2 macIpMap) macPorts)
  where
   getMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
@@ -86,7 +86,7 @@ queryMacs macs = do
                     xs -> Just xs
   queryMacs' :: T2.TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr SwPortInfo) ()
   queryMacs' = do
-    portSw <- asks (swName . T2.switchInfo)
+    portSw <- asks (swName . T2.switchData)
     macs  <- asks T2.telnetIn
     res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort macs
     T2.putResult res

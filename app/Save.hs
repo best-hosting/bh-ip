@@ -20,7 +20,7 @@ import qualified BH.Telnet2 as T2
 
 saveSwitch2 :: T2.TelnetRunM TelnetParserResult () (M.Map SwName T.Text) ()
 saveSwitch2 = do
-    curSn <- asks (swName . T2.switchInfo)
+    curSn <- asks (swName . T2.switchData)
     T2.sendCmd (T2.cmd "write")
     T2.sendCmd (T2.cmd "terminal length 0")
     cf <- T2.sendAndParse pResTextL parseCiscoConfig (T2.cmd "show running")

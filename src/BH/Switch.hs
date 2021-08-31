@@ -4,8 +4,9 @@
 
 module BH.Switch (
   SwName (..),
-  SwInfo (..),
-  SwInfoMap,
+  SwData (..),
+  SwInfo,
+  readSwInfo,
   SwPort (..),
   swPortP,
   swPortP',
@@ -44,6 +45,11 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Network.Simple.TCP
 import Data.Monoid
+import qualified Data.Yaml as Y
+import Control.Monad.Except
+import Data.Functor
+import Data.Either.Combinators
+import System.Directory
 
 import BH.Common
 import BH.IP
@@ -59,13 +65,12 @@ instance FromJSON SwName where
   parseJSON = withText "SwName" (\t -> pure (SwName t))
 
 -- FIXME: 'swHost' should be 'Either HostName IP'.
--- FIXME: Rename 'SwInfo' to 'SwData' and remove 'swName' field. And create
--- 'SwInfo :: M.Map SwName SwData' (i.e. 'SwInfoMap' now). But.. i use this
--- data as "single element" in 'TelnetInfo' and query 'swName' quite often.
--- That means, even if i rename it to 'SwData', i need 'swName' field here.
--- Moreover, if i add 'macAddr' back into 'MacData' this will greatly simplify
--- 'resolveIPs', because i no longer need 'foldrWithKey'..
-data SwInfo = SwInfo
+-- FIXME: Should i have map key in map value? E.g. 'swName' field in 'SwData',
+-- 'macAddr' field in 'MacData', etc. I use 'SwData' as "single element" in
+-- 'TelnetInfo' and query 'swName' quite often. Thus, i'm quite sure, that i
+-- need 'swName'. Adding 'macAddr' into 'MacData' may simplify 'resolveIPs',
+-- but does this really matter? [types]
+data SwData = SwData
   { swName :: SwName
   , swHost :: HostName
   , swUser :: T.Text
@@ -77,8 +82,8 @@ data SwInfo = SwInfo
   }
   deriving (Show)
 
-instance ToJSON SwInfo where
-  toJSON SwInfo{..} =
+instance ToJSON SwData where
+  toJSON SwData{..} =
     object $
       [ "name" .= swName
       , "host" .= swHost
@@ -90,9 +95,9 @@ instance ToJSON SwInfo where
       , "trunkPorts" .= swTrunkPorts
       ]
 
-instance FromJSON SwInfo where
-  parseJSON = withObject "SwInfo" $ \v ->
-    SwInfo
+instance FromJSON SwData where
+  parseJSON = withObject "SwData" $ \v ->
+    SwData
       <$> v .: "name"
       <*> v .: "host"
       <*> v .: "user"
@@ -102,7 +107,18 @@ instance FromJSON SwInfo where
       <*> v .: "defaultPortSlot"
       <*> v .:? "trunkPorts" .!= []
 
-type SwInfoMap = M.Map SwName SwInfo
+type SwInfo = M.Map SwName SwData
+
+-- FIXME: Use generic yaml reading func.
+readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfo
+readSwInfo file = do
+  b <- liftIO (doesFileExist file)
+  if b
+    then (liftIO (Y.decodeFileEither file) >>= liftEither . mapLeft show) <&> toSwInfo
+    else throwError ("File with switch info not found " <> file)
+ where
+  toSwInfo :: [SwData] -> SwInfo
+  toSwInfo = M.fromList . map (\x -> (swName x, x))
 
 -- TODO: Add and check for 'disabled' port state.
 data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}

@@ -83,7 +83,7 @@ telnetStateRef :: (Show b, Monoid b) => IORef (TelnetState a b)
 {-# NOINLINE telnetStateRef #-}
 telnetStateRef  = unsafePerformIO (newIORef defTelnetState)
 
-data TelnetInfo a b = TelnetInfo { switchInfo   :: SwInfo
+data TelnetInfo a b = TelnetInfo { switchInfo   :: SwData
                                  , telnetConn   :: TL.TelnetPtr
                                  , telnetIn     :: a
                                  , telnetRef    :: IORef (TelnetState a b)
@@ -253,7 +253,7 @@ checkRootP = A.lookAhead (A.takeTill (== '#') *> A.string "#" $> mempty) <|> fai
 
 loginCmd :: (Show b, Monoid b) => TelnetCmd a b T.Text
 loginCmd ts0 = shiftT $ \finish -> do
-    SwInfo  { swUser = user
+    SwData  { swUser = user
             , swPassword = pw
             , swRootPassword = enPw
             } <- asks switchInfo
@@ -308,12 +308,12 @@ setPrompt promptP ts = do
 
 -- | Run till predicate returns 'Just' with some input.
 runTill ::
-  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b, Monoid b) =>
   (b -> Maybe a) -> TelnetCmd a b () -> m b
 runTill p telnetCmd = asks M.keys >>= foldM go mempty
   where
     --go ::
-    --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+    --  (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b, Monoid b) =>
     --  b -> SwName -> m b
     go z sn =
       case p z of
@@ -325,27 +325,27 @@ runTill p telnetCmd = asks M.keys >>= foldM go mempty
 
 -- | Run on specified switches with input depending on switch.
 runOn ::
-  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b, Monoid b) =>
   (SwName -> a) -> TelnetCmd a b () -> [SwName] -> m b
 runOn getInput telnetCmd = foldM go mempty
  where
   --go ::
-  --  (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) =>
+  --  (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b, Monoid b) =>
   --  b -> SwName -> m b
   go z sn = (<> z) <$> run (getInput sn) telnetCmd sn
 
 -- | Run on one switch.
-run :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> m b
+run :: (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b, Monoid b) => a -> TelnetCmd a b () -> SwName -> m b
 run = run' telnetStateRef
 
 -- I need to pass default state as argument here to bind type variable 'b'
 -- used in default state to resulting 'b'. Otherwise, default state used in
 -- 'atomicWriteIORef' call won't typecheck.
-run' :: (MonadReader SwInfoMap m, MonadError String m, MonadIO m, Show b, Monoid b) => IORef (TelnetState a b) -> a -> TelnetCmd a b () -> SwName -> m b
+run' :: (MonadReader SwInfo m, MonadError String m, MonadIO m, Show b, Monoid b) => IORef (TelnetState a b) -> a -> TelnetCmd a b () -> SwName -> m b
 run' tRef input telnetCmd sn = do
     mSwInfo <- asks (M.lookup sn)
     case mSwInfo of
-      Just swInfo@SwInfo{swHost = h} -> liftIO $ do
+      Just swInfo@SwData{swHost = h} -> liftIO $ do
         print $ "Connect to " ++ show h
         let ti con = TelnetInfo
                         { switchInfo = swInfo

@@ -100,8 +100,8 @@ initConfig ::
   ReaderT Config m () ->
   m ()
 initConfig Options{..} action = do
-  swInfoMap <- readSwInfo authFile
-  liftIO $ print swInfoMap
+  swInfo <- readSwInfo authFile
+  liftIO $ print swInfo
   (macIpMap, ipMacMap) <- queryLinuxArp macIpFile queryHost
   runReaderT action Config{..}
 
@@ -113,7 +113,7 @@ workQueryPorts ts = do
   Config{..} <- ask
   let getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
       getSwDefaults sn =
-        let m = M.lookup sn swInfoMap
+        let m = M.lookup sn swInfo
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
   queryPorts swports >>= liftIO . B.putStr . Y.encode

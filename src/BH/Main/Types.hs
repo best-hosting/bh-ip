@@ -19,6 +19,6 @@ type IpMacMap = M.Map IP MacAddr
 data Config = Config
                 { macIpMap :: MacIpMap
                 , ipMacMap :: IpMacMap
-                , swInfoMap :: SwInfoMap
+                , swInfo :: SwInfo
                 }
   deriving (Show)
