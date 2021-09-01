@@ -14,7 +14,6 @@ module BH.Main (
 where
 
 import qualified Data.Map as M
-import qualified Data.Set as S
 import Control.Monad.Reader
 import Control.Monad.Except
 import Data.Maybe
@@ -36,20 +35,20 @@ queryPorts ::
 queryPorts switches = do
   Config{..} <- ask
   portMacs <- flip runReaderT swInfo
-    $ runOn getPorts (map portSw switches) queryPorts'
+    $ runOn ports (map portSw switches) queryPorts'
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
   return (resolveIPs2 macIpMap portMacs)
  where
-  getPorts :: SwName -> [PortNum]
-  getPorts sn = map portSpec . filter ((== sn) . portSw) $ switches
+  ports :: SwName -> [PortNum]
+  ports sn = map portSpec . filter ((== sn) . portSw) $ switches
   queryPorts' :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
   queryPorts' = do
     portSw <- asks (swName . switchData)
-    ports  <- asks telnetIn
+    ps  <- asks telnetIn
     sendCmd (cmd "terminal length 0")
-    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ports
+    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ps
     putResult res
     sendExit
 
@@ -75,20 +74,19 @@ queryMacs ::
   m (M.Map MacAddr SwPortInfo)
 queryMacs macs = do
   Config{..} <- ask
-  macPorts <- flip runReaderT swInfo $ runTill getMacs queryMacs'
+  macPorts <- flip runReaderT swInfo $ runTill maybeMacs queryMacs'
   return (M.map (resolveIPs2 macIpMap) macPorts)
  where
-  getMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
-  getMacs res
-    | res == M.empty = Just macs
-    | otherwise = case M.keys . M.filter (== M.empty) $ res of
-                    [] -> Nothing
-                    xs -> Just xs
+  maybeMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
+  maybeMacs res = let found = M.keys . M.filter (/= M.empty) $ res
+                in  case filter (`notElem` found) macs of
+                      [] -> Nothing
+                      xs -> Just xs
   queryMacs' :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr SwPortInfo) ()
   queryMacs' = do
     portSw <- asks (swName . switchData)
-    macs  <- asks telnetIn
-    res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort macs
+    ms  <- asks telnetIn
+    res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort ms
     putResult res
     sendExit
 
