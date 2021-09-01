@@ -124,14 +124,15 @@ workQueryMacs ::
   m ()
 workQueryMacs macs0 = do
   swpInfo0 <- readYaml "switches.yaml"
-  let foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swpInfo0)) mempty macs0
+  let foundMacPorts :: M.Map MacAddr SwPortInfo
+      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swpInfo0)) mempty macs0
       foundMacs = M.keys . M.filter (/= M.empty) $ foundMacPorts
       macs1 = filter (`notElem` foundMacs) macs0
   liftIO $ print "Found in cache: "
   liftIO $ print foundMacPorts
   liftIO $ print $ "Yet to query: " ++ show macs1
   queriedMacPorts <- queryMacs macs1
-  let allMacPorts = foundMacPorts <> queriedMacPorts
+  let allMacPorts = M.unionWith (<>) foundMacPorts queriedMacPorts
       swpInfo1 = foldr (<>) swpInfo0 (M.elems queriedMacPorts)
   liftIO $ do
     B.putStr . Y.encode $ allMacPorts
