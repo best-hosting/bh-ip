@@ -35,6 +35,7 @@ library
       BH.Main
       BH.Main.Types
       BH.Common
+      BH.Cache
   other-modules:
       BH.SwitchMega
       Paths_bh_ip

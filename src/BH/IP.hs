@@ -99,7 +99,7 @@ instance ToJSONKey MacAddr where
     toJSONKey = ToJSONKeyText (showMacAddr) (JE.text . showMacAddr)
 
 instance FromJSON MacAddr where
-    parseJSON (Data.Aeson.String t) = either fail return (A.parseOnly macP t)
+    parseJSON = withText "MacAddr" (either fail return . A.parseOnly macP)
 instance FromJSONKey MacAddr where
     fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly macP)
 
@@ -166,6 +166,12 @@ instance ToJSON MacData where
       , "ips"  .= macIPs
       ]
 
+instance FromJSON MacData where
+  parseJSON = withObject "MacData" $ \v ->
+    MacData
+      <$> v .: "vlan"
+      <*> v .: "ips"
+
 -- | Old text-based mac address implementation.
 newtype MacAddr2     = MacAddr2 T.Text
   deriving (Eq, Ord)
@@ -185,14 +191,14 @@ parseMacAddr2 t = MacAddr2 <$> T.foldr go end t 1
       | otherwise           = Right T.empty
 
 instance Show MacAddr2 where
-    showsPrec d (MacAddr2 t) = showMac (T.unpack t)
+    showsPrec _ (MacAddr2 t) = showMac (T.unpack t)
       where
         showMac :: String -> ShowS
-        showMac t r = foldr (\(n, x) zs ->
+        showMac ts r = foldr (\(n, x) zs ->
                                 if n > 1 && n `mod` 2 == 1 then ':' : x : zs else x : zs)
                             r
-                        . zip [1..12]
-                        $ t
+                        . zip [(1 :: Int)..12]
+                        $ ts
 
 instance ToJSON MacAddr2 where
     toJSON mac = toJSON (show mac)
@@ -200,7 +206,8 @@ instance ToJSONKey MacAddr2 where
     toJSONKey = ToJSONKeyText (T.pack . show) (JE.string . show)
 
 instance FromJSON MacAddr2 where
-    parseJSON (Data.Aeson.String t) = either fail return (parseMacAddr2 t)
+    parseJSON = withText "MacAddr2" (either fail return . parseMacAddr2)
+
 instance FromJSONKey MacAddr2 where
     fromJSONKey = FromJSONKeyTextParser (either fail return . parseMacAddr2)
 
@@ -249,7 +256,7 @@ instance ToJSONKey IP where
   toJSONKey = ToJSONKeyText (T.pack . showIP) (JE.string . showIP)
 
 instance FromJSON IP where
-    parseJSON (Data.Aeson.String t) = either fail return (A.parseOnly ipP t)
+    parseJSON = withText "IP" (either fail return . A.parseOnly ipP)
 instance FromJSONKey IP where
   fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly ipP)
 
@@ -283,6 +290,7 @@ parseIP t = do
           | 0 <= d && d <= 255  -> Right d
           | otherwise           -> Left $ "Incorrect IP2 octet '" ++ show d ++ "'"
         []                      -> Left "Can't read IP2 octet."
+        _                       -> Left "Huita kakaya-to"
 
 -- TODO: Subnets and vlans for IPs.
 type IPInfo = M.Map IP IPData
@@ -299,6 +307,9 @@ newtype Vlan = Vlan Int
 
 instance ToJSON Vlan where
   toJSON (Vlan x) = toJSON x
+
+instance FromJSON Vlan where
+  parseJSON = fmap Vlan . parseJSON
 
 -- | Parser for vlan number.
 vlanP :: A.Parser Vlan

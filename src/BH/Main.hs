@@ -4,6 +4,7 @@
 
 module BH.Main (
   module BH.Main.Types,
+  readSwInfo,
   queryPort,
   queryPorts,
   queryMac,
@@ -25,7 +26,15 @@ import BH.IP.Arp
 import BH.Switch
 import BH.Switch.Cisco
 
+import BH.Cache
 import BH.Telnet
+
+-- FIXME: Use generic yaml reading func.
+readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfo
+readSwInfo file = toSwInfo <$> readYaml file
+ where
+  toSwInfo :: [SwData] -> SwInfo
+  toSwInfo = M.fromList . map (\x -> (swName x, x))
 
 -- | Query several ports.
 queryPorts ::

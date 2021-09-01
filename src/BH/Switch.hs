@@ -6,7 +6,6 @@ module BH.Switch (
   SwName (..),
   SwData (..),
   SwInfo,
-  readSwInfo,
   SwPort (..),
   swPortP,
   swPortP',
@@ -34,21 +33,15 @@ module BH.Switch (
 ) where
 
 import Control.Applicative
-import Control.Applicative.Combinators
 import Data.Aeson
 import qualified Data.Aeson.Encoding as J
 import qualified Data.Attoparsec.Combinator as A
 import qualified Data.Attoparsec.Text as A
-import Data.Char
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Network.Simple.TCP
 import Data.Monoid
-import qualified Data.Yaml as Y
-import Control.Monad.Except
-import Data.Functor
-import Data.Either.Combinators
-import System.Directory
+import Text.Read
 
 import BH.Common
 import BH.IP
@@ -108,17 +101,6 @@ instance FromJSON SwData where
 
 type SwInfo = M.Map SwName SwData
 
--- FIXME: Use generic yaml reading func.
-readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfo
-readSwInfo file = do
-  b <- liftIO (doesFileExist file)
-  if b
-    then (liftIO (Y.decodeFileEither file) >>= liftEither . mapLeft show) <&> toSwInfo
-    else throwError ("File with switch info not found " <> file)
- where
-  toSwInfo :: [SwData] -> SwInfo
-  toSwInfo = M.fromList . map (\x -> (swName x, x))
-
 data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
@@ -143,10 +125,13 @@ data PortMode
 
 -- FIXME: "show interfaces configuration gi3" for sw0.
 data PortState = Up | NotConnect | Disabled
-  deriving (Eq, Show)
+  deriving (Eq, Show, Read)
 
 instance ToJSON PortState where
   toJSON = toJSON . show
+
+instance FromJSON PortState where
+  parseJSON = withText "PortState" (either fail return . readEither . T.unpack)
 
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
@@ -168,6 +153,12 @@ instance ToJSON PortData where
       [ "state" .= portState
       , "addrs" .= portAddrs
       ]
+
+instance FromJSON PortData where
+  parseJSON = withObject "PortData" $ \v ->
+    PortData
+      <$> v .: "state"
+      <*> v .: "addrs"
 
 instance Semigroup PortData where
     x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}

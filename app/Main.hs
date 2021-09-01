@@ -19,6 +19,7 @@ import qualified Data.ByteString as B
 import BH.IP
 import BH.IP.Arp
 import BH.Main
+import BH.Cache
 import BH.Switch.Cisco
 
 -- TODO: Work on sw-0.
@@ -121,7 +122,29 @@ workQueryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m ()
-workQueryMacs macs = queryMacs macs >>= liftIO . B.putStr . Y.encode
+workQueryMacs macs0 = do
+  swpInfo0 <- readYaml "switches.yaml"
+  let foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swpInfo0)) mempty macs0
+      foundMacs = M.keys . M.filter (/= M.empty) $ foundMacPorts
+      macs1 = filter (`notElem` foundMacs) macs0
+  liftIO $ print "Found in cache: "
+  liftIO $ print foundMacPorts
+  liftIO $ print $ "Yet to query: " ++ show macs1
+  queriedMacPorts <- queryMacs macs1
+  let allMacPorts = foundMacPorts <> queriedMacPorts
+      swpInfo1 = foldr (<>) swpInfo0 (M.elems queriedMacPorts)
+  liftIO $ do
+    B.putStr . Y.encode $ allMacPorts
+    Y.encodeFile "switches1.yaml" swpInfo1
+
+
+lookupMacPort :: MacAddr -> SwPortInfo -> SwPortInfo
+lookupMacPort mac = M.foldrWithKey go mempty
+ where
+  go :: SwPort -> PortData -> SwPortInfo -> SwPortInfo
+  go swp pd@PortData{..} z
+    | M.member mac portAddrs = M.insert swp pd z
+    | otherwise = z
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>

@@ -10,6 +10,7 @@ import System.Environment
 import Control.Monad.Reader
 import Control.Monad.Trans.Except
 
+import BH.Main
 import BH.Switch.Cisco
 import BH.Telnet
 
