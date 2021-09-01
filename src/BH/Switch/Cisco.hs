@@ -162,5 +162,5 @@ findMacPort mac = do
             (map elPort ps)
 
 findMacsPort :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-findMacsPort = foldr (\p mz -> M.insert p <$> findMacPort p <*> mz) (pure mempty)
+findMacsPort = foldr (\m mz -> M.insert p <$> findMacPort m <*> mz) (pure mempty)
 
