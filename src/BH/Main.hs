@@ -37,6 +37,8 @@ readSwInfo file = toSwInfo <$> readYaml file
   toSwInfo :: [SwData] -> SwInfo
   toSwInfo = M.fromList . map (\x -> (swName x, x))
 
+-- FIXME: In fact, in all queryX functions i need unique items. May be change
+-- type to 'S.Set' to force uniqueness?
 -- | Query several ports.
 queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
@@ -52,7 +54,7 @@ queryPorts switches = do
   return (resolveIPs2 macIpMap portMacs)
  where
   ports :: SwName -> [PortNum]
-  ports sn = map portSpec . filter ((== sn) . portSw) $ switches
+  ports sn = nub . map portSpec . filter ((== sn) . portSw) $ switches
   queryPorts' :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
   queryPorts' = do
     portSw <- asks (swName . switchData)
