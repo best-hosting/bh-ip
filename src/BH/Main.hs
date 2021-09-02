@@ -18,6 +18,7 @@ import qualified Data.Map as M
 import Control.Monad.Reader
 import Control.Monad.Except
 import Data.Maybe
+import Data.List
 
 import BH.Main.Types
 import BH.Common
@@ -44,7 +45,7 @@ queryPorts ::
 queryPorts switches = do
   Config{..} <- ask
   portMacs <- flip runReaderT swInfo
-    $ runOn ports (map portSw switches) queryPorts'
+    $ runOn ports (nub . map portSw $ switches) queryPorts'
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."

@@ -15,6 +15,9 @@ import qualified Data.Text as T
 import qualified Options.Applicative as O
 import qualified Data.Yaml as Y
 import qualified Data.ByteString as B
+import System.IO.Temp
+import System.IO
+import System.Directory
 
 import BH.IP
 import BH.IP.Arp
@@ -124,8 +127,18 @@ workQueryMacs ::
   m ()
 workQueryMacs macs0 = do
   swpInfo0 <- readYaml "switches.yaml"
+{-  let foundMacPorts :: M.Map MacAddr SwPortInfo
+      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swpInfo0)) mempty macs0-}
+  swp1 <- f' macs0 swpInfo0
+  liftIO $ print "Found in cache: "
+  liftIO $ B.putStr . Y.encode $ swp1
+{-  foundMacPorts' <-
+    foldr (\x mz -> M.insert x <$> lookupVerifyMacPort x swpInfo0 <*> mz)
+      (return mempty)
+      macs0-}
   let foundMacPorts :: M.Map MacAddr SwPortInfo
-      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swpInfo0)) mempty macs0
+      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swp1)) mempty macs0
+      swp2 = swp1 <> swpInfo0
       foundMacs = M.keys . M.filter (/= M.empty) $ foundMacPorts
       macs1 = filter (`notElem` foundMacs) macs0
   liftIO $ print "Found in cache: "
@@ -133,11 +146,20 @@ workQueryMacs macs0 = do
   liftIO $ print $ "Yet to query: " ++ show macs1
   queriedMacPorts <- queryMacs macs1
   let allMacPorts = M.unionWith (<>) foundMacPorts queriedMacPorts
-      swpInfo1 = foldr (<>) swpInfo0 (M.elems queriedMacPorts)
+      swp3 = foldr (\x z -> x <> z) swp2 (M.elems queriedMacPorts)
   liftIO $ do
     B.putStr . Y.encode $ allMacPorts
-    Y.encodeFile "switches1.yaml" swpInfo1
+    cwd <- getCurrentDirectory
+    (f, _) <- openTempFile cwd "switches.yaml"
+    Y.encodeFile f swp3
+    renameFile f "switches.yaml"
 
+f' ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] -> SwPortInfo -> m SwPortInfo
+f' macs swpInfo = do
+  let swp1 = foldr (\m z -> lookupMacPort m swpInfo <> z) mempty macs
+  queryPorts (M.keys swp1)
 
 lookupMacPort :: MacAddr -> SwPortInfo -> SwPortInfo
 lookupMacPort mac = M.foldrWithKey go mempty
@@ -146,6 +168,17 @@ lookupMacPort mac = M.foldrWithKey go mempty
   go swp pd@PortData{..} z
     | M.member mac portAddrs = M.insert swp pd z
     | otherwise = z
+
+{-verifyMacPort ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  MacAddr -> SwPortInfo -> m SwPortInfo
+verifyMacPort mac swpInfo =
+  queryPorts (M.keys swpInfo) >>= return . lookupMacPort mac-}
+
+lookupVerifyMacPort ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  MacAddr -> SwPortInfo -> m SwPortInfo
+lookupVerifyMacPort mac = queryPorts . M.keys . lookupMacPort mac
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
