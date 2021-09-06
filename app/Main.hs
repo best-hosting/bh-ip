@@ -123,47 +123,6 @@ workQueryPorts ts = do
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
   queryPorts swports >>= liftIO . B.putStr . Y.encode
 
-workQueryMacs ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] ->
-  m ()
-workQueryMacs macs0 = do
-  runWQM' macs0
-{-  swpInfo0 <- readYaml "switches.yaml"
-{-  let foundMacPorts :: M.Map MacAddr SwPortInfo
-      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swpInfo0)) mempty macs0-}
-  swp1 <- f' macs0 swpInfo0
-  liftIO $ print "Found in cache: "
-  liftIO $ B.putStr . Y.encode $ swp1
-{-  foundMacPorts' <-
-    foldr (\x mz -> M.insert x <$> lookupVerifyMacPort x swpInfo0 <*> mz)
-      (return mempty)
-      macs0-}
-  let foundMacPorts :: M.Map MacAddr SwPortInfo
-      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m swp1)) mempty macs0
-      swp2 = swp1 <> swpInfo0
-      foundMacs = M.keys . M.filter (/= M.empty) $ foundMacPorts
-      macs1 = filter (`notElem` foundMacs) macs0
-  liftIO $ print "Found in cache: "
-  liftIO $ print foundMacPorts
-  liftIO $ print $ "Yet to query: " ++ show macs1
-  queriedMacPorts <- queryMacs macs1
-  let allMacPorts = M.unionWith (<>) foundMacPorts queriedMacPorts
-      swp3 = foldr (\x z -> x <> z) swp2 (M.elems queriedMacPorts)
-  liftIO $ do
-    B.putStr . Y.encode $ allMacPorts
-    cwd <- getCurrentDirectory
-    (f, _) <- openTempFile cwd "switches.yaml"
-    Y.encodeFile f swp3
-    renameFile f "switches.yaml"-}
-
-f' ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] -> SwPortInfo -> m SwPortInfo
-f' macs swpInfo = do
-  let swp1 = foldr (\m z -> lookupMacPort m swpInfo <> z) mempty macs
-  queryPorts (M.keys swp1)
-
 -- | Lookup single mac port in a cache.
 lookupMacPort :: MacAddr -> SwPortInfo -> SwPortInfo
 lookupMacPort mac = M.filter (\PortData{..} -> M.member mac portAddrs)
@@ -199,11 +158,11 @@ workQueryMacs' macs0 = do
   modify (\s -> foldr (<>) s (M.elems queriedMacPorts))
   liftIO $ B.putStr . Y.encode $ allMacPorts
 
-runWQM' ::
-  (MonadReader Config m, MonadError String m, MonadIO m)
-  => [MacAddr]
-  -> m ()
-runWQM' macs = do
+workQueryMacs ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] ->
+  m ()
+workQueryMacs macs = do
   newSwpInfo <- readYaml "switches.yaml" >>= execStateT (workQueryMacs' macs)
   -- TODO: Use 'Config' parameter to store swport db filename.
   liftIO $ do
@@ -211,17 +170,6 @@ runWQM' macs = do
     (f, _) <- openTempFile cwd "switches.yaml"
     Y.encodeFile f newSwpInfo
     renameFile f "switches.yaml"
-
-{-verifyMacPort ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  MacAddr -> SwPortInfo -> m SwPortInfo
-verifyMacPort mac swpInfo =
-  queryPorts (M.keys swpInfo) >>= return . lookupMacPort mac-}
-
-lookupVerifyMacPort ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  MacAddr -> SwPortInfo -> m SwPortInfo
-lookupVerifyMacPort mac = queryPorts . M.keys . lookupMacPort mac
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
