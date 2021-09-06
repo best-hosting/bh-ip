@@ -158,6 +158,7 @@ workQueryMacs' macs0 = do
   modify (\s -> foldr (<>) s (M.elems queriedMacPorts))
   liftIO $ B.putStr . Y.encode $ allMacPorts
 
+-- FIXME: May this be the common part for all query types?
 workQueryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
