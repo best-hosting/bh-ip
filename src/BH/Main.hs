@@ -112,6 +112,8 @@ queryMacs macs = do
     putResult res
     sendExit
 
+-- TODO: I may use hash to determine changed db file. And then treat /that/
+-- file as source and generate others from it.
 queryMacs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
