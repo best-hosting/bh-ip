@@ -9,6 +9,7 @@ module BH.Main (
   queryPorts,
   queryMac,
   queryMacs,
+  queryMacs2,
   queryIP,
   queryIPs,
 )
@@ -19,11 +20,11 @@ import Control.Monad.Reader
 import Control.Monad.Except
 import Data.Maybe
 import Data.List
+import qualified Data.Set as S
 
 import BH.Main.Types
 import BH.Common
 import BH.IP
-import BH.IP.Arp
 import BH.Switch
 import BH.Switch.Cisco
 
@@ -36,6 +37,15 @@ readSwInfo file = toSwInfo <$> readYaml file
  where
   toSwInfo :: [SwData] -> SwInfo
   toSwInfo = M.fromList . map (\x -> (swName x, x))
+
+-- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
+resolveIPs :: MacIpMap -> MacInfo -> MacInfo
+resolveIPs macIpMap = M.foldrWithKey go mempty
+ where
+  go :: MacAddr -> MacData -> MacInfo -> MacInfo
+  go mac y z =
+    let ips = fromMaybe mempty (M.lookup mac macIpMap)
+    in  M.insert mac (setL macIPsL ips y) z
 
 -- FIXME: In fact, in all queryX functions i need unique items. May be change
 -- type to 'S.Set' to force uniqueness?
@@ -100,6 +110,27 @@ queryMacs macs = do
     ms  <- asks telnetIn
     res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort ms
     putResult res
+    sendExit
+
+queryMacs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] ->
+  m MacInfo
+queryMacs2 macs = do
+  Config{..} <- ask
+  macInfo <- flip runReaderT swInfo $ runTill maybeMacs queryMacs'
+  return (M.mapWithKey (\m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}) macInfo)
+ where
+  maybeMacs :: MacInfo -> Maybe [MacAddr]
+  maybeMacs res = let found = M.keys . M.filter (not . S.null . macSwPorts) $ res
+                in  case filter (`notElem` found) macs of
+                      [] -> Nothing
+                      xs -> Just xs
+  queryMacs' :: TelnetRunM TelnetParserResult [MacAddr] MacInfo ()
+  queryMacs' = do
+    portSw <- asks (swName . switchData)
+    ms  <- asks telnetIn
+    findMacInfo ms >>= putResult
     sendExit
 
 queryIP ::

@@ -163,13 +163,14 @@ workQueryMacs ::
   [MacAddr] ->
   m ()
 workQueryMacs macs = do
-  newSwpInfo <- readYaml "switches.yaml" >>= execStateT (workQueryMacs' macs)
+  queryMacs2 macs >>= liftIO . B.putStr . Y.encode
+{-  newSwpInfo <- readYaml "switches.yaml" >>= execStateT (workQueryMacs' macs)
   -- TODO: Use 'Config' parameter to store swport db filename.
   liftIO $ do
     cwd <- getCurrentDirectory
     (f, _) <- openTempFile cwd "switches.yaml"
     Y.encodeFile f newSwpInfo
-    renameFile f "switches.yaml"
+    renameFile f "switches.yaml"-}
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>

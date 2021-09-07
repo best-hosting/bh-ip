@@ -8,15 +8,10 @@ module BH.IP
     , defMacAddr
     , macP
     , showMacAddr
-    , MacInfo
-    , MacData(..)
-    , macIPsL
     , IP (..)
     , defIP
     , showIP
     , ipP
-    , IPInfo
-    , IPData (..)
     , Vlan (..)
     , vlanP
     )
@@ -146,33 +141,6 @@ macP = do
       <- p
     return MacAddr{..}
 
--- TODO: Humans works with IPs, not with mac addresses. So, it's more natural
--- to have IP-mac relation, than mac-[IP] .
-type MacInfo = M.Map MacAddr MacData
-data MacData = MacData
-  { macVlan :: Vlan
-  --, macVendor :: T.Text
-  , macIPs :: S.Set IP
-  --, macSwPort :: SwPort
-  }
-  deriving (Eq, Show)
-
-macIPsL :: LensC MacData (S.Set IP)
-macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
-
-instance ToJSON MacData where
-  toJSON MacData {..} =
-    object $
-      [ "vlan" .= macVlan
-      , "ips"  .= macIPs
-      ]
-
-instance FromJSON MacData where
-  parseJSON = withObject "MacData" $ \v ->
-    MacData
-      <$> v .: "vlan"
-      <*> v .: "ips"
-
 -- | Old text-based mac address implementation.
 newtype MacAddr2     = MacAddr2 T.Text
   deriving (Eq, Ord)
@@ -292,16 +260,6 @@ parseIP t = do
           | otherwise           -> Left $ "Incorrect IP2 octet '" ++ show d ++ "'"
         []                      -> Left "Can't read IP2 octet."
         _                       -> Left "Huita kakaya-to"
-
--- TODO: Subnets and vlans for IPs.
-type IPInfo = M.Map IP IPData
-
-data IPData = IPData
-  { ipMacData :: MacData
-  , ipVlan :: Vlan
-  , ipSubnet :: T.Text
-  }
- deriving (Show)
 
 newtype Vlan = Vlan Int
   deriving (Eq, Show)

@@ -12,12 +12,7 @@ module BH.Switch (
   showSwPort,
   PortState (..),
   PortMode (..),
-  SwPortInfo,
-  PortInfo,
-  PortData (..),
-  portAddrsL,
   MacTableEl (..),
-  toMacInfo,
   PortNum (..),
   portNumP,
   portNumP',
@@ -27,7 +22,7 @@ module BH.Switch (
   portSpeedP,
   showPortSpeedShort,
   TelnetParserResult,
-  pResPortInfoL,
+  pMacTableL,
   pResTextL,
   pResPortStateL,
 ) where
@@ -55,6 +50,8 @@ instance ToJSON SwName where
 
 instance FromJSON SwName where
   parseJSON = withText "SwName" (\t -> pure (SwName t))
+
+type SwInfo = M.Map SwName SwData
 
 -- FIXME: 'swHost' should be 'Either HostName IP'.
 -- FIXME: Should i have map key in map value? E.g. 'swName' field in 'SwData',
@@ -99,8 +96,6 @@ instance FromJSON SwData where
       <*> v .: "defaultPortSlot"
       <*> v .:? "trunkPorts" .!= []
 
-type SwInfo = M.Map SwName SwData
-
 data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
@@ -114,6 +109,21 @@ instance FromJSON SwPort where
   parseJSON = withText "SwPort" (either fail pure . A.parseOnly swPortP)
 instance FromJSONKey SwPort where
   fromJSONKey = FromJSONKeyTextParser (either fail pure . A.parseOnly swPortP)
+
+-- | Parse fully specified switch port.
+swPortP :: A.Parser SwPort
+swPortP = swPortP' (const (Nothing, Nothing))
+
+-- | Parse switch port providing function for determining defaults for port
+-- specification parser.
+swPortP' :: (SwName -> (Maybe PortSpeed, Maybe Int)) -> A.Parser SwPort
+swPortP' getDefs = do
+  pn <- SwName <$> A.takeWhile1 (/= '/') <* A.string "/" A.<?> "switch name"
+  let (defSpeed, defSlot) = getDefs $ pn
+  SwPort pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
+
+showSwPort :: SwPort -> T.Text
+showSwPort SwPort{..} = getSwName portSw <> "/" <> showCiscoPortShort portSpec
 
 -- FIXME: "show interfaces fa0/3 switchport" and there look for
 -- "Administrative Mode" and "Trunking Native Mode VLAN". "show interfaces
@@ -133,60 +143,12 @@ instance ToJSON PortState where
 instance FromJSON PortState where
   parseJSON = withText "PortState" (either fail return . readEither . T.unpack)
 
-type SwPortInfo = M.Map SwPort PortData
-type PortInfo = M.Map PortNum PortData
-
--- TODO: Read port mode (access/trunk) to 'PortData'.
-data PortData = PortData
-  { portState :: PortState
-  , --, portMode :: PortMode
-    portAddrs :: MacInfo
-  }
-  deriving (Eq, Show)
-
-portAddrsL :: LensC PortData MacInfo
-portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
-
-instance ToJSON PortData where
-  toJSON PortData{..} =
-    object $
-      [ "state" .= portState
-      , "addrs" .= portAddrs
-      ]
-
-instance FromJSON PortData where
-  parseJSON = withObject "PortData" $ \v ->
-    PortData
-      <$> v .: "state"
-      <*> v .: "addrs"
-
-instance Semigroup PortData where
-    x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
-
--- | Parse fully specified switch port.
-swPortP :: A.Parser SwPort
-swPortP = swPortP' (const (Nothing, Nothing))
-
--- | Parse switch port providing function for determining defaults for port
--- specification parser.
-swPortP' :: (SwName -> (Maybe PortSpeed, Maybe Int)) -> A.Parser SwPort
-swPortP' getDefs = do
-  pn <- SwName <$> A.takeWhile1 (/= '/') <* A.string "/" A.<?> "switch name"
-  let (defSpeed, defSlot) = getDefs $ pn
-  SwPort pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
-
-showSwPort :: SwPort -> T.Text
-showSwPort SwPort{..} = getSwName portSw <> "/" <> showCiscoPortShort portSpec
-
 data MacTableEl = MacTableEl
   { elVlan :: Vlan
   , elMac :: MacAddr
   , elPort :: PortNum
   }
   deriving (Show)
-
-toMacInfo :: MacTableEl -> MacInfo
-toMacInfo MacTableEl{..} = M.singleton elMac (MacData{macVlan = elVlan, macIPs = mempty})
 
 data PortSpeed = FastEthernet | GigabitEthernet
   deriving (Eq, Ord, Read, Show)
@@ -280,7 +242,7 @@ showCiscoPort PortNum{..} =
   T.pack $ show portSpeed <> show portSlot <> "/" <> show portNumber
 
 data TelnetParserResult = TelnetParserResult
-    { pResPortInfo :: First (A.Result [MacTableEl])
+    { pMacTable :: First (A.Result [MacTableEl])
     , pResText :: First (A.Result T.Text)
     , pResPortState :: First (A.Result PortState)
     }
@@ -288,20 +250,20 @@ data TelnetParserResult = TelnetParserResult
 
 instance Semigroup TelnetParserResult where
   x <> y = TelnetParserResult
-            { pResPortInfo = pResPortInfo x <> pResPortInfo y
+            { pMacTable = pMacTable x <> pMacTable y
             , pResText = pResText x <> pResText y
             , pResPortState = pResPortState x <> pResPortState y
             }
 
 instance Monoid TelnetParserResult where
   mempty = TelnetParserResult
-            { pResPortInfo = mempty
+            { pMacTable = mempty
             , pResText = mempty
             , pResPortState = mempty
             }
 
-pResPortInfoL :: LensC TelnetParserResult (Maybe (A.Result [MacTableEl]))
-pResPortInfoL g z@TelnetParserResult{pResPortInfo = First x} = (\x' -> z{pResPortInfo = First x'}) <$> g x
+pMacTableL :: LensC TelnetParserResult (Maybe (A.Result [MacTableEl]))
+pMacTableL g z@TelnetParserResult{pMacTable = First x} = (\x' -> z{pMacTable = First x'}) <$> g x
 
 pResTextL :: LensC TelnetParserResult (Maybe (A.Result T.Text))
 pResTextL g z@TelnetParserResult{pResText = First x} = (\x' -> z{pResText = First x'}) <$> g x

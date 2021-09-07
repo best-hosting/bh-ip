@@ -3,13 +3,9 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module BH.IP.Arp (
-  MacIpMap,
-  IpMacMap,
   ipNeigh,
   nmapCache,
   queryLinuxArp,
-  resolveIPs,
-  ipToMac,
 ) where
 
 import Control.Concurrent
@@ -227,21 +223,6 @@ queryLinuxArp ::
   m (MacIpMap, IpMacMap)
 queryLinuxArp cacheFile host =
   readCache cacheFile >>= updateArpCache cacheFile host
-
--- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
-resolveIPs :: MacIpMap -> MacInfo -> MacInfo
-resolveIPs macIpMap = M.foldrWithKey go mempty
- where
-  go :: MacAddr -> MacData -> MacInfo -> MacInfo
-  go mac y z =
-    let ips = fromMaybe mempty (M.lookup mac macIpMap)
-    in  M.insert mac (setL macIPsL ips y) z
-
--- TODO: Query IP using nmap/ip neigh, if not found. [nmap][arp]
-ipToMac :: MonadReader Config m => IP -> m (Maybe MacAddr)
-ipToMac ip = do
-  Config{..} <- ask
-  return (M.lookup ip ipMacMap)
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host =
