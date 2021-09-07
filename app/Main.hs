@@ -130,8 +130,7 @@ lookupMacPort mac = M.filter (\PortData{..} -> M.member mac portAddrs)
 -- | Lookup mac ports in cache (without verify).
 lookupMacPorts :: [MacAddr] -> SwPortInfo -> SwPortInfo
 lookupMacPorts macs swpInfo =
-  foldr (\m -> (lookupMacPort m swpInfo <>)) mempty
-  $ macs
+  foldr (\m -> (lookupMacPort m swpInfo <>)) mempty $ macs
 
 -- | Lookup mac ports in cache and verify (query) info about found ports.
 lookupMacPorts' ::

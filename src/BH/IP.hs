@@ -153,6 +153,7 @@ data MacData = MacData
   { macVlan :: Vlan
   --, macVendor :: T.Text
   , macIPs :: S.Set IP
+  --, macSwPort :: SwPort
   }
   deriving (Eq, Show)
 
@@ -296,7 +297,7 @@ parseIP t = do
 type IPInfo = M.Map IP IPData
 
 data IPData = IPData
-  { ipMacAddr :: MacAddr
+  { ipMacData :: MacData
   , ipVlan :: Vlan
   , ipSubnet :: T.Text
   }
