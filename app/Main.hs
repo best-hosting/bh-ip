@@ -52,7 +52,7 @@ optParser =
                         <> O.help "Switch port to look for."
                     )
                 )
-            <|> workQueryMacs2
+            <|> workQueryMacs
               <$> some
                 ( O.option
                     (O.eitherReader (A.parseOnly macP . T.pack))
@@ -123,7 +123,7 @@ workQueryPorts ts = do
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
   queryPorts swports >>= liftIO . B.putStr . Y.encode
 
--- | Lookup single mac port in a cache.
+{--- | Lookup single mac port in a cache.
 lookupMacPort :: MacAddr -> SwPortInfo -> SwPortInfo
 lookupMacPort mac = M.filter (\PortData{..} -> M.member mac portAddrs)
 
@@ -136,68 +136,18 @@ lookupMacPorts macs swpInfo =
 lookupMacPorts' ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] -> SwPortInfo -> m SwPortInfo
-lookupMacPorts' macs = queryPorts . M.keys . lookupMacPorts macs
-
-workQueryMacs' ::
-  (MonadReader Config m, MonadState SwPortInfo m, MonadError String m, MonadIO m)
-  => [MacAddr]
-  -> m ()
-workQueryMacs' macs0 = do
-  -- TODO: Query only cache, if requested. On the other hand, i probably may
-  -- not offer such functionality. After all, cache is yaml and `yq` will be
-  -- better in querying it anyway. But in case `yq` is not available.. well..
-  s1 <- get >>= lookupMacPorts' macs0
-  modify (s1 <>)
-  let foundMacPorts :: M.Map MacAddr SwPortInfo
-      foundMacPorts = foldr (\m -> M.insert m (lookupMacPort m s1)) mempty macs0
-      macs1 = macs0 \\ (M.keys . M.filter (/= M.empty) $ foundMacPorts)
-  liftIO $ print "Found in cache: "
-  liftIO $ print foundMacPorts
-  liftIO $ print $ "Yet to query: " ++ show macs1
-  queriedMacPorts <- queryMacs macs1
-  let allMacPorts = M.unionWith (<>) foundMacPorts queriedMacPorts
-  modify (\s -> foldr (<>) s (M.elems queriedMacPorts))
-  liftIO $ B.putStr . Y.encode $ allMacPorts
+lookupMacPorts' macs = queryPorts . M.keys . lookupMacPorts macs-}
 
 -- FIXME: May this be the common part for all query types?
+-- TODO: Query only cache, if requested. On the other hand, i probably may not
+-- offer such functionality. After all, cache is yaml and `yq` will be better
+-- in querying it anyway. But in case `yq` is not available.. well..
 workQueryMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m ()
 workQueryMacs macs = do
-  newSwpInfo <- readYaml "switches.yaml" >>= execStateT (workQueryMacs' macs)
-  -- TODO: Use 'Config' parameter to store swport db filename.
-  liftIO $ do
-    cwd <- getCurrentDirectory
-    (f, _) <- openTempFile cwd "switches.yaml"
-    Y.encodeFile f newSwpInfo
-    renameFile f "switches.yaml"
-
-workQueryMacs'2 ::
-  (MonadReader Config m, MonadState MacInfo m, MonadError String m, MonadIO m)
-  => [MacAddr]
-  -> m MacInfo
-workQueryMacs'2 macs0 = do
-  -- TODO: Can this pattern be generalized?
-  Config{..} <- ask
-  s0 <- get
-  updated <- resolveIPs macIpMap <$> verifyMacs2 (M.filterWithKey (\m _ -> m `elem` macs0) s0)
-  modify (updated <>)
-  let found = M.filterWithKey (\m _ -> m `elem` macs0) updated
-      macs1 = macs0 \\ M.keys found
-  liftIO $ print "Found in cache: "
-  liftIO $ print found
-  liftIO $ print $ "Yet to query: " ++ show macs1
-  queried <- queryMacs2 macs1
-  modify (queried <>)
-  return (M.unionWith (<>) found queried)
-
-workQueryMacs2 ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] ->
-  m ()
-workQueryMacs2 macs = do
-  (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (workQueryMacs'2 macs)
+  (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (queryMacs macs)
   liftIO $ B.putStr . Y.encode $ res
   -- TODO: Use 'Config' parameter to store swport db filename.
   liftIO $ do

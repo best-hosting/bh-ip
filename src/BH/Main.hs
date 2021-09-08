@@ -7,14 +7,11 @@ module BH.Main (
   readSwInfo,
   queryPort,
   queryPorts,
-  queryMac,
+  searchMacs,
+  verifyMacInfo,
   queryMacs,
-  queryMacs2,
-  verifyMacs2,
   queryIP,
   queryIPs,
-  resolveIPs,
-  resolveIPs2,
 )
 where
 
@@ -24,6 +21,7 @@ import Control.Monad.Except
 import Data.Maybe
 import Data.List
 import qualified Data.Set as S
+import Control.Monad.State
 
 import BH.Main.Types
 import BH.Common
@@ -41,10 +39,6 @@ readSwInfo file = toSwInfo <$> readYaml file
   toSwInfo :: [SwData] -> SwInfo
   toSwInfo = M.fromList . map (\x -> (swName x, x))
 
--- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
-resolveIPs :: MacIpMap -> MacInfo -> MacInfo
-resolveIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}
-
 -- FIXME: In fact, in all queryX functions i need unique items. May be change
 -- type to 'S.Set' to force uniqueness?
 -- | Query several ports.
@@ -58,7 +52,7 @@ queryPorts swPorts = do
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
-  return (resolveIPs2 macIpMap portMacs)
+  return (resolvePortIPs macIpMap portMacs)
  where
   onPorts :: SwName -> [PortNum]
   onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
@@ -80,31 +74,22 @@ queryPort ::
   m SwPortInfo
 queryPort = queryPorts . (: [])
 
-queryMac ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  MacAddr ->
-  m (M.Map MacAddr SwPortInfo)
-queryMac mac = queryMacs [mac]
-
-resolveIPs2 :: MacIpMap -> M.Map a PortData -> M.Map a PortData
-resolveIPs2 macIpMap = M.map $ modifyL portAddrsL (resolveIPs macIpMap)
-
-queryMacs ::
+queryMacs3 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m (M.Map MacAddr SwPortInfo)
-queryMacs macs = do
+queryMacs3 macs = do
   Config{..} <- ask
-  macPorts <- flip runReaderT swInfo $ runTill maybeMacs queryMacs'
-  return (M.map (resolveIPs2 macIpMap) macPorts)
+  macPorts <- flip runReaderT swInfo $ runTill maybeMacs go
+  return (M.map (resolvePortIPs macIpMap) macPorts)
  where
   maybeMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys . M.filter (/= M.empty) $ res
                 in  case filter (`notElem` found) macs of
                       [] -> Nothing
                       xs -> Just xs
-  queryMacs' :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr SwPortInfo) ()
-  queryMacs' = do
+  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr SwPortInfo) ()
+  go = do
     portSw <- asks (swName . switchData)
     ms  <- asks telnetIn
     res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort ms
@@ -113,31 +98,34 @@ queryMacs macs = do
 
 -- TODO: I may use hash to determine changed db file. And then treat /that/
 -- file as source and generate others from it.
-queryMacs2 ::
+-- | Search mac on all switches.
+searchMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m MacInfo
-queryMacs2 macs = do
+searchMacs macs = do
   Config{..} <- ask
-  resolveIPs macIpMap <$> runReaderT (runTill maybeMacs queryMacs') swInfo
+  resolveMacIPs macIpMap <$> runReaderT (runTill maybeMacs go) swInfo
  where
   maybeMacs :: MacInfo -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys . M.filter (not . S.null . macSwPorts) $ res
                 in  case filter (`notElem` found) macs of
                       [] -> Nothing
                       xs -> Just xs
-  queryMacs' :: TelnetRunM TelnetParserResult [MacAddr] MacInfo ()
-  queryMacs' = do
+  go :: TelnetRunM TelnetParserResult [MacAddr] MacInfo ()
+  go = do
     ms  <- asks telnetIn
     findMacInfo ms >>= putResult
     sendExit
 
-verifyMacs2 ::
+-- | Query ports, where macs from 'MacInfo' where found and build new
+-- (updated) 'MacInfo'.
+verifyMacInfo ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   MacInfo -> m MacInfo
-verifyMacs2 mInfo = do
+verifyMacInfo mInfo = do
   Config{..} <- ask
-  flip runReaderT swInfo $ runOn onPorts swNames verifyMacs'
+  flip runReaderT swInfo $ runOn onPorts swNames go
  where
   swPorts :: [SwPort]
   swPorts = nub . concatMap (S.toList . macSwPorts) . M.elems $ mInfo
@@ -147,14 +135,35 @@ verifyMacs2 mInfo = do
   onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
   swNames :: [SwName]
   swNames = nub . map portSw $ swPorts
-  verifyMacs' :: TelnetRunM TelnetParserResult [PortNum] MacInfo ()
-  verifyMacs' = do
+  go :: TelnetRunM TelnetParserResult [PortNum] MacInfo ()
+  go = do
     portSw <- asks (swName . switchData)
     ps <- asks telnetIn
     res <- swPortInfoToMacInfo . M.mapKeys (\p -> SwPort{portSpec = p, ..})
       <$> findPortInfo ps
     putResult res
     sendExit
+
+-- | Query mac address in 'MacInfo' (presumably obtained from cache) and
+-- update info, if found. Otherwise search for mac address.
+queryMacs ::
+  (MonadReader Config m, MonadState MacInfo m, MonadError String m, MonadIO m)
+  => [MacAddr]
+  -> m MacInfo
+queryMacs macs0 = do
+  -- TODO: Can this pattern be generalized?
+  Config{..} <- ask
+  s0 <- get
+  updated <- resolveMacIPs macIpMap <$> verifyMacInfo (M.filterWithKey (\m _ -> m `elem` macs0) s0)
+  modify (updated <>)
+  let found = M.filterWithKey (\m _ -> m `elem` macs0) updated
+      macs1 = macs0 \\ M.keys found
+  liftIO $ print "Found in cache: "
+  liftIO $ print found
+  liftIO $ print $ "Yet to query: " ++ show macs1
+  queried <- searchMacs macs1
+  modify (queried <>)
+  return (M.unionWith (<>) found queried)
 
 -- | Rebuild 'SwPortInfo' to 'MacInfo' and _build_ 'macSwPorts' from scratch.
 queryIP ::
@@ -170,7 +179,7 @@ queryIPs ::
 queryIPs ips = do
   Config{..} <- ask
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
-  macPorts <- queryMacs macs
+  macPorts <- queryMacs3 macs
   let go :: IP -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
       go ip acc = flip (M.insert ip) acc . fromMaybe mempty $ do
         mac <- M.lookup ip ipMacMap

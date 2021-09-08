@@ -9,6 +9,7 @@ module BH.Main.Types (
   toMacInfo,
   MacData(..),
   swPortInfoToMacInfo,
+  resolveMacIPs,
   macIPsL,
   IPInfo,
   IPData(..),
@@ -16,6 +17,7 @@ module BH.Main.Types (
   PortInfo,
   PortData(..),
   portAddrsL,
+  resolvePortIPs,
 )
 where
 
@@ -23,6 +25,7 @@ import Data.Aeson
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Text as T
+import Data.Maybe
 
 import BH.Common
 import BH.IP
@@ -83,6 +86,10 @@ swPortInfoToMacInfo = M.foldrWithKey go M.empty
   go sp PortData{..} z = M.unionWith (<>) z $
     M.map (\x -> x{macSwPorts = S.singleton sp}) portAddrs
 
+-- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
+resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
+resolveMacIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}
+
 toMacInfo :: MacTableEl -> MacInfo
 toMacInfo MacTableEl{..} = M.singleton elMac $
   MacData
@@ -130,4 +137,7 @@ instance FromJSON PortData where
 
 instance Semigroup PortData where
     x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
+
+resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
+resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
 
