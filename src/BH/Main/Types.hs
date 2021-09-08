@@ -8,6 +8,7 @@ module BH.Main.Types (
   MacInfo,
   toMacInfo,
   MacData(..),
+  swPortInfoToMacInfo,
   macIPsL,
   IPInfo,
   IPData(..),
@@ -53,6 +54,13 @@ data MacData = MacData
 macIPsL :: LensC MacData (S.Set IP)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
+instance Semigroup MacData where
+  x <> y = MacData
+            { macVlan = macVlan y
+            , macIPs = macIPs x <> macIPs y
+            , macSwPorts = macSwPorts x <> macSwPorts y
+            }
+
 instance ToJSON MacData where
   toJSON MacData {..} =
     object $
@@ -67,6 +75,13 @@ instance FromJSON MacData where
       <$> v .: "vlan"
       <*> v .: "ips"
       <*> v .: "ports"
+
+swPortInfoToMacInfo :: SwPortInfo -> MacInfo
+swPortInfoToMacInfo = M.foldrWithKey go M.empty
+ where
+  go :: SwPort -> PortData -> MacInfo -> MacInfo
+  go sp PortData{..} z = M.unionWith (<>) z $
+    M.map (\x -> x{macSwPorts = S.singleton sp}) portAddrs
 
 toMacInfo :: MacTableEl -> MacInfo
 toMacInfo MacTableEl{..} = M.singleton elMac $

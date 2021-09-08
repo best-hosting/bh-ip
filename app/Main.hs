@@ -52,7 +52,7 @@ optParser =
                         <> O.help "Switch port to look for."
                     )
                 )
-            <|> workQueryMacs
+            <|> workQueryMacs2
               <$> some
                 ( O.option
                     (O.eitherReader (A.parseOnly macP . T.pack))
@@ -143,7 +143,9 @@ workQueryMacs' ::
   => [MacAddr]
   -> m ()
 workQueryMacs' macs0 = do
-  -- TODO: Query only cache, if requested.
+  -- TODO: Query only cache, if requested. On the other hand, i probably may
+  -- not offer such functionality. After all, cache is yaml and `yq` will be
+  -- better in querying it anyway. But in case `yq` is not available.. well..
   s1 <- get >>= lookupMacPorts' macs0
   modify (s1 <>)
   let foundMacPorts :: M.Map MacAddr SwPortInfo
@@ -163,14 +165,47 @@ workQueryMacs ::
   [MacAddr] ->
   m ()
 workQueryMacs macs = do
-  queryMacs2 macs >>= liftIO . B.putStr . Y.encode
-{-  newSwpInfo <- readYaml "switches.yaml" >>= execStateT (workQueryMacs' macs)
+  newSwpInfo <- readYaml "switches.yaml" >>= execStateT (workQueryMacs' macs)
   -- TODO: Use 'Config' parameter to store swport db filename.
   liftIO $ do
     cwd <- getCurrentDirectory
     (f, _) <- openTempFile cwd "switches.yaml"
     Y.encodeFile f newSwpInfo
-    renameFile f "switches.yaml"-}
+    renameFile f "switches.yaml"
+
+workQueryMacs'2 ::
+  (MonadReader Config m, MonadState MacInfo m, MonadError String m, MonadIO m)
+  => [MacAddr]
+  -> m MacInfo
+workQueryMacs'2 macs0 = do
+  -- TODO: Can this pattern be generalized?
+  Config{..} <- ask
+  s0 <- get
+  updated <- resolveIPs macIpMap <$> verifyMacs2 (M.filterWithKey (\m _ -> m `elem` macs0) s0)
+  modify (updated <>)
+  let found = M.filterWithKey (\m _ -> m `elem` macs0) updated
+      macs1 = macs0 \\ M.keys found
+  liftIO $ print "Found in cache: "
+  liftIO $ print found
+  liftIO $ print $ "Yet to query: " ++ show macs1
+  queried <- queryMacs2 macs1
+  modify (queried <>)
+  return (M.unionWith (<>) found queried)
+
+workQueryMacs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] ->
+  m ()
+workQueryMacs2 macs = do
+  (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (workQueryMacs'2 macs)
+  liftIO $ B.putStr . Y.encode $ res
+  -- TODO: Use 'Config' parameter to store swport db filename.
+  liftIO $ do
+    cwd <- getCurrentDirectory
+    (f, _) <- openTempFile cwd "macinfo.yaml"
+    Y.encodeFile f newMacInfo
+    renameFile f "macinfo.yaml"
+
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>

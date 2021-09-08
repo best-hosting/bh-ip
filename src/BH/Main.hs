@@ -10,8 +10,11 @@ module BH.Main (
   queryMac,
   queryMacs,
   queryMacs2,
+  verifyMacs2,
   queryIP,
   queryIPs,
+  resolveIPs,
+  resolveIPs2,
 )
 where
 
@@ -40,12 +43,7 @@ readSwInfo file = toSwInfo <$> readYaml file
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 resolveIPs :: MacIpMap -> MacInfo -> MacInfo
-resolveIPs macIpMap = M.foldrWithKey go mempty
- where
-  go :: MacAddr -> MacData -> MacInfo -> MacInfo
-  go mac y z =
-    let ips = fromMaybe mempty (M.lookup mac macIpMap)
-    in  M.insert mac (setL macIPsL ips y) z
+resolveIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}
 
 -- FIXME: In fact, in all queryX functions i need unique items. May be change
 -- type to 'S.Set' to force uniqueness?
@@ -54,17 +52,18 @@ queryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [SwPort] ->
   m SwPortInfo
-queryPorts switches = do
+queryPorts swPorts = do
   Config{..} <- ask
-  portMacs <- flip runReaderT swInfo
-    $ runOn ports (nub . map portSw $ switches) queryPorts'
+  portMacs <- flip runReaderT swInfo $ runOn onPorts swNames queryPorts'
   liftIO $ putStrLn "Gathered ac map:"
   liftIO $ print portMacs
   liftIO $ putStrLn "Finally, ips..."
   return (resolveIPs2 macIpMap portMacs)
  where
-  ports :: SwName -> [PortNum]
-  ports sn = nub . map portSpec . filter ((== sn) . portSw) $ switches
+  onPorts :: SwName -> [PortNum]
+  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
+  swNames :: [SwName]
+  swNames = nub . map portSw $ swPorts
   queryPorts' :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
   queryPorts' = do
     portSw <- asks (swName . switchData)
@@ -120,8 +119,7 @@ queryMacs2 ::
   m MacInfo
 queryMacs2 macs = do
   Config{..} <- ask
-  macInfo <- flip runReaderT swInfo $ runTill maybeMacs queryMacs'
-  return (M.mapWithKey (\m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}) macInfo)
+  resolveIPs macIpMap <$> runReaderT (runTill maybeMacs queryMacs') swInfo
  where
   maybeMacs :: MacInfo -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys . M.filter (not . S.null . macSwPorts) $ res
@@ -130,11 +128,35 @@ queryMacs2 macs = do
                       xs -> Just xs
   queryMacs' :: TelnetRunM TelnetParserResult [MacAddr] MacInfo ()
   queryMacs' = do
-    portSw <- asks (swName . switchData)
     ms  <- asks telnetIn
     findMacInfo ms >>= putResult
     sendExit
 
+verifyMacs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  MacInfo -> m MacInfo
+verifyMacs2 mInfo = do
+  Config{..} <- ask
+  flip runReaderT swInfo $ runOn onPorts swNames verifyMacs'
+ where
+  swPorts :: [SwPort]
+  swPorts = nub . concatMap (S.toList . macSwPorts) . M.elems $ mInfo
+  -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
+  -- need to change it everywhere, includeing findX funcs.. [refactor]
+  onPorts :: SwName -> [PortNum]
+  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
+  swNames :: [SwName]
+  swNames = nub . map portSw $ swPorts
+  verifyMacs' :: TelnetRunM TelnetParserResult [PortNum] MacInfo ()
+  verifyMacs' = do
+    portSw <- asks (swName . switchData)
+    ps <- asks telnetIn
+    res <- swPortInfoToMacInfo . M.mapKeys (\p -> SwPort{portSpec = p, ..})
+      <$> findPortInfo ps
+    putResult res
+    sendExit
+
+-- | Rebuild 'SwPortInfo' to 'MacInfo' and _build_ 'macSwPorts' from scratch.
 queryIP ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   IP ->

@@ -128,7 +128,8 @@ findPortMacs p =
           (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
 
 findPortState :: PortNum -> TelnetRunM TelnetParserResult a b PortState
-findPortState p =
+findPortState p = do
+  sendCmd (cmd "terminal length 0")
   sendAndParse pResPortStateL
           (portStateP p)
           (cmd $ "show interfaces " <> showCiscoPort p)
