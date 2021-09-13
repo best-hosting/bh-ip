@@ -173,6 +173,7 @@ workQueryIPs ips = do
   (res, newMacInfo) <- readYaml "ipinfo.yaml" >>= runStateT (queryIPs ips)
   liftIO $ B.putStr . Y.encode $ res
   -- TODO: Use 'Config' parameter to store swport db filename.
+  -- FIXME: Update all dbs after each query.
   liftIO $ do
     cwd <- getCurrentDirectory
     (f, _) <- openTempFile cwd "ipinfo.yaml"

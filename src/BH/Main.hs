@@ -116,7 +116,8 @@ searchIPs ips = do
   macInfoToIPInfo <$> searchMacs macs
 
 -- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ? Or just use 'queryPorts'
--- instead?
+-- instead in 'verifyMacInfo'? Can i merge 'verifyMacInfo' and 'verifyIPInfo'?
+
 -- | Query ports, where macs from 'MacInfo' where found and build new
 -- (updated) 'MacInfo'.
 verifyMacInfo ::
@@ -188,20 +189,7 @@ queryMacs macs0 = do
   modify (queried <>)
   return (M.unionWith (<>) found queried)
 
-queryIPs3 ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [IP] ->
-  m (M.Map IP SwPortInfo)
-queryIPs3 ips = do
-  Config{..} <- ask
-  let macs = mapMaybe (flip M.lookup ipMacMap) ips
-  macPorts <- queryMacs3 macs
-  let go :: IP -> M.Map IP SwPortInfo -> M.Map IP SwPortInfo
-      go ip acc = flip (M.insert ip) acc . fromMaybe mempty $ do
-        mac <- M.lookup ip ipMacMap
-        M.lookup mac macPorts
-  return (foldr go mempty ips)
-
+-- FIXME: 'queryIPs' and 'queryMacs' seems identical. Can i generalize them?
 queryIPs ::
   (MonadReader Config m, MonadState IPInfo m, MonadError String m, MonadIO m)
   => [IP]

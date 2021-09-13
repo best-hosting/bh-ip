@@ -34,7 +34,13 @@ import BH.IP
 import BH.Switch
 
 
--- FIXME: Replace this with 'MacInfo' and 'IPInfo'.
+-- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
+-- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
+-- because when nmap scans network, vlan is already known. Moreover, 'vlan'
+-- should be parent element for 'ips' and 'ports' fields on mac address. The
+-- same is true for 'IPInfo': vlan should be parent element for 'macs' and
+-- 'ports'. In other words, 'MacData' and 'IPData' should contain vlan-indexed
+-- maps.
 type MacIpMap = M.Map MacAddr (S.Set IP)
 type IpMacMap = M.Map IP MacAddr
 
