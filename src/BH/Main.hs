@@ -153,8 +153,8 @@ queryMacs ::
 queryMacs macs0 = do
   -- TODO: Can this pattern be generalized?
   Config{..} <- ask
-  s0 <- get
-  updated <- resolveMacIPs macIpMap <$> verifyMacInfo (M.filterWithKey (\m _ -> m `elem` macs0) s0)
+  updated <- get >>=
+    fmap (resolveMacIPs macIpMap) . verifyMacInfo . M.filterWithKey (\m _ -> m `elem` macs0)
   modify (updated <>)
   let found = M.filterWithKey (\m _ -> m `elem` macs0) updated
       macs1 = macs0 \\ M.keys found
