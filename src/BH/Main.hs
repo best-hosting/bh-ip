@@ -115,9 +115,6 @@ searchIPs ips = do
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macInfoToIPInfo <$> searchMacs macs
 
--- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ? Or just use 'queryPorts'
--- instead in 'verifyMacInfo'? Can i merge 'verifyMacInfo' and 'verifyIPInfo'?
-
 -- | Query ports, where macs from 'MacInfo' where found and build new
 -- (updated) 'MacInfo'.
 verifyMacInfo ::
@@ -189,6 +186,9 @@ queryMacs macs0 = do
   modify (queried <>)
   return (M.unionWith (<>) found queried)
 
+-- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ? Or just use 'queryPorts'
+-- instead in 'verifyMacInfo'? Can i merge 'verifyMacInfo' and 'verifyIPInfo'?
+-- [current]
 -- FIXME: 'queryIPs' and 'queryMacs' seems identical. Can i generalize them?
 queryIPs ::
   (MonadReader Config m, MonadState IPInfo m, MonadError String m, MonadIO m)
