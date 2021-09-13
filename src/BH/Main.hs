@@ -9,7 +9,6 @@ module BH.Main (
   searchMacs,
   verifyMacInfo,
   queryMacs,
-  queryIP,
   queryIPs,
 )
 where
@@ -107,7 +106,17 @@ searchMacs macs = do
     findMacInfo ms >>= putResult
     sendExit
 
--- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ?
+searchIPs ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [IP] ->
+  m IPInfo
+searchIPs ips = do
+  Config{..} <- ask
+  let macs = mapMaybe (flip M.lookup ipMacMap) ips
+  macInfoToIPInfo <$> searchMacs macs
+
+-- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ? Or just use 'queryPorts'
+-- instead?
 -- | Query ports, where macs from 'MacInfo' where found and build new
 -- (updated) 'MacInfo'.
 verifyMacInfo ::
@@ -134,6 +143,30 @@ verifyMacInfo mInfo = do
     putResult res
     sendExit
 
+verifyIPInfo ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  IPInfo -> m IPInfo
+verifyIPInfo ipInfo = do
+  Config{..} <- ask
+  flip runReaderT swInfo $ runOn onPorts swNames (go macIpMap)
+ where
+  swPorts :: [SwPort]
+  swPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems $ ipInfo
+  -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
+  -- need to change it everywhere, includeing findX funcs.. [refactor]
+  onPorts :: SwName -> [PortNum]
+  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
+  swNames :: [SwName]
+  swNames = nub . map portSw $ swPorts
+  go :: MacIpMap -> TelnetRunM TelnetParserResult [PortNum] IPInfo ()
+  go macIpMap = do
+    portSw <- asks (swName . switchData)
+    ps <- asks telnetIn
+    res <- swPortInfoToIPInfo . resolvePortIPs macIpMap . M.mapKeys (\p -> SwPort{portSpec = p, ..})
+      <$> findPortInfo ps
+    putResult res
+    sendExit
+
 -- | Query mac address in 'MacInfo' (presumably obtained from cache) and
 -- update info, if found. Otherwise search for mac address.
 queryMacs ::
@@ -155,18 +188,11 @@ queryMacs macs0 = do
   modify (queried <>)
   return (M.unionWith (<>) found queried)
 
--- | Rebuild 'SwPortInfo' to 'MacInfo' and _build_ 'macSwPorts' from scratch.
-queryIP ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  IP ->
-  m (M.Map IP SwPortInfo)
-queryIP = queryIPs . (: [])
-
-queryIPs ::
+queryIPs3 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m (M.Map IP SwPortInfo)
-queryIPs ips = do
+queryIPs3 ips = do
   Config{..} <- ask
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macPorts <- queryMacs3 macs
@@ -175,4 +201,22 @@ queryIPs ips = do
         mac <- M.lookup ip ipMacMap
         M.lookup mac macPorts
   return (foldr go mempty ips)
+
+queryIPs ::
+  (MonadReader Config m, MonadState IPInfo m, MonadError String m, MonadIO m)
+  => [IP]
+  -> m IPInfo
+queryIPs ips0 = do
+  -- TODO: Can this pattern be generalized?
+  Config{..} <- ask
+  updated <- get >>= verifyIPInfo . M.filterWithKey (\i _ -> i `elem` ips0)
+  modify (updated <>)
+  let found = M.filterWithKey (\i _ -> i `elem` ips0) updated
+      ips1 = ips0 \\ M.keys found
+  liftIO $ print "Found in cache: "
+  liftIO $ print found
+  liftIO $ print $ "Yet to query: " ++ show ips1
+  queried <- searchIPs ips1
+  modify (queried <>)
+  return (M.unionWith (<>) found (M.filterWithKey (\i _ -> i `elem` ips1) queried))
 

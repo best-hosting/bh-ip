@@ -13,6 +13,8 @@ module BH.Main.Types (
   macIPsL,
   IPInfo,
   IPData(..),
+  macInfoToIPInfo,
+  swPortInfoToIPInfo,
   SwPortInfo,
   PortInfo,
   PortData(..),
@@ -102,11 +104,54 @@ toMacInfo MacTableEl{..} = M.singleton elMac $
 type IPInfo = M.Map IP IPData
 
 data IPData = IPData
-  { ipMacData :: MacData
+  { ipMacAddrs :: S.Set MacAddr
   , ipVlan :: Vlan
-  , ipSubnet :: T.Text
+  , ipSwPorts :: S.Set SwPort
+  --, ipSubnet :: T.Text
   }
  deriving (Show)
+
+instance Semigroup IPData where
+  x <> y = IPData
+            { ipMacAddrs = ipMacAddrs x <> ipMacAddrs y
+            , ipVlan = ipVlan y
+            , ipSwPorts = ipSwPorts x <> ipSwPorts y
+            }
+
+instance ToJSON IPData where
+  toJSON IPData{..} =
+    object $
+      [ "macs" .= ipMacAddrs
+      , "vlan" .= ipVlan
+      , "ports" .= ipSwPorts
+      ]
+
+instance FromJSON IPData where
+  parseJSON = withObject "IPData" $ \v ->
+    IPData
+      <$> v .: "macs"
+      <*> v .: "vlan"
+      <*> v .: "ports"
+
+-- Here there're two places, where 'SwPort' may be defined: key of
+-- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i will
+-- explicitly overwrite 'SwPort' obtained from 'portAddrs' with value of
+-- current 'SwPortInfo' key.
+swPortInfoToIPInfo :: SwPortInfo -> IPInfo
+swPortInfoToIPInfo = M.foldrWithKey go M.empty
+ where
+  go :: SwPort -> PortData -> IPInfo -> IPInfo
+  go p PortData{..} = M.unionWith (<>)
+    $ M.map (\x -> x{ipSwPorts = S.singleton p})
+    $ macInfoToIPInfo portAddrs
+
+macInfoToIPInfo :: MacInfo -> IPInfo
+macInfoToIPInfo = M.foldrWithKey go M.empty
+ where
+  go :: MacAddr -> MacData -> IPInfo -> IPInfo
+  go mac MacData{..} =
+    let d = IPData{ipMacAddrs = S.singleton mac, ipVlan = macVlan, ipSwPorts = macSwPorts}
+    in  M.unionWith (<>) $ foldr (\ip z -> M.insertWith (<>) ip d z) M.empty macIPs
 
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData

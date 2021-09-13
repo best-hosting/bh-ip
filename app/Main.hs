@@ -157,6 +157,7 @@ workQueryMacs macs = do
   (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (queryMacs macs)
   liftIO $ B.putStr . Y.encode $ res
   -- TODO: Use 'Config' parameter to store swport db filename.
+  -- FIXME: If one file is missing, rebuild it from others.
   liftIO $ do
     cwd <- getCurrentDirectory
     (f, _) <- openTempFile cwd "macinfo.yaml"
@@ -168,7 +169,16 @@ workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m ()
-workQueryIPs ips = queryIPs ips >>= liftIO . B.putStr . Y.encode
+workQueryIPs ips = do
+  (res, newMacInfo) <- readYaml "ipinfo.yaml" >>= runStateT (queryIPs ips)
+  liftIO $ B.putStr . Y.encode $ res
+  -- TODO: Use 'Config' parameter to store swport db filename.
+  liftIO $ do
+    cwd <- getCurrentDirectory
+    (f, _) <- openTempFile cwd "ipinfo.yaml"
+    Y.encodeFile f newMacInfo
+    renameFile f "ipinfo.yaml"
+
 
 main :: IO ()
 main = do
