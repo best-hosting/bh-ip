@@ -304,6 +304,7 @@ loginCmd = shiftT $ \k -> do
     setPrompt telnetPromptP
     sendCmd (cmd "enable")
     sendParseWithPrompt passwordPromptP nothingL checkRootP (cmdNoEcho swRootPassword)
+    sendCmd (cmd "terminal length 0")
     saveAndCont
     lift (k ())
 

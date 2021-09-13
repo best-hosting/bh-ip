@@ -121,7 +121,14 @@ workQueryPorts ts = do
         let m = M.lookup sn swInfo
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  queryPorts swports >>= liftIO . B.putStr . Y.encode
+  (res, newMacInfo) <- readYaml "swportinfo.yaml" >>= runStateT (queryPorts swports)
+  liftIO $ B.putStr . Y.encode $ res
+  liftIO $ do
+    cwd <- getCurrentDirectory
+    (f, _) <- openTempFile cwd "swportinfo.yaml"
+    Y.encodeFile f newMacInfo
+    renameFile f "swportinfo.yaml"
+
 
 {--- | Lookup single mac port in a cache.
 lookupMacPort :: MacAddr -> SwPortInfo -> SwPortInfo
@@ -138,7 +145,7 @@ lookupMacPorts' ::
   [MacAddr] -> SwPortInfo -> m SwPortInfo
 lookupMacPorts' macs = queryPorts . M.keys . lookupMacPorts macs-}
 
--- FIXME: May this be the common part for all query types?
+-- FIXME: May this be the common function for all query types?
 -- TODO: Query only cache, if requested. On the other hand, i probably may not
 -- offer such functionality. After all, cache is yaml and `yq` will be better
 -- in querying it anyway. But in case `yq` is not available.. well..

@@ -5,7 +5,6 @@
 module BH.Main (
   module BH.Main.Types,
   readSwInfo,
-  queryPort,
   queryPorts,
   searchMacs,
   verifyMacInfo,
@@ -43,36 +42,26 @@ readSwInfo file = toSwInfo <$> readYaml file
 -- type to 'S.Set' to force uniqueness?
 -- | Query several ports.
 queryPorts ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [SwPort] ->
-  m SwPortInfo
+  (MonadReader Config m, MonadState SwPortInfo m, MonadError String m, MonadIO m) =>
+  [SwPort] -> m SwPortInfo
 queryPorts swPorts = do
   Config{..} <- ask
-  portMacs <- flip runReaderT swInfo $ runOn onPorts swNames queryPorts'
-  liftIO $ putStrLn "Gathered ac map:"
-  liftIO $ print portMacs
-  liftIO $ putStrLn "Finally, ips..."
-  return (resolvePortIPs macIpMap portMacs)
+  queried <- fmap (resolvePortIPs macIpMap) . flip runReaderT swInfo $ runOn onPorts swNames go
+  modify (queried <>)
+  return queried
  where
   onPorts :: SwName -> [PortNum]
   onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
   swNames :: [SwName]
   swNames = nub . map portSw $ swPorts
-  queryPorts' :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
-  queryPorts' = do
+  go :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
+  go = do
     portSw <- asks (swName . switchData)
-    ps  <- asks telnetIn
-    sendCmd (cmd "terminal length 0")
+    ps <- asks telnetIn
     res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ps
     putResult res
     sendExit
 
--- | Query single port.
-queryPort ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  SwPort ->
-  m SwPortInfo
-queryPort = queryPorts . (: [])
 
 queryMacs3 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
@@ -118,6 +107,7 @@ searchMacs macs = do
     findMacInfo ms >>= putResult
     sendExit
 
+-- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ?
 -- | Query ports, where macs from 'MacInfo' where found and build new
 -- (updated) 'MacInfo'.
 verifyMacInfo ::
