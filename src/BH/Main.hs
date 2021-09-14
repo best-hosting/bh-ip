@@ -1,6 +1,9 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module BH.Main (
   module BH.Main.Types,
@@ -35,18 +38,6 @@ readSwInfo file = toSwInfo <$> readYaml file
  where
   toSwInfo :: [SwData] -> SwInfo
   toSwInfo = M.fromList . map (\x -> (swName x, x))
-
--- FIXME: In fact, in all queryX functions i need unique items. May be change
--- type to 'S.Set' to force uniqueness?
--- | Query several ports.
-queryPorts ::
-  (MonadReader Config m, MonadState SwPortInfo m, MonadError String m, MonadIO m) =>
-  [SwPort] -> m SwPortInfo
-queryPorts swPorts = do
-  Config{..} <- ask
-  queried <- searchPorts swPorts
-  modify (queried <>)
-  return queried
 
 -- TODO: I may use hash to determine changed db file. And then treat /that/
 -- file as source and generate others from it.
@@ -102,13 +93,17 @@ searchPorts swPorts = do
     putResult res
     sendExit
 
-verifyIPInfo ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  IPInfo -> m IPInfo
-verifyIPInfo ipInfo = do
+-- FIXME: In fact, in all queryX functions i need unique items. May be change
+-- type to 'S.Set' to force uniqueness?
+-- | Query several ports.
+queryPorts ::
+  (MonadReader Config m, MonadState SwPortInfo m, MonadError String m, MonadIO m) =>
+  [SwPort] -> m SwPortInfo
+queryPorts swPorts = do
   Config{..} <- ask
-  let swPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems $ ipInfo
-  swPortInfoToIPInfo <$> searchPorts swPorts
+  queried <- searchPorts swPorts
+  modify (queried <>)
+  return queried
 
 -- | Query mac address in 'MacInfo' (presumably obtained from cache) and
 -- update info, if found. Otherwise search for mac address.
@@ -154,4 +149,54 @@ queryIPs ips0 = do
   queried <- searchIPs ips1
   modify (queried <>)
   return (M.unionWith (<>) found (M.filterWithKey (\i _ -> i `elem` ips1) queried))
+
+{-queryX ::
+  (MonadReader Config m, MonadState IPInfo m, MonadError String m, MonadIO m)
+  => [a]
+  -> m (InfoDb a)
+queryX xs = do
+  -- TODO: Can this pattern be generalized?
+  Config{..} <- ask
+  cached <- M.filterWithKey (\x _ -> x `elem` xs) <$> get
+  let f :: InfoDb a -> [SwPort]
+      f = nub . concatMap (S.toList . xSwPorts) . M.elems
+  updated <- swPortInfoToX <$> searchPorts (f cached)
+  modify (updated <>)
+  let found = M.filterWithKey (\x _ -> x `elem` xs) updated
+      xs' = xs \\ M.keys found
+  liftIO $ print "Found in cache: "
+  liftIO $ print found
+  liftIO $ print $ "Yet to query: " ++ show xs'
+  queried <- searchX xs'
+  modify (queried <>)
+  return (M.unionWith (<>) found (M.filterWithKey (\x _ -> x `elem` xs) queried))-}
+
+--instance InfoDb IP where
+
+--instance InfoDb MacAddr where
+
+{-class InfoElement a where
+  type InfoDb a
+  --xSwPorts :: InfoDb a -> [SwPort]
+  --swPortInfoToX :: SwPortInfo -> InfoDb a
+  searchX ::
+    (MonadReader Config m, MonadError String m, MonadIO m) =>
+    [a] -> m (InfoDb a)-}
+
+class InfoDb a where
+  type InfoElem a
+  xSwPorts :: a -> [SwPort]
+  swPortInfoToX :: SwPortInfo -> a
+  searchX ::
+    (MonadReader Config m, MonadError String m, MonadIO m) =>
+    [InfoElem a] -> m a
+
+instance InfoDb IPInfo where
+  type InfoElem IPInfo = IP
+  searchX = searchIPs
+  --queryX =...
+  xSwPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems
+  -- getSwPorts
+  swPortInfoToX = swPortInfoToIPInfo
+  -- fromSwPortInfo
 
