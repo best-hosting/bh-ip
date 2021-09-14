@@ -45,44 +45,9 @@ queryPorts ::
   [SwPort] -> m SwPortInfo
 queryPorts swPorts = do
   Config{..} <- ask
-  queried <- fmap (resolvePortIPs macIpMap) . flip runReaderT swInfo $ runOn onPorts swNames go
+  queried <- searchPorts swPorts
   modify (queried <>)
   return queried
- where
-  onPorts :: SwName -> [PortNum]
-  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
-  swNames :: [SwName]
-  swNames = nub . map portSw $ swPorts
-  go :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
-  go = do
-    portSw <- asks (swName . switchData)
-    ps <- asks telnetIn
-    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ps
-    putResult res
-    sendExit
-
-
-queryMacs3 ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] ->
-  m (M.Map MacAddr SwPortInfo)
-queryMacs3 macs = do
-  Config{..} <- ask
-  macPorts <- flip runReaderT swInfo $ runTill maybeMacs go
-  return (M.map (resolvePortIPs macIpMap) macPorts)
- where
-  maybeMacs :: M.Map MacAddr SwPortInfo -> Maybe [MacAddr]
-  maybeMacs res = let found = M.keys . M.filter (/= M.empty) $ res
-                in  case filter (`notElem` found) macs of
-                      [] -> Nothing
-                      xs -> Just xs
-  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr SwPortInfo) ()
-  go = do
-    portSw <- asks (swName . switchData)
-    ms  <- asks telnetIn
-    res <- M.map (M.mapKeys (\p -> SwPort{portSpec = p, ..})) <$> findMacsPort ms
-    putResult res
-    sendExit
 
 -- TODO: I may use hash to determine changed db file. And then treat /that/
 -- file as source and generate others from it.
@@ -115,6 +80,29 @@ searchIPs ips = do
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macInfoToIPInfo <$> searchMacs macs
 
+-- | This is not really "search", but just quering info about ports. It names
+-- this way just to make show its relevant to 'searchX' family of functions.
+searchPorts ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [SwPort] -> m SwPortInfo
+searchPorts swPorts = do
+  Config{..} <- ask
+  resolvePortIPs macIpMap <$> runReaderT (runOn onPorts swNames go) swInfo
+ where
+  -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
+  -- need to change it everywhere, includeing findX funcs.. [refactor]
+  onPorts :: SwName -> [PortNum]
+  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
+  swNames :: [SwName]
+  swNames = nub . map portSw $ swPorts
+  go :: TelnetRunM TelnetParserResult [PortNum] SwPortInfo ()
+  go = do
+    portSw <- asks (swName . switchData)
+    ps <- asks telnetIn
+    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ps
+    putResult res
+    sendExit
+
 -- | Query ports, where macs from 'MacInfo' where found and build new
 -- (updated) 'MacInfo'.
 verifyMacInfo ::
@@ -122,48 +110,16 @@ verifyMacInfo ::
   MacInfo -> m MacInfo
 verifyMacInfo mInfo = do
   Config{..} <- ask
-  flip runReaderT swInfo $ runOn onPorts swNames go
- where
-  swPorts :: [SwPort]
-  swPorts = nub . concatMap (S.toList . macSwPorts) . M.elems $ mInfo
-  -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
-  -- need to change it everywhere, includeing findX funcs.. [refactor]
-  onPorts :: SwName -> [PortNum]
-  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
-  swNames :: [SwName]
-  swNames = nub . map portSw $ swPorts
-  go :: TelnetRunM TelnetParserResult [PortNum] MacInfo ()
-  go = do
-    portSw <- asks (swName . switchData)
-    ps <- asks telnetIn
-    res <- swPortInfoToMacInfo . M.mapKeys (\p -> SwPort{portSpec = p, ..})
-      <$> findPortInfo ps
-    putResult res
-    sendExit
+  let swPorts = nub . concatMap (S.toList . macSwPorts) . M.elems $ mInfo
+  swPortInfoToMacInfo <$> searchPorts swPorts
 
 verifyIPInfo ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   IPInfo -> m IPInfo
 verifyIPInfo ipInfo = do
   Config{..} <- ask
-  flip runReaderT swInfo $ runOn onPorts swNames (go macIpMap)
- where
-  swPorts :: [SwPort]
-  swPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems $ ipInfo
-  -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
-  -- need to change it everywhere, includeing findX funcs.. [refactor]
-  onPorts :: SwName -> [PortNum]
-  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
-  swNames :: [SwName]
-  swNames = nub . map portSw $ swPorts
-  go :: MacIpMap -> TelnetRunM TelnetParserResult [PortNum] IPInfo ()
-  go macIpMap = do
-    portSw <- asks (swName . switchData)
-    ps <- asks telnetIn
-    res <- swPortInfoToIPInfo . resolvePortIPs macIpMap . M.mapKeys (\p -> SwPort{portSpec = p, ..})
-      <$> findPortInfo ps
-    putResult res
-    sendExit
+  let swPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems $ ipInfo
+  swPortInfoToIPInfo <$> searchPorts swPorts
 
 -- | Query mac address in 'MacInfo' (presumably obtained from cache) and
 -- update info, if found. Otherwise search for mac address.
@@ -174,8 +130,7 @@ queryMacs ::
 queryMacs macs0 = do
   -- TODO: Can this pattern be generalized?
   Config{..} <- ask
-  updated <- get >>=
-    fmap (resolveMacIPs macIpMap) . verifyMacInfo . M.filterWithKey (\m _ -> m `elem` macs0)
+  updated <- get >>= verifyMacInfo . M.filterWithKey (\m _ -> m `elem` macs0)
   modify (updated <>)
   let found = M.filterWithKey (\m _ -> m `elem` macs0) updated
       macs1 = macs0 \\ M.keys found
@@ -186,7 +141,7 @@ queryMacs macs0 = do
   modify (queried <>)
   return (M.unionWith (<>) found queried)
 
--- FIXME: Use 'verify :: [SwPort] -> SwPortInfo' ? Or just use 'queryPorts'
+-- FIXME: Use 'verify :: \[SwPort\] -> SwPortInfo' ? Or just use 'queryPorts'
 -- instead in 'verifyMacInfo'? Can i merge 'verifyMacInfo' and 'verifyIPInfo'?
 -- [current]
 -- FIXME: 'queryIPs' and 'queryMacs' seems identical. Can i generalize them?
