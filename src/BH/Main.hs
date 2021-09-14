@@ -7,7 +7,6 @@ module BH.Main (
   readSwInfo,
   queryPorts,
   searchMacs,
-  verifyMacInfo,
   queryMacs,
   queryIPs,
 )
@@ -103,16 +102,6 @@ searchPorts swPorts = do
     putResult res
     sendExit
 
--- | Query ports, where macs from 'MacInfo' where found and build new
--- (updated) 'MacInfo'.
-verifyMacInfo ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  MacInfo -> m MacInfo
-verifyMacInfo mInfo = do
-  Config{..} <- ask
-  let swPorts = nub . concatMap (S.toList . macSwPorts) . M.elems $ mInfo
-  swPortInfoToMacInfo <$> searchPorts swPorts
-
 verifyIPInfo ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   IPInfo -> m IPInfo
@@ -130,7 +119,10 @@ queryMacs ::
 queryMacs macs0 = do
   -- TODO: Can this pattern be generalized?
   Config{..} <- ask
-  updated <- get >>= verifyMacInfo . M.filterWithKey (\m _ -> m `elem` macs0)
+  cached <- M.filterWithKey (\m _ -> m `elem` macs0) <$> get
+  let f :: MacInfo -> [SwPort]
+      f = nub . concatMap (S.toList . macSwPorts) . M.elems
+  updated <- swPortInfoToMacInfo <$> searchPorts (f cached)
   modify (updated <>)
   let found = M.filterWithKey (\m _ -> m `elem` macs0) updated
       macs1 = macs0 \\ M.keys found
@@ -141,9 +133,6 @@ queryMacs macs0 = do
   modify (queried <>)
   return (M.unionWith (<>) found queried)
 
--- FIXME: Use 'verify :: \[SwPort\] -> SwPortInfo' ? Or just use 'queryPorts'
--- instead in 'verifyMacInfo'? Can i merge 'verifyMacInfo' and 'verifyIPInfo'?
--- [current]
 -- FIXME: 'queryIPs' and 'queryMacs' seems identical. Can i generalize them?
 queryIPs ::
   (MonadReader Config m, MonadState IPInfo m, MonadError String m, MonadIO m)
@@ -152,7 +141,10 @@ queryIPs ::
 queryIPs ips0 = do
   -- TODO: Can this pattern be generalized?
   Config{..} <- ask
-  updated <- get >>= verifyIPInfo . M.filterWithKey (\i _ -> i `elem` ips0)
+  cached <- M.filterWithKey (\i _ -> i `elem` ips0) <$> get
+  let f :: IPInfo -> [SwPort]
+      f = nub . concatMap (S.toList . ipSwPorts) . M.elems
+  updated <- swPortInfoToIPInfo <$> searchPorts (f cached)
   modify (updated <>)
   let found = M.filterWithKey (\i _ -> i `elem` ips0) updated
       ips1 = ips0 \\ M.keys found
