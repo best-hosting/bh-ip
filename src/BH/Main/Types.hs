@@ -163,6 +163,8 @@ type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
 
 -- TODO: Read port mode (access/trunk) to 'PortData'.
+-- FIXME: Do not use 'MacInfo' inside 'PortData. Just 'MacAddr' will be
+-- enough.
 data PortData = PortData
   { portState :: PortState
   , --, portMode :: PortMode
