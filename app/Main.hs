@@ -110,6 +110,21 @@ initConfig Options{..} action = do
   (macIpMap, ipMacMap) <- queryLinuxArp macIpFile queryHost
   runReaderT action Config{..}
 
+
+workQuery ::
+  (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c) =>
+  FilePath -> [IElem c] -> m c
+workQuery p xs = do
+  (res, newMacInfo) <- readYaml p >>= runStateT (query xs)
+  -- TODO: Use 'Config' parameter to store swport db filename.
+  -- FIXME: Update all dbs after each query.
+  liftIO $ do
+    cwd <- getCurrentDirectory
+    (f, _) <- openTempFile cwd p
+    Y.encodeFile f newMacInfo
+    renameFile f p
+  return res
+
 workQueryPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [T.Text] ->
@@ -121,29 +136,7 @@ workQueryPorts ts = do
         let m = M.lookup sn swInfo
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  (res, newMacInfo) <- readYaml "swportinfo.yaml" >>= runStateT (query swports)
-  liftIO $ B.putStr . Y.encode $ (res :: SwPortInfo)
-  liftIO $ do
-    cwd <- getCurrentDirectory
-    (f, _) <- openTempFile cwd "swportinfo.yaml"
-    Y.encodeFile f newMacInfo
-    renameFile f "swportinfo.yaml"
-
-
-{--- | Lookup single mac port in a cache.
-lookupMacPort :: MacAddr -> SwPortInfo -> SwPortInfo
-lookupMacPort mac = M.filter (\PortData{..} -> M.member mac portAddrs)
-
--- | Lookup mac ports in cache (without verify).
-lookupMacPorts :: [MacAddr] -> SwPortInfo -> SwPortInfo
-lookupMacPorts macs swpInfo =
-  foldr (\m -> (lookupMacPort m swpInfo <>)) mempty $ macs
-
--- | Lookup mac ports in cache and verify (query) info about found ports.
-lookupMacPorts' ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] -> SwPortInfo -> m SwPortInfo
-lookupMacPorts' macs = queryPorts . M.keys . lookupMacPorts macs-}
+  workQuery "swportinfo.yaml" swports >>= \res -> liftIO . B.putStr . Y.encode $ (res :: SwPortInfo)
 
 -- FIXME: May this be the common function for all query types?
 -- TODO: Query only cache, if requested. On the other hand, i probably may not
@@ -154,31 +147,14 @@ workQueryMacs ::
   [MacAddr] ->
   m ()
 workQueryMacs macs = do
-  (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (query macs)
-  liftIO $ B.putStr . Y.encode $ (res :: MacInfo)
-  -- TODO: Use 'Config' parameter to store swport db filename.
-  -- FIXME: If one file is missing, rebuild it from others.
-  liftIO $ do
-    cwd <- getCurrentDirectory
-    (f, _) <- openTempFile cwd "macinfo.yaml"
-    Y.encodeFile f newMacInfo
-    renameFile f "macinfo.yaml"
-
+  workQuery "macinfo.yaml" macs >>= \res -> liftIO . B.putStr . Y.encode $ (res :: MacInfo)
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m ()
-workQueryIPs ips = do
-  (res, newMacInfo) <- readYaml "ipinfo.yaml" >>= runStateT (query ips)
-  liftIO $ B.putStr . Y.encode $ (res :: IPInfo)
-  -- TODO: Use 'Config' parameter to store swport db filename.
-  -- FIXME: Update all dbs after each query.
-  liftIO $ do
-    cwd <- getCurrentDirectory
-    (f, _) <- openTempFile cwd "ipinfo.yaml"
-    Y.encodeFile f newMacInfo
-    renameFile f "ipinfo.yaml"
+workQueryIPs ips =
+  workQuery "ipinfo.yaml" ips >>= \res -> liftIO . B.putStr . Y.encode $ (res :: IPInfo)
 
 
 main :: IO ()

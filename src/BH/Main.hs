@@ -16,6 +16,7 @@ module BH.Main (
 )
 where
 
+import Data.Aeson
 import qualified Data.Map as M
 import Control.Monad.Reader
 import Control.Monad.Except
@@ -169,49 +170,13 @@ queryX xs = do
   modify (queried <>)
   return (M.unionWith (<>) found (M.filterWithKey (\x _ -> x `elem` xs) queried))-}
 
---instance InfoDb IP where
-
---instance InfoDb MacAddr where
-
-{-class InfoElement a where
-  type InfoDb a
-  --xSwPorts :: InfoDb a -> [SwPort]
-  --swPortInfoToX :: SwPortInfo -> InfoDb a
-  searchX ::
-    (MonadReader Config m, MonadError String m, MonadIO m) =>
-    [a] -> m (InfoDb a)-}
-
-{-class (Semigroup c, Eq (InfoElem c), Show (InfoElem c), Show c) => InfoDb c where
-  type InfoElem c
-  getSwPorts :: c -> [SwPort]
-  fromSwPortInfo :: SwPortInfo -> c
-  filterDb :: (InfoElem c -> Bool) -> c -> c
-  dbKeys :: c -> [InfoElem c]
-  search ::
-    (MonadReader Config m, MonadError String m, MonadIO m)
-    => [InfoElem c] -> m c
-  query ::
-    (MonadReader Config m, MonadState c m, MonadError String m, MonadIO m)
-    => [InfoElem c] -> m c
-  query xs = do
-    -- TODO: Can this pattern be generalized?
-    Config{..} <- ask
-    cached <- filterDb (\x -> x `elem` xs) <$> get
-    updated <- fromSwPortInfo <$> searchPorts (getSwPorts cached)
-    modify (updated <>)
-    let found = filterDb (\x -> x `elem` xs) updated
-        xs' = xs \\ dbKeys found
-    liftIO $ print "Found in cache: "
-    liftIO $ print found
-    liftIO $ print $ "Yet to query: " ++ show xs'
-    queried <- search xs'
-    modify (queried <>)
-    --return (M.unionWith (<>) found queried)
-    return (found <> queried)-}
-
 class ( Ord (IElem c)
       , Semigroup (IData c)
       , c ~ M.Map (IElem c) (IData c)
+      , FromJSONKey (IElem c)
+      , FromJSON (IData c)
+      , ToJSONKey (IElem c)
+      , ToJSON (IData c)
       , Show (IElem c)
       , Show (IData c))
     => InfoDb c where
@@ -273,18 +238,4 @@ newtype instance D IP = DI IP
 
 foo :: D IP
 foo = DI (IP 1 2 3 4)
-
-{-instance InfoDb MacInfo where
-  type InfoElem MacInfo = MacAddr
-  getSwPorts = nub . concatMap (S.toList . macSwPorts) . M.elems
-  search = searchMacs
-
-instance InfoDb IPInfo where
-  type InfoElem IPInfo = IP
-  search = searchIPs
-  --query =...
-  getSwPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems
-  -- getSwPorts
-  fromSwPortInfo = swPortInfoToIPInfo
-  -- fromSwPortInfo-}
 

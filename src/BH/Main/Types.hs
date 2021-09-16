@@ -1,5 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module BH.Main.Types (
   MacIpMap,
@@ -28,6 +32,10 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Maybe
+import Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.Except
+import Data.List
 
 import BH.Common
 import BH.IP
@@ -193,4 +201,5 @@ instance Semigroup PortData where
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
+
 
