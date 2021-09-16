@@ -8,6 +8,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Main where
 
@@ -879,4 +880,36 @@ comparisonReport :: (ComonadTraced (Sum Int) w, ComonadStore Region w)
 comparisonReport w =
     let otherReports = extract $ w =>> detailedReport2 =>> otherRegions
     in  "Comparison report:\n" <> unlines otherReports
+
+class MyClass t where
+  myValue :: t
+
+instance MyClass Int where myValue = 0
+instance MyClass Bool where myValue = True
+
+
+instance (MyClass a, MyClass b) => MyClass (a, b) where
+  myValue = (myValue, myValue)
+
+instance MyClass (Int, ()) where
+  myValue = (0, ())
+
+{-blah :: (Int, ())
+blah = myValue-}
+
+class PairOf a b where
+  thePair :: (a, b)
+
+{-instance Monoid a => PairOf a a where
+  thePair = (mempty, mempty)-}
+
+obtuseMempty :: Monoid t => t
+obtuseMempty = fst thePair
+
+evenMoreObtuseMempty :: Monoid t => t
+evenMoreObtuseMempty = let p = thePair in (fst p `mappend` snd p)
+
+
+instance (Monoid a, a ~ b) => PairOf a b where
+  thePair = (mempty, mempty)
 

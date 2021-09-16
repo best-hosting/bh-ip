@@ -121,8 +121,8 @@ workQueryPorts ts = do
         let m = M.lookup sn swInfo
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  (res, newMacInfo) <- readYaml "swportinfo.yaml" >>= runStateT (queryPorts swports)
-  liftIO $ B.putStr . Y.encode $ res
+  (res, newMacInfo) <- readYaml "swportinfo.yaml" >>= runStateT (query swports)
+  liftIO $ B.putStr . Y.encode $ (res :: SwPortInfo)
   liftIO $ do
     cwd <- getCurrentDirectory
     (f, _) <- openTempFile cwd "swportinfo.yaml"
@@ -154,8 +154,8 @@ workQueryMacs ::
   [MacAddr] ->
   m ()
 workQueryMacs macs = do
-  (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (queryMacs macs)
-  liftIO $ B.putStr . Y.encode $ res
+  (res, newMacInfo) <- readYaml "macinfo.yaml" >>= runStateT (query macs)
+  liftIO $ B.putStr . Y.encode $ (res :: MacInfo)
   -- TODO: Use 'Config' parameter to store swport db filename.
   -- FIXME: If one file is missing, rebuild it from others.
   liftIO $ do
@@ -170,8 +170,8 @@ workQueryIPs ::
   [IP] ->
   m ()
 workQueryIPs ips = do
-  (res, newMacInfo) <- readYaml "ipinfo.yaml" >>= runStateT (queryIPs ips)
-  liftIO $ B.putStr . Y.encode $ res
+  (res, newMacInfo) <- readYaml "ipinfo.yaml" >>= runStateT (query ips)
+  liftIO $ B.putStr . Y.encode $ (res :: IPInfo)
   -- TODO: Use 'Config' parameter to store swport db filename.
   -- FIXME: Update all dbs after each query.
   liftIO $ do
