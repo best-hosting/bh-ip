@@ -12,18 +12,17 @@ module BH.Main.Types (
   MacInfo,
   toMacInfo,
   MacData(..),
-  swPortInfoToMacInfo,
   resolveMacIPs,
   macIPsL,
   IPInfo,
   IPData(..),
   macInfoToIPInfo,
-  swPortInfoToIPInfo,
   SwPortInfo,
   PortInfo,
   PortData(..),
   portAddrsL,
   resolvePortIPs,
+  ToSwPortInfo(..),
 )
 where
 
@@ -95,16 +94,15 @@ instance FromJSON MacData where
       <*> v .: "ips"
       <*> v .: "ports"
 
-swPortInfoToMacInfo :: SwPortInfo -> MacInfo
-swPortInfoToMacInfo = M.foldrWithKey go M.empty
- where
-  go :: SwPort -> PortData -> MacInfo -> MacInfo
-  go sp PortData{..} z = M.unionWith (<>) z $
-    M.map (\x -> x{macSwPorts = S.singleton sp}) portAddrs
-
--- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
-resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
-resolveMacIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}
+instance ToSwPortInfo MacInfo where
+  -- FIXME: In fact, in all queryX functions i need unique items. May be change
+  -- type to 'S.Set' to force uniqueness?
+  getSwPorts = nub . concatMap (S.toList . macSwPorts) . M.elems
+  fromSwPortInfo = M.foldrWithKey go M.empty
+   where
+    go :: SwPort -> PortData -> MacInfo -> MacInfo
+    go sp PortData{..} z = M.unionWith (<>) z $
+      M.map (\x -> x{macSwPorts = S.singleton sp}) portAddrs
 
 toMacInfo :: MacTableEl -> MacInfo
 toMacInfo MacTableEl{..} = M.singleton elMac $
@@ -147,17 +145,20 @@ instance FromJSON IPData where
       <*> v .: "vlan"
       <*> v .: "ports"
 
--- Here there're two places, where 'SwPort' may be defined: key of
--- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i will
--- explicitly overwrite 'SwPort' obtained from 'portAddrs' with value of
--- current 'SwPortInfo' key.
-swPortInfoToIPInfo :: SwPortInfo -> IPInfo
-swPortInfoToIPInfo = M.foldrWithKey go M.empty
- where
-  go :: SwPort -> PortData -> IPInfo -> IPInfo
-  go p PortData{..} = M.unionWith (<>)
-    $ M.map (\x -> x{ipSwPorts = S.singleton p})
-    $ macInfoToIPInfo portAddrs
+instance ToSwPortInfo IPInfo where
+  getSwPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems
+  -- Here there're two places, where 'SwPort' may be defined: key of
+  -- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i
+  -- will explicitly overwrite 'SwPort' obtained from 'portAddrs' with value
+  -- of current 'SwPortInfo' key.
+  -- FIXME: Do not use 'MacInfo' in 'PortData'. Use just 'S.Set MacAddr'
+  -- instead.
+  fromSwPortInfo = M.foldrWithKey go M.empty
+   where
+    go :: SwPort -> PortData -> IPInfo -> IPInfo
+    go p PortData{..} = M.unionWith (<>)
+      $ M.map (\x -> x{ipSwPorts = S.singleton p})
+      $ macInfoToIPInfo portAddrs
 
 macInfoToIPInfo :: MacInfo -> IPInfo
 macInfoToIPInfo = M.foldrWithKey go M.empty
@@ -199,7 +200,18 @@ instance FromJSON PortData where
 instance Semigroup PortData where
     x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
 
+-- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
+resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
+resolveMacIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}
+
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
 
+class ToSwPortInfo a where
+  getSwPorts :: a -> [SwPort]
+  fromSwPortInfo :: SwPortInfo -> a
+
+instance ToSwPortInfo SwPortInfo where
+  getSwPorts = M.keys
+  fromSwPortInfo = id
 
