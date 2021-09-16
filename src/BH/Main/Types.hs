@@ -41,13 +41,6 @@ import BH.IP
 import BH.Switch
 
 
--- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
--- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
--- because when nmap scans network, vlan is already known. Moreover, 'vlan'
--- should be parent element for 'ips' and 'ports' fields on mac address. The
--- same is true for 'IPInfo': vlan should be parent element for 'macs' and
--- 'ports'. In other words, 'MacData' and 'IPData' should contain vlan-indexed
--- maps.
 type MacIpMap = M.Map MacAddr (S.Set IP)
 type IpMacMap = M.Map IP MacAddr
 
@@ -68,6 +61,29 @@ data MacData = MacData
   , macSwPorts :: S.Set SwPort
   }
   deriving (Eq, Show)
+
+
+-- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
+-- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
+-- because when nmap scans network, vlan is already known. Moreover, 'vlan'
+-- should be parent element for 'ips' and 'ports' fields on mac address. The
+-- same is true for 'IPInfo': vlan should be parent element for 'macs' and
+-- 'ports'. In other words, 'MacData' and 'IPData' should contain vlan-indexed
+-- maps.
+{-data MacData = MacData
+  { macIPs :: VlanInfo IP
+  , macSwPorts :: S.Set SwPort
+  }
+
+data IPData = IPData
+  { ipMacs :: VlanInfo MacAddr
+  , ipSwPorts :: S.Set SwPort
+  }
+
+data PortData = PortData
+  { portState ..
+  , portAddrs :: M.Map MacAddr (VlanInfo IP)
+  }-}
 
 macIPsL :: LensC MacData (S.Set IP)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
@@ -173,7 +189,10 @@ type PortInfo = M.Map PortNum PortData
 
 -- TODO: Read port mode (access/trunk) to 'PortData'.
 -- FIXME: Do not use 'MacInfo' inside 'PortData. Just 'MacAddr' will be
--- enough.
+-- enough. Well, not really. Now in all DBs i may find all info: in 'MacInfo'
+-- i may find both IP and 'SwPort', in 'IPInfo' i also may find both 'MacAddr'
+-- and 'SwPort'. And this should remain. But i just need to remove duplication
+-- of 'ports' from 'PortData'.
 data PortData = PortData
   { portState :: PortState
   , --, portMode :: PortMode
@@ -207,6 +226,7 @@ resolveMacIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.l
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
 
+-- FIXME: Rename to 'HasPorts'.
 class ToSwPortInfo a where
   getSwPorts :: a -> [SwPort]
   fromSwPortInfo :: SwPortInfo -> a

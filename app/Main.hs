@@ -136,7 +136,9 @@ workQueryPorts ts = do
         let m = M.lookup sn swInfo
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  workQuery "swportinfo.yaml" swports >>= \res -> liftIO . B.putStr . Y.encode $ (res :: SwPortInfo)
+  let f :: SwPortInfo -> SwPortInfo
+      f = id
+  workQuery "swportinfo.yaml" swports >>= liftIO . B.putStr . Y.encode . f
 
 -- FIXME: May this be the common function for all query types?
 -- TODO: Query only cache, if requested. On the other hand, i probably may not

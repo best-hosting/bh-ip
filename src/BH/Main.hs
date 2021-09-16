@@ -93,6 +93,9 @@ searchIPs ips = do
 
 -- FIXME: Use 'newtype' instead of 'MacInfo'. But then i can not longer
 -- constrain 'c ~ M.Map ..', so what to do? Use some kind of 'WrappedMap' ?
+-- I may just define class 'MapLike' providing conversion function from a type
+-- to a Map. And then use this conversion functions here. That way i won't
+-- define instance for 'Map', but for my custom type.
 class ( Ord (IElem c)
       , Semigroup (IData c)
       , c ~ M.Map (IElem c) (IData c)
@@ -104,6 +107,7 @@ class ( Ord (IElem c)
       , Show (IElem c)
       , Show (IData c))
     => InfoDb c where
+  -- FIXME: Rename to 'InfoKey' and 'InfoData'.
   type IElem c
   type IData c
   search ::
