@@ -69,7 +69,7 @@ data MacData = MacData
 -- should be parent element for 'ips' and 'ports' fields on mac address. The
 -- same is true for 'IPInfo': vlan should be parent element for 'macs' and
 -- 'ports'. In other words, 'MacData' and 'IPData' should contain vlan-indexed
--- maps.
+-- maps. [current]
 {-data MacData = MacData
   { macIPs :: VlanInfo IP
   , macSwPorts :: S.Set SwPort
@@ -84,6 +84,11 @@ data PortData = PortData
   { portState ..
   , portAddrs :: M.Map MacAddr (VlanInfo IP)
   }-}
+-- FIXME: If i will store all ips and all macs in 'MacInfo' and 'IPInfo'
+-- instead of separate 'MacIpMap' and 'IpMacMap', then conversion 'MacInfo' ->
+-- 'SwPortInfo' and 'IPInfo' -> 'SwPortInfo' will be lossy (for some ports and
+-- IPs i may not know ports (yet)). Thus, db verification should be done in
+-- reverse direction only. [verify]
 
 macIPsL :: LensC MacData (S.Set IP)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x

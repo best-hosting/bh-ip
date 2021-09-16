@@ -95,7 +95,7 @@ searchIPs ips = do
 -- constrain 'c ~ M.Map ..', so what to do? Use some kind of 'WrappedMap' ?
 -- I may just define class 'MapLike' providing conversion function from a type
 -- to a Map. And then use this conversion functions here. That way i won't
--- define instance for 'Map', but for my custom type.
+-- define instance for 'Map', but for my custom type. [current]
 class ( Ord (IElem c)
       , Semigroup (IData c)
       , c ~ M.Map (IElem c) (IData c)

@@ -140,7 +140,6 @@ workQueryPorts ts = do
       f = id
   workQuery "swportinfo.yaml" swports >>= liftIO . B.putStr . Y.encode . f
 
--- FIXME: May this be the common function for all query types?
 -- TODO: Query only cache, if requested. On the other hand, i probably may not
 -- offer such functionality. After all, cache is yaml and `yq` will be better
 -- in querying it anyway. But in case `yq` is not available.. well..
