@@ -134,7 +134,7 @@ toMacInfo MacTableEl{..} = M.singleton elMac $
     }
 
 -- TODO: Subnets and vlans for IPs.
-type IPInfo = M.Map IP IPData
+newtype IPInfo = IPInfo {fromIPInfo :: M.Map IP IPData}
 
 data IPData = IPData
   { ipMacAddrs :: S.Set MacAddr
