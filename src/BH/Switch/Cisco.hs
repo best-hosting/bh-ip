@@ -180,8 +180,7 @@ findMacData mac = do
     []    -> return Nothing
     [MacTableEl{..}]  -> return . Just $
       MacData
-        { macVlan = elVlan
-        , macIPs = S.empty
+        { macIPs = M.singleton elVlan S.empty
         , macSwPorts = S.singleton (SwPort{portSw = swName, portSpec = elPort})
         }
     (_:_) -> error "Several ports for a single mac"

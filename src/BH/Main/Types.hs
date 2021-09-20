@@ -13,7 +13,7 @@ module BH.Main.Types (
   toMacInfo,
   MacData(..),
   resolveMacIPs,
-  macIPsL,
+  --macIPsL,
   IPInfo,
   IPData(..),
   SwPortInfo,
@@ -51,14 +51,15 @@ data Config = Config
                 }
   deriving (Show)
 
+type VlanInfo = M.Map Vlan
+
 -- TODO: Humans works with IPs, not with mac addresses. So, it's more natural
 -- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
 data MacData = MacData
-  { macVlan :: Vlan
-  --, macVendor :: T.Text
-  , macIPs :: S.Set IP
+  { macIPs     :: M.Map Vlan (S.Set IP)
   , macSwPorts :: S.Set SwPort
+--, macVendor :: T.Text
   }
   deriving (Eq, Show)
 
@@ -90,45 +91,33 @@ data PortData = PortData
 -- IPs i may not know ports (yet)). Thus, db verification should be done in
 -- reverse direction only. [verify]
 
-macIPsL :: LensC MacData (S.Set IP)
-macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
+{-macIPsL :: LensC MacData (S.Set IP)
+macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x-}
 
 instance Semigroup MacData where
   x <> y = MacData
-            { macVlan = macVlan y
-            , macIPs = macIPs x <> macIPs y
+            { macIPs = M.unionWith (<>) (macIPs x) (macIPs y)
             , macSwPorts = macSwPorts x <> macSwPorts y
             }
 
 instance ToJSON MacData where
   toJSON MacData {..} =
     object $
-      [ "vlan" .= macVlan
-      , "ips"  .= macIPs
+      [ "ips"   .= macIPs
       , "ports" .= macSwPorts
       ]
 
 instance FromJSON MacData where
   parseJSON = withObject "MacData" $ \v ->
     MacData
-      <$> v .: "vlan"
-      <*> v .: "ips"
+      <$> v .: "ips"
       <*> v .: "ports"
-
-toMacInfo :: MacTableEl -> MacInfo
-toMacInfo MacTableEl{..} = M.singleton elMac $
-  MacData
-    { macVlan = elVlan
-    , macIPs = mempty
-    , macSwPorts = S.empty
-    }
 
 -- TODO: Subnets and vlans for IPs.
 type IPInfo = M.Map IP IPData
 
 data IPData = IPData
-  { ipMacAddrs :: S.Set MacAddr
-  , ipVlan :: Vlan
+  { ipMacs :: M.Map Vlan (S.Set MacAddr)
   , ipSwPorts :: S.Set SwPort
   --, ipSubnet :: T.Text
   }
@@ -136,16 +125,14 @@ data IPData = IPData
 
 instance Semigroup IPData where
   x <> y = IPData
-            { ipMacAddrs = ipMacAddrs x <> ipMacAddrs y
-            , ipVlan = ipVlan y
+            { ipMacs    = M.unionWith (<>) (ipMacs x) (ipMacs y)
             , ipSwPorts = ipSwPorts x <> ipSwPorts y
             }
 
 instance ToJSON IPData where
   toJSON IPData{..} =
     object $
-      [ "macs" .= ipMacAddrs
-      , "vlan" .= ipVlan
+      [ "macs"  .= ipMacs
       , "ports" .= ipSwPorts
       ]
 
@@ -153,7 +140,6 @@ instance FromJSON IPData where
   parseJSON = withObject "IPData" $ \v ->
     IPData
       <$> v .: "macs"
-      <*> v .: "vlan"
       <*> v .: "ports"
 
 type SwPortInfo = M.Map SwPort PortData
@@ -192,8 +178,10 @@ instance Semigroup PortData where
     x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
+-- FIXME: Use 'IPInfo' to resolve mac ips.
 resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
-resolveMacIPs macIpMap = M.mapWithKey $ \m d -> d{macIPs = fromMaybe mempty (M.lookup m macIpMap)}
+resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
+  d{macIPs = M.singleton (Vlan 500) $ fromMaybe S.empty (M.lookup m macIpMap)}
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
@@ -233,10 +221,29 @@ instance ToSwPortInfo IPInfo where
       $ macInfoToIPInfo portAddrs
 
 macInfoToIPInfo :: MacInfo -> IPInfo
-macInfoToIPInfo = M.foldrWithKey go M.empty
+macInfoToIPInfo = M.foldrWithKey goM M.empty
  where
-  go :: MacAddr -> MacData -> IPInfo -> IPInfo
-  go mac MacData{..} =
-    let d = IPData{ipMacAddrs = S.singleton mac, ipVlan = macVlan, ipSwPorts = macSwPorts}
-    in  M.unionWith (<>) $ foldr (\ip z -> M.insertWith (<>) ip d z) M.empty macIPs
+  goM :: MacAddr -> MacData -> IPInfo -> IPInfo
+  goM mac MacData{..} = M.unionWith (<>) (M.foldrWithKey goV M.empty macIPs)
+   where
+    goV :: Vlan -> S.Set IP -> IPInfo -> IPInfo
+    goV vl ips =
+      let d = IPData{ipMacs = M.singleton vl (S.singleton mac), ipSwPorts = macSwPorts}
+      in  M.unionWith (<>) (foldr (\ip -> M.insertWith (<>) ip d) M.empty ips)
+
+toMacInfo :: MacTableEl -> MacInfo
+toMacInfo MacTableEl{..} = M.singleton elMac $
+  MacData
+    { macIPs = M.singleton elVlan S.empty
+    -- I don't know 'SwName' here, so i can't define port.
+    , macSwPorts = S.empty
+    }
+
+toMacInfo' :: SwName -> MacTableEl -> MacInfo
+toMacInfo' portSw MacTableEl{..} = M.singleton elMac $
+  MacData
+    { macIPs = M.singleton elVlan S.empty
+    -- I don't know 'SwName' here, so i can't define port.
+    , macSwPorts = S.singleton SwPort{portSpec = elPort, ..}
+    }
 

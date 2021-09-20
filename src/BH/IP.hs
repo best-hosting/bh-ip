@@ -261,14 +261,21 @@ parseIP t = do
         []                      -> Left "Can't read IP2 octet."
         _                       -> Left "Huita kakaya-to"
 
-newtype Vlan = Vlan Int
-  deriving (Eq, Show)
+newtype Vlan = Vlan {getVlan :: Int}
+  deriving (Eq, Ord, Show)
 
 instance ToJSON Vlan where
   toJSON (Vlan x) = toJSON x
 
+instance ToJSONKey Vlan where
+  toJSONKey = let txtVlan (Vlan x) = T.pack $ "vlan" <> show x
+              in  ToJSONKeyText txtVlan (JE.text . txtVlan)
+
 instance FromJSON Vlan where
   parseJSON = fmap Vlan . parseJSON
+
+instance FromJSONKey Vlan where
+  fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly (A.string "vlan" *> vlanP))
 
 -- | Parser for vlan number.
 vlanP :: A.Parser Vlan
