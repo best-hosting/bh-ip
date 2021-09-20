@@ -23,6 +23,7 @@ module BH.Main.Types (
   portAddrsL,
   resolvePortIPs,
   ToSwPortInfo(..),
+  MapLike(..),
 )
 where
 
@@ -133,8 +134,20 @@ toMacInfo MacTableEl{..} = M.singleton elMac $
     , macSwPorts = S.empty
     }
 
+class MapLike a where
+  type MapKey a
+  type MapData a
+  toMap :: a -> M.Map (MapKey a) (MapData a)
+  fromMap :: M.Map (MapKey a) (MapData a) -> a
+
 -- TODO: Subnets and vlans for IPs.
 newtype IPInfo = IPInfo {fromIPInfo :: M.Map IP IPData}
+
+instance MapLike IPInfo where
+  type MapKey  IPInfo = IP
+  type MapData IPInfo = IPData
+  toMap   = fromIPInfo
+  fromMap = IPInfo
 
 data IPData = IPData
   { ipMacAddrs :: S.Set MacAddr
@@ -167,27 +180,30 @@ instance FromJSON IPData where
       <*> v .: "ports"
 
 instance ToSwPortInfo IPInfo where
-  getSwPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems
+  getSwPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems . fromIPInfo
   -- Here there're two places, where 'SwPort' may be defined: key of
   -- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i
   -- will explicitly overwrite 'SwPort' obtained from 'portAddrs' with value
   -- of current 'SwPortInfo' key.
   -- FIXME: Do not use 'MacInfo' in 'PortData'. Use just 'S.Set MacAddr'
   -- instead.
-  fromSwPortInfo = M.foldrWithKey go M.empty
+  fromSwPortInfo = M.foldrWithKey go (IPInfo M.empty)
    where
     go :: SwPort -> PortData -> IPInfo -> IPInfo
-    go p PortData{..} = M.unionWith (<>)
-      $ M.map (\x -> x{ipSwPorts = S.singleton p})
-      $ macInfoToIPInfo portAddrs
+    go p PortData{..} =
+      IPInfo
+        . M.unionWith (<>) (M.map (\x -> x{ipSwPorts = S.singleton p}) (fromIPInfo $ macInfoToIPInfo portAddrs))
+        . fromIPInfo
 
 macInfoToIPInfo :: MacInfo -> IPInfo
-macInfoToIPInfo = M.foldrWithKey go M.empty
+macInfoToIPInfo = M.foldrWithKey go (IPInfo M.empty)
  where
   go :: MacAddr -> MacData -> IPInfo -> IPInfo
   go mac MacData{..} =
     let d = IPData{ipMacAddrs = S.singleton mac, ipVlan = macVlan, ipSwPorts = macSwPorts}
-    in  M.unionWith (<>) $ foldr (\ip z -> M.insertWith (<>) ip d z) M.empty macIPs
+    in  IPInfo
+          . M.unionWith (<>) (foldr (\ip z -> M.insertWith (<>) ip d z) M.empty macIPs)
+          . fromIPInfo
 
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
