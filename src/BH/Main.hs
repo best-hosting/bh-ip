@@ -138,10 +138,10 @@ class (
     liftIO $ print "Found in cache: "
     liftIO $ print found
     liftIO $ print $ "Yet to query: " ++ show xs'
-    queried <- search xs'
-    modify (queried <>)
-    let queriedOnly = M.filterWithKey (\x _ -> x `elem` xs) queried
-    return (M.unionWith (<>) found queriedOnly)
+    searched <- search xs'
+    modify (searched <>)
+    let queried = M.filterWithKey (\x _ -> x `elem` xs) searched
+    return (M.unionWith (<>) found queried)
 
 instance InfoDb SwPortInfo where
   query swPorts = do
