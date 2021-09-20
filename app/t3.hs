@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
 
 import qualified Options.Applicative as O
 import Control.Monad.Trans.Cont
@@ -15,6 +16,7 @@ import Data.Typeable
 import Data.Monoid
 import Data.Maybe
 import Data.Type.Equality
+import qualified Data.Map as M
 
 import BH.Common
 
@@ -410,4 +412,8 @@ fParse3T p = shiftT $ \k -> do
 
 newtype A = A Int
   deriving (Show)
+
+class c ~ M.Map (MK c) (MD c) => C c where
+  type MK c
+  type MD c
 

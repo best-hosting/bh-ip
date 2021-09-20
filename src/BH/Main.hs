@@ -4,11 +4,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module BH.Main (
   module BH.Main.Types,
   readSwInfo,
   InfoDb(..),
+  Searchable(..),
 )
 where
 
@@ -91,31 +93,39 @@ searchIPs ips = do
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macInfoToIPInfo <$> searchMacs macs
 
--- FIXME: Use 'newtype' instead of 'MacInfo'. But then i can not longer
--- constrain 'c ~ M.Map ..', so what to do? Use some kind of 'WrappedMap' ?
--- I may just define class 'MapLike' providing conversion function from a type
--- to a Map. And then use this conversion functions here. That way i won't
--- define instance for 'Map', but for my custom type. [current]
-class ( Ord (IElem c)
-      , Semigroup (IData c)
-      , c ~ M.Map (IElem c) (IData c)
-      , ToSwPortInfo c
-      , FromJSONKey (IElem c)
-      , FromJSON (IData c)
-      , ToJSONKey (IElem c)
-      , ToJSON (IData c)
-      , Show (IElem c)
-      , Show (IData c))
-    => InfoDb c where
-  -- FIXME: Rename to 'InfoKey' and 'InfoData'.
-  type IElem c
-  type IData c
+class c ~ M.Map (InfoKey c) (InfoData c) => Searchable c where
+  type InfoKey c
+  type InfoData c
   search ::
     (MonadReader Config m, MonadError String m, MonadIO m)
-    => [IElem c] -> m c
+    => [InfoKey c] -> m c
+
+instance Searchable MacInfo where
+  type InfoKey MacInfo = MacAddr
+  type InfoData MacInfo = MacData
+  search = searchMacs
+
+instance Searchable IPInfo where
+  type InfoKey IPInfo = IP
+  type InfoData IPInfo = IPData
+  search = searchIPs
+
+instance Searchable SwPortInfo where
+  type InfoKey SwPortInfo  = SwPort
+  type InfoData SwPortInfo = PortData
+  search = searchPorts
+
+class (
+      ToSwPortInfo c
+      , Searchable c
+      , Ord (InfoKey c)
+      , Semigroup (InfoData c)
+      , Show (InfoKey c)
+      , Show (InfoData c))
+    => InfoDb c where
   query ::
     (MonadReader Config m, MonadState c m, MonadError String m, MonadIO m)
-    => [IElem c] -> m c
+    => [InfoKey c] -> m c
   query xs = do
     cached <- M.filterWithKey (\x _ -> x `elem` xs) <$> get
     -- I can use just 'search' below, but then default implementation will
@@ -133,21 +143,12 @@ class ( Ord (IElem c)
     return (M.unionWith (<>) found queried)
 
 instance InfoDb SwPortInfo where
-  type IElem SwPortInfo = SwPort
-  type IData SwPortInfo = PortData
-  search = searchPorts
   query swPorts = do
     queried <- search swPorts
     modify (queried <>)
     return queried
 
 instance InfoDb MacInfo where
-  type IElem MacInfo = MacAddr
-  type IData MacInfo = MacData
-  search = searchMacs
 
 instance InfoDb IPInfo where
-  type IElem IPInfo = IP
-  type IData IPInfo = IPData
-  search = searchIPs
 

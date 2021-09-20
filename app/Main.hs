@@ -20,6 +20,7 @@ import System.IO.Temp
 import System.IO
 import System.Directory
 import Data.List
+import qualified Data.Aeson as A
 
 import BH.IP
 import BH.IP.Arp
@@ -112,8 +113,13 @@ initConfig Options{..} action = do
 
 
 workQuery ::
-  (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c) =>
-  FilePath -> [IElem c] -> m c
+  (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c
+      , A.FromJSONKey (InfoKey c)
+      , A.FromJSON (InfoData c)
+      , A.ToJSONKey (InfoKey c)
+      , A.ToJSON (InfoData c)
+  ) =>
+  FilePath -> [InfoKey c] -> m c
 workQuery p xs = do
   (res, newMacInfo) <- readYaml p >>= runStateT (query xs)
   -- TODO: Use 'Config' parameter to store swport db filename.
