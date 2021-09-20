@@ -140,7 +140,8 @@ class (
     liftIO $ print $ "Yet to query: " ++ show xs'
     queried <- search xs'
     modify (queried <>)
-    return (M.unionWith (<>) found queried)
+    let queriedOnly = M.filterWithKey (\x _ -> x `elem` xs) queried
+    return (M.unionWith (<>) found queriedOnly)
 
 instance InfoDb SwPortInfo where
   query swPorts = do
