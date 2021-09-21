@@ -95,6 +95,7 @@ searchIPs ips = do
   macInfoToIPInfo <$> searchMacs macs
 
 class c ~ M.Map (InfoKey c) (InfoData c) => Searchable c where
+  -- FIXME: Rename to 'SearchKey' and 'SearchData' or 'SearchResult'
   type InfoKey c
   type InfoData c
   search ::
