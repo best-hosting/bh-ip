@@ -29,7 +29,6 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Char
 import Control.Applicative.Combinators
-import qualified Data.Set as S
 
 import BH.Common
 import BH.IP
@@ -121,8 +120,9 @@ portStateP PortNum{..} = do
 
 -- | Find all mac addresses visible on port.
 findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b MacInfo
-findPortMacs p =
-  foldMap (toMacInfo Nothing)
+findPortMacs p = do
+  SwData{..} <- asks switchData
+  foldMap (toMacInfo swName)
     <$> sendAndParse pMacTableL
           macTableP
           (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
@@ -178,7 +178,7 @@ findMacData mac = do
             (cmd $ "show mac address-table address " <> showMacAddr mac)
   case mt of
     []    -> return Nothing
-    [x]   -> return . Just $ toMacData (Just swName) x
+    [x]   -> return . Just $ toMacData swName x
     (_:_) -> error "Several ports for a single mac"
 
 findMacsPort :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)

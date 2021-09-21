@@ -36,6 +36,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Except
 import Data.List
+import Data.Monoid
 
 import BH.Common
 import BH.IP
@@ -52,9 +53,9 @@ data Config = Config
                 }
   deriving (Show)
 
-type VlanInfo a = M.Map Vlan (VlanData a)
+type VlanInfo a = M.Map Vlan a
 
-data VlanData a = VlanData
+{-data VlanData a = VlanData
                     { vlanSwPort :: Maybe SwPort
                     , vlanAddrs  :: S.Set a
                     }
@@ -80,27 +81,47 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
   parseJSON = withObject "VlanData" $ \v ->
     VlanData
       <$> v .:? "port"
-      <*> v .:  "addrs"
+      <*> v .:  "addrs"-}
 
 -- TODO: Humans works with IPs, not with mac addresses. So, it's more natural
 -- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
+
+-- Single mac can't be on several ports.
 data MacData = MacData
-  { macIPs :: VlanInfo IP
+  { macIPs    :: S.Set IP
+  , macSwPort :: Last SwPort
 --, macVendor :: T.Text
   }
   deriving (Eq, Show)
 
-toMacData :: Maybe SwName -> MacTableEl -> MacData
-toMacData mn MacTableEl{..} =
-  let vd = VlanData
-            { vlanSwPort = (\portSw -> SwPort{portSpec = elPort, ..}) <$> mn
-            , vlanAddrs = S.empty
+instance Semigroup MacData where
+  x <> y = MacData
+            { macIPs    = macIPs x    <> macIPs y
+            , macSwPort = macSwPort x <> macSwPort y
             }
-  in  MacData {macIPs = M.singleton elVlan vd}
 
-toMacInfo :: Maybe SwName -> MacTableEl -> MacInfo
-toMacInfo mn x@(MacTableEl{..}) = M.singleton elMac (toMacData mn x)
+instance ToJSON MacData where
+  toJSON MacData{..} =
+    if macSwPort == Last Nothing
+      then object ["ips" .= macIPs]
+      else object ["ips" .= macIPs, "port" .= macSwPort]
+
+instance FromJSON MacData where
+  parseJSON = withObject "MacData" $ \v ->
+    MacData
+      <$> v .:  "ips"
+      <*> (Last <$> v .:? "port")
+
+toMacData :: SwName -> MacTableEl -> MacData
+toMacData portSw MacTableEl{..} =
+  MacData
+    { macIPs = S.empty
+    , macSwPort = Last (Just SwPort{portSpec = elPort, ..})
+    }
+
+toMacInfo :: SwName -> MacTableEl -> MacInfo
+toMacInfo n x@(MacTableEl{..}) = M.singleton elMac (toMacData n x)
 
 -- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
 -- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
@@ -135,34 +156,25 @@ data PortData = PortData
 {-macIPsL :: LensC MacData (S.Set IP)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x-}
 
-instance Semigroup MacData where
-  x <> y = MacData {macIPs = M.unionWith (<>) (macIPs x) (macIPs y)}
-
-instance ToJSON MacData where
-  toJSON MacData {..} =
-    object ["ips"   .= macIPs]
-
-instance FromJSON MacData where
-  parseJSON = withObject "MacData" $ \v -> MacData <$> v .: "ips"
-
 -- TODO: Subnets and vlans for IPs.
 type IPInfo = M.Map IP IPData
 
+-- Single IP can have several macs (though, this is broken network) and, thus,
+-- can be on several ports.
 data IPData = IPData
-  { ipMacs :: VlanInfo MacAddr
+  { ipMacPorts :: M.Map MacAddr (Maybe SwPort)
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
 instance Semigroup IPData where
-  x <> y = IPData {ipMacs = M.unionWith (<>) (ipMacs x) (ipMacs y)}
+  x <> y = IPData {ipMacPorts = ipMacPorts y <> ipMacPorts x}
 
 instance ToJSON IPData where
-  toJSON IPData{..} =
-    object ["macs"  .= ipMacs]
+  toJSON IPData{..} = object ["macPorts" .= ipMacPorts]
 
 instance FromJSON IPData where
-  parseJSON = withObject "IPData" $ \v -> IPData <$> v .: "macs"
+  parseJSON = withObject "IPData" $ \v -> IPData <$> v .: "macPorts"
 
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
@@ -207,11 +219,10 @@ instance Semigroup PortData where
 -- FIXME: Hardcoded vlan 500. [current]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
 -- whatever. Every maps should be inside vlan. And vlan should be removed
--- early at start.
+-- early at start. [current]
 resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
-  let vd = VlanData {vlanSwPort = maybe Nothing vlanSwPort (M.lookup (Vlan 500) (macIPs d)), vlanAddrs = fromMaybe S.empty (M.lookup m macIpMap)}
-  in  d{macIPs = M.singleton (Vlan 500) vd}
+  d{macIPs = fromMaybe S.empty (M.lookup m macIpMap)}
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
@@ -225,22 +236,22 @@ instance ToSwPortInfo SwPortInfo where
   getSwPorts = M.keys
   fromSwPortInfo = id
 
-instance ToSwPortInfo (VlanInfo a) where
-  getSwPorts = nub . mapMaybe vlanSwPort . M.elems
+{-instance ToSwPortInfo (VlanInfo a) where
+  getSwPorts = nub . mapMaybe vlanSwPort . M.elems-}
 
 instance ToSwPortInfo MacInfo where
   -- FIXME: In fact, in all queryX functions i need unique items. May be change
   -- type to 'S.Set' to force uniqueness? [current]
   -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
   -- entire program run to single vlan? [current]
-  getSwPorts = nub . concatMap (getSwPorts . macIPs) . M.elems
+  getSwPorts = nub . mapMaybe (getLast . macSwPort) . M.elems
   fromSwPortInfo = M.foldrWithKey go M.empty
    where
     go :: SwPort -> PortData -> MacInfo -> MacInfo
     go sp PortData{..} z = M.unionWith (<>) z portAddrs
 
 instance ToSwPortInfo IPInfo where
-  getSwPorts = nub . concatMap (getSwPorts . ipMacs) . M.elems
+  getSwPorts = nub . catMaybes . concatMap (M.elems . ipMacPorts) . M.elems
   -- Here there're two places, where 'SwPort' may be defined: key of
   -- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i
   -- will explicitly overwrite 'SwPort' obtained from 'portAddrs' with value
@@ -256,10 +267,7 @@ macInfoToIPInfo :: MacInfo -> IPInfo
 macInfoToIPInfo = M.foldrWithKey goM M.empty
  where
   goM :: MacAddr -> MacData -> IPInfo -> IPInfo
-  goM mac MacData{..} = M.unionWith (<>) (M.foldrWithKey goV M.empty macIPs)
-   where
-    goV :: Vlan -> VlanData IP -> IPInfo -> IPInfo
-    goV v vd@VlanData{..} =
-      let d = IPData{ipMacs = M.singleton v (vd{vlanAddrs = S.singleton mac})}
-      in  M.unionWith (<>) (foldr (\ip -> M.insertWith (<>) ip d) M.empty vlanAddrs)
+  goM mac MacData{..} =
+    let d = IPData{ipMacPorts = M.singleton mac (getLast macSwPort)}
+    in  M.unionWith (<>) (foldr (\ip -> M.insertWith (<>) ip d) M.empty macIPs)
 

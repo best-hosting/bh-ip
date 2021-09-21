@@ -22,13 +22,13 @@ import Data.Maybe
 import Data.List
 import qualified Data.Set as S
 import Control.Monad.State
+import Data.Monoid
 
 import BH.Main.Types
 import BH.Common
 import BH.IP
 import BH.Switch
 import BH.Switch.Cisco
-
 import BH.Cache
 import BH.Telnet
 
@@ -75,7 +75,7 @@ searchMacs macs = do
  where
   -- FIXME: Hardcoded vlan! [current]
   maybeMacs :: MacInfo -> Maybe [MacAddr]
-  maybeMacs res = let found = M.keys . M.filter (not . null . getSwPorts . macIPs) $ res
+  maybeMacs res = let found = M.keys . M.filter (isJust . getLast . macSwPort) $ res
                 in  case filter (`notElem` found) macs of
                       [] -> Nothing
                       xs -> Just xs
@@ -129,25 +129,35 @@ class (
     => [InfoKey c] -> m c
   query xs = do
     cached <- M.filterWithKey (\x _ -> x `elem` xs) <$> get
+    liftIO $ print "cached:"
+    liftIO $ print cached
     -- I can use just 'search' below, but then default implementation will
     -- depend on having 'SwPortInfo' defined. That's probably wrong, so i use
     -- concrete 'searchPorts' function.
     updated <- fromSwPortInfo <$> searchPorts (getSwPorts cached)
-    modify (updated <>)
-    let found = M.filterWithKey (\x _ -> x `elem` xs) updated
-        xs' = xs \\ M.keys found
+    liftIO $ print "updated:"
+    liftIO $ print updated
+    -- Always use 'unionWith (<>)', because left-biased 'union', which is used
+    -- in 'Monoid Map' instance, does not merge map data elements.
+    modify (M.unionWith (<>) updated)
+    huy <- get
+    liftIO $ print huy
+    -- FIXME: When ports are missed, updated won't work and will get
+    -- undetected. [current]
+    found <- M.filterWithKey (\x _ -> x `elem` xs) <$> get
+    let xs' = xs \\ M.keys found
     liftIO $ print "Found in cache: "
     liftIO $ print found
     liftIO $ print $ "Yet to query: " ++ show xs'
     queried <- search xs'
-    modify (queried <>)
+    modify (M.unionWith (<>) queried)
     let found' = M.filterWithKey (\x _ -> x `elem` xs) queried
     return (M.unionWith (<>) found found')
 
 instance InfoDb SwPortInfo where
   query swPorts = do
     queried <- search swPorts
-    modify (queried <>)
+    modify (M.unionWith (<>) queried)
     return queried
 
 instance InfoDb MacInfo where
