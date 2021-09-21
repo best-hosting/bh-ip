@@ -205,9 +205,12 @@ instance Semigroup PortData where
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: Use 'IPInfo' to resolve mac ips. [current]
 -- FIXME: Hardcoded vlan 500. [current]
+-- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
+-- whatever. Every maps should be inside vlan. And vlan should be removed
+-- early at start.
 resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
-  let vd = VlanData {vlanSwPort = Nothing, vlanAddrs = fromMaybe S.empty (M.lookup m macIpMap)}
+  let vd = VlanData {vlanSwPort = maybe Nothing vlanSwPort (M.lookup (Vlan 500) (macIPs d)), vlanAddrs = fromMaybe S.empty (M.lookup m macIpMap)}
   in  d{macIPs = M.singleton (Vlan 500) vd}
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
