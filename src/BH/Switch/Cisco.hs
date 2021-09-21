@@ -122,7 +122,7 @@ portStateP PortNum{..} = do
 -- | Find all mac addresses visible on port.
 findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b MacInfo
 findPortMacs p =
-  foldMap toMacInfo
+  foldMap (toMacInfo Nothing)
     <$> sendAndParse pMacTableL
           macTableP
           (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
@@ -178,11 +178,7 @@ findMacData mac = do
             (cmd $ "show mac address-table address " <> showMacAddr mac)
   case mt of
     []    -> return Nothing
-    [MacTableEl{..}]  -> return . Just $
-      MacData
-        { macIPs = M.singleton elVlan S.empty
-        , macSwPorts = S.singleton (SwPort{portSw = swName, portSpec = elPort})
-        }
+    [x]   -> return . Just $ toMacData (Just swName) x
     (_:_) -> error "Several ports for a single mac"
 
 findMacsPort :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)

@@ -73,8 +73,9 @@ searchMacs macs = do
   Config{..} <- ask
   resolveMacIPs macIpMap <$> runReaderT (runTill maybeMacs go) swInfo
  where
+  -- FIXME: Hardcoded vlan! [current]
   maybeMacs :: MacInfo -> Maybe [MacAddr]
-  maybeMacs res = let found = M.keys . M.filter (not . S.null . macSwPorts) $ res
+  maybeMacs res = let found = M.keys . M.filter (not . null . getSwPorts . macIPs) $ res
                 in  case filter (`notElem` found) macs of
                       [] -> Nothing
                       xs -> Just xs

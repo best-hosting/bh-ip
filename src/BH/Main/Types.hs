@@ -11,6 +11,7 @@ module BH.Main.Types (
   Config(..),
   MacInfo,
   toMacInfo,
+  toMacData,
   MacData(..),
   resolveMacIPs,
   --macIPsL,
@@ -51,18 +52,55 @@ data Config = Config
                 }
   deriving (Show)
 
-type VlanInfo = M.Map Vlan
+type VlanInfo a = M.Map Vlan (VlanData a)
+
+data VlanData a = VlanData
+                    { vlanSwPort :: Maybe SwPort
+                    , vlanAddrs  :: S.Set a
+                    }
+  deriving(Eq, Show)
+
+instance Ord a => Semigroup (VlanData a) where
+  x <> y = VlanData
+            { vlanSwPort = vlanSwPort y
+            , vlanAddrs  =
+                if vlanSwPort x == vlanSwPort y
+                  then vlanAddrs x <> vlanAddrs y
+                  else                vlanAddrs y
+            }
+
+instance ToJSON a => ToJSON (VlanData a) where
+  toJSON VlanData{..} =
+    object $
+      [ "port"  .= vlanSwPort
+      , "addrs" .= vlanAddrs
+      ]
+
+instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
+  parseJSON = withObject "VlanData" $ \v ->
+    VlanData
+      <$> v .:? "port"
+      <*> v .:  "addrs"
 
 -- TODO: Humans works with IPs, not with mac addresses. So, it's more natural
 -- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
 data MacData = MacData
-  { macIPs     :: M.Map Vlan (S.Set IP)
-  , macSwPorts :: S.Set SwPort
+  { macIPs :: VlanInfo IP
 --, macVendor :: T.Text
   }
   deriving (Eq, Show)
 
+toMacData :: Maybe SwName -> MacTableEl -> MacData
+toMacData mn MacTableEl{..} =
+  let vd = VlanData
+            { vlanSwPort = (\portSw -> SwPort{portSpec = elPort, ..}) <$> mn
+            , vlanAddrs = S.empty
+            }
+  in  MacData {macIPs = M.singleton elVlan vd}
+
+toMacInfo :: Maybe SwName -> MacTableEl -> MacInfo
+toMacInfo mn x@(MacTableEl{..}) = M.singleton elMac (toMacData mn x)
 
 -- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
 -- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
@@ -90,57 +128,41 @@ data PortData = PortData
 -- 'SwPortInfo' and 'IPInfo' -> 'SwPortInfo' will be lossy (for some ports and
 -- IPs i may not know ports (yet)). Thus, db verification should be done in
 -- reverse direction only. [verify]
+-- FIXME: In fact, ports should also be grouped by vlan. Because the same
+-- mac/IP may have different ports in different vlans. Or the same. That's
+-- completely unrelated and it should be the same in 'xInfo' structure.
 
 {-macIPsL :: LensC MacData (S.Set IP)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x-}
 
 instance Semigroup MacData where
-  x <> y = MacData
-            { macIPs = M.unionWith (<>) (macIPs x) (macIPs y)
-            , macSwPorts = macSwPorts x <> macSwPorts y
-            }
+  x <> y = MacData {macIPs = M.unionWith (<>) (macIPs x) (macIPs y)}
 
 instance ToJSON MacData where
   toJSON MacData {..} =
-    object $
-      [ "ips"   .= macIPs
-      , "ports" .= macSwPorts
-      ]
+    object ["ips"   .= macIPs]
 
 instance FromJSON MacData where
-  parseJSON = withObject "MacData" $ \v ->
-    MacData
-      <$> v .: "ips"
-      <*> v .: "ports"
+  parseJSON = withObject "MacData" $ \v -> MacData <$> v .: "ips"
 
 -- TODO: Subnets and vlans for IPs.
 type IPInfo = M.Map IP IPData
 
 data IPData = IPData
-  { ipMacs :: M.Map Vlan (S.Set MacAddr)
-  , ipSwPorts :: S.Set SwPort
+  { ipMacs :: VlanInfo MacAddr
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
 instance Semigroup IPData where
-  x <> y = IPData
-            { ipMacs    = M.unionWith (<>) (ipMacs x) (ipMacs y)
-            , ipSwPorts = ipSwPorts x <> ipSwPorts y
-            }
+  x <> y = IPData {ipMacs = M.unionWith (<>) (ipMacs x) (ipMacs y)}
 
 instance ToJSON IPData where
   toJSON IPData{..} =
-    object $
-      [ "macs"  .= ipMacs
-      , "ports" .= ipSwPorts
-      ]
+    object ["macs"  .= ipMacs]
 
 instance FromJSON IPData where
-  parseJSON = withObject "IPData" $ \v ->
-    IPData
-      <$> v .: "macs"
-      <*> v .: "ports"
+  parseJSON = withObject "IPData" $ \v -> IPData <$> v .: "macs"
 
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
@@ -175,13 +197,18 @@ instance FromJSON PortData where
       <*> v .: "addrs"
 
 instance Semigroup PortData where
-    x <> y = PortData{portState = portState x, portAddrs = portAddrs x <> portAddrs y}
+    x <> y = PortData
+              { portState = portState y
+              , portAddrs = portAddrs x <> portAddrs y
+              }
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
--- FIXME: Use 'IPInfo' to resolve mac ips.
+-- FIXME: Use 'IPInfo' to resolve mac ips. [current]
+-- FIXME: Hardcoded vlan 500. [current]
 resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
-  d{macIPs = M.singleton (Vlan 500) $ fromMaybe S.empty (M.lookup m macIpMap)}
+  let vd = VlanData {vlanSwPort = Nothing, vlanAddrs = fromMaybe S.empty (M.lookup m macIpMap)}
+  in  d{macIPs = M.singleton (Vlan 500) vd}
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
@@ -195,18 +222,22 @@ instance ToSwPortInfo SwPortInfo where
   getSwPorts = M.keys
   fromSwPortInfo = id
 
+instance ToSwPortInfo (VlanInfo a) where
+  getSwPorts = nub . mapMaybe vlanSwPort . M.elems
+
 instance ToSwPortInfo MacInfo where
   -- FIXME: In fact, in all queryX functions i need unique items. May be change
-  -- type to 'S.Set' to force uniqueness?
-  getSwPorts = nub . concatMap (S.toList . macSwPorts) . M.elems
+  -- type to 'S.Set' to force uniqueness? [current]
+  -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
+  -- entire program run to single vlan? [current]
+  getSwPorts = nub . concatMap (getSwPorts . macIPs) . M.elems
   fromSwPortInfo = M.foldrWithKey go M.empty
    where
     go :: SwPort -> PortData -> MacInfo -> MacInfo
-    go sp PortData{..} z = M.unionWith (<>) z $
-      M.map (\x -> x{macSwPorts = S.singleton sp}) portAddrs
+    go sp PortData{..} z = M.unionWith (<>) z portAddrs
 
 instance ToSwPortInfo IPInfo where
-  getSwPorts = nub . concatMap (S.toList . ipSwPorts) . M.elems
+  getSwPorts = nub . concatMap (getSwPorts . ipMacs) . M.elems
   -- Here there're two places, where 'SwPort' may be defined: key of
   -- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i
   -- will explicitly overwrite 'SwPort' obtained from 'portAddrs' with value
@@ -216,9 +247,7 @@ instance ToSwPortInfo IPInfo where
   fromSwPortInfo = M.foldrWithKey go M.empty
    where
     go :: SwPort -> PortData -> IPInfo -> IPInfo
-    go p PortData{..} = M.unionWith (<>)
-      $ M.map (\x -> x{ipSwPorts = S.singleton p})
-      $ macInfoToIPInfo portAddrs
+    go p PortData{..} = M.unionWith (<>) (macInfoToIPInfo portAddrs)
 
 macInfoToIPInfo :: MacInfo -> IPInfo
 macInfoToIPInfo = M.foldrWithKey goM M.empty
@@ -226,24 +255,8 @@ macInfoToIPInfo = M.foldrWithKey goM M.empty
   goM :: MacAddr -> MacData -> IPInfo -> IPInfo
   goM mac MacData{..} = M.unionWith (<>) (M.foldrWithKey goV M.empty macIPs)
    where
-    goV :: Vlan -> S.Set IP -> IPInfo -> IPInfo
-    goV vl ips =
-      let d = IPData{ipMacs = M.singleton vl (S.singleton mac), ipSwPorts = macSwPorts}
-      in  M.unionWith (<>) (foldr (\ip -> M.insertWith (<>) ip d) M.empty ips)
-
-toMacInfo :: MacTableEl -> MacInfo
-toMacInfo MacTableEl{..} = M.singleton elMac $
-  MacData
-    { macIPs = M.singleton elVlan S.empty
-    -- I don't know 'SwName' here, so i can't define port.
-    , macSwPorts = S.empty
-    }
-
-toMacInfo' :: SwName -> MacTableEl -> MacInfo
-toMacInfo' portSw MacTableEl{..} = M.singleton elMac $
-  MacData
-    { macIPs = M.singleton elVlan S.empty
-    -- I don't know 'SwName' here, so i can't define port.
-    , macSwPorts = S.singleton SwPort{portSpec = elPort, ..}
-    }
+    goV :: Vlan -> VlanData IP -> IPInfo -> IPInfo
+    goV v vd@VlanData{..} =
+      let d = IPData{ipMacs = M.singleton v (vd{vlanAddrs = S.singleton mac})}
+      in  M.unionWith (<>) (foldr (\ip -> M.insertWith (<>) ip d) M.empty vlanAddrs)
 
