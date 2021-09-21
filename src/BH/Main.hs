@@ -129,8 +129,6 @@ class (
     => [InfoKey c] -> m c
   query xs = do
     cached <- M.filterWithKey (\x _ -> x `elem` xs) <$> get
-    liftIO $ print "cached:"
-    liftIO $ print cached
     -- I can use just 'search' below, but then default implementation will
     -- depend on having 'SwPortInfo' defined. That's probably wrong, so i use
     -- concrete 'searchPorts' function.
@@ -140,11 +138,9 @@ class (
     -- Always use 'unionWith (<>)', because left-biased 'union', which is used
     -- in 'Monoid Map' instance, does not merge map data elements.
     modify (M.unionWith (<>) updated)
-    huy <- get
-    liftIO $ print huy
-    -- FIXME: When ports are missed, updated won't work and will get
-    -- undetected. [current]
-    found <- M.filterWithKey (\x _ -> x `elem` xs) <$> get
+    -- Search info in /merged/ db, not just updated "portion", because update
+    -- may not have some data, which was present in cached version.
+    found <- M.filterWithKey (\x _ -> x `elem` xs && x `elem` M.keys updated) <$> get
     let xs' = xs \\ M.keys found
     liftIO $ print "Found in cache: "
     liftIO $ print found
