@@ -264,18 +264,21 @@ parseIP t = do
 newtype Vlan = Vlan {getVlan :: Int}
   deriving (Eq, Ord, Show)
 
+instance Read Vlan where
+  readPrec = parens . prec 10 . lift $ Vlan <$> readDecP
+
 instance ToJSON Vlan where
   toJSON (Vlan x) = toJSON x
 
 instance ToJSONKey Vlan where
-  toJSONKey = let txtVlan (Vlan x) = T.pack $ "vlan" <> show x
+  toJSONKey = let txtVlan (Vlan x) = T.pack $ show x
               in  ToJSONKeyText txtVlan (JE.text . txtVlan)
 
 instance FromJSON Vlan where
   parseJSON = fmap Vlan . parseJSON
 
 instance FromJSONKey Vlan where
-  fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly (A.string "vlan" *> vlanP))
+  fromJSONKey = FromJSONKeyTextParser (either fail return . A.parseOnly vlanP)
 
 -- | Parser for vlan number.
 vlanP :: A.Parser Vlan

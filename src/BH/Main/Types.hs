@@ -50,6 +50,7 @@ data Config = Config
                 { macIpMap :: MacIpMap
                 , ipMacMap :: IpMacMap
                 , swInfo :: SwInfo
+                , runVlan :: Vlan
                 }
   deriving (Show)
 

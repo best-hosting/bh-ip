@@ -20,7 +20,9 @@ import System.IO.Temp
 import System.IO
 import System.Directory
 import Data.List
-import qualified Data.Aeson as A
+import Data.Aeson
+import Data.Maybe
+import Data.Monoid
 
 import BH.IP
 import BH.IP.Arp
@@ -32,12 +34,52 @@ import BH.Switch.Cisco
 -- TODO: Use `show cdp neighbors` to build switch connection tree. And
 -- visualize with diagrams.
 
-data Options = Options
-  { authFile :: FilePath
-  , macIpFile :: FilePath
-  , queryHost :: T.Text
+data VlanConfig = VlanConfig {vlanHost :: T.Text, vlanNet :: String}
+  deriving (Show)
+
+{-instance ToJSON VlanConfig where
+  toJSON VlanConfig{..} =
+    object ["host" .= vlanHost, "net" .= vlanNet]-}
+
+instance FromJSON VlanConfig where
+  parseJSON = withObject "VlanConfig" $ \v ->
+    VlanConfig
+      <$> v .: "host"
+      <*> v .: "net"
+
+-- FIXME: Add 'opt' prefix to fields.
+data MyOptions = MyOptions
+  { optConfFile :: FilePath
+  , optAuthFile :: FilePath
+  , optMacIpFile :: FilePath
+  , optVlan :: Last Vlan
+  , optVlanConfig :: M.Map Vlan VlanConfig
   }
   deriving (Show)
+
+instance Semigroup MyOptions where
+  x <> y = y
+            { optVlan = optVlan x <> optVlan y
+            , optVlanConfig = optVlanConfig y <> optVlanConfig x
+            }
+
+{-instance ToJSON MyOptions where
+  toJSON MyOptions{..} =
+    object
+      $ maybe [] (\v -> ["optVlan" .= v]) optVlan
+        ++  [ "authfile" .= optAuthFile
+            , "vlans" .= optVlanConfig
+            ]
+-}
+
+instance FromJSON MyOptions where
+  parseJSON = withObject "MyOptions" $ \v ->
+    MyOptions
+      <$> pure ""
+      <*> v .:? "authfile" .!= "authinfo.yaml"
+      <*> pure "mac-ip-cache.yaml"
+      <*> (Last <$> v .:? "defaultVlan")
+      <*> v .: "vlans"
 
 optParser ::
   (MonadError String m, MonadIO m) => O.Parser (m ())
@@ -75,10 +117,17 @@ optParser =
                 )
         )
  where
-  globalOptions :: O.Parser Options
+  globalOptions :: O.Parser MyOptions
   globalOptions =
-    Options
+    MyOptions
       <$> O.strOption
+        ( O.long "confifile"
+            <> O.short 'c'
+            <> O.metavar "FILENAME"
+            <> O.help "Config file."
+            <> O.value "bh-ip.yaml"
+        )
+      <*> O.strOption
         ( O.long "authfile"
             <> O.short 'a'
             <> O.metavar "FILENAME"
@@ -92,32 +141,41 @@ optParser =
             <> O.help "File with mac to IP cache."
             <> O.value "mac-ip-cache.yaml"
         )
-      <*> O.strOption
-        ( O.long "query-host"
-            <> O.short 'H'
-            <> O.metavar "HOSTNAME"
-            <> O.help "ssh hostname of server from where to gather mac/IPs info."
-            <> O.value "certbot"
+      <*> O.option O.auto
+        ( O.long "vlan"
+            <> O.short 'c'
+            <> O.metavar "INT"
+            <> O.help "Vlan to run in."
+            <> O.value (Last Nothing)
         )
+      <*> pure M.empty
 
 initConfig ::
   (MonadError String m, MonadIO m) =>
-  Options ->
+  MyOptions ->
   ReaderT Config m () ->
   m ()
-initConfig Options{..} action = do
-  swInfo <- readSwInfo authFile
+initConfig cmdOp action = do
+  liftIO $ print cmdOp
+  readOp <- readYaml (optConfFile cmdOp)
+  let cf@MyOptions{..} = readOp <> cmdOp
+  liftIO $ print "HUUUY"
+  liftIO $ print cf
+  swInfo <- readSwInfo optAuthFile
   liftIO $ print swInfo
-  (macIpMap, ipMacMap) <- queryLinuxArp macIpFile queryHost
+  (runVlan, VlanConfig{..}) <- maybe (throwError "Unknown vlan") return $ do
+    v <- getLast optVlan
+    (v, ) <$> M.lookup v optVlanConfig
+  (macIpMap, ipMacMap) <- queryLinuxArp optMacIpFile vlanHost
   runReaderT action Config{..}
 
 
 workQuery ::
   (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c
-      , A.FromJSONKey (InfoKey c)
-      , A.FromJSON (InfoData c)
-      , A.ToJSONKey (InfoKey c)
-      , A.ToJSON (InfoData c)
+      , FromJSONKey (InfoKey c)
+      , FromJSON (InfoData c)
+      , ToJSONKey (InfoKey c)
+      , ToJSON (InfoData c)
   ) =>
   FilePath -> [InfoKey c] -> m c
 workQuery p xs = do
