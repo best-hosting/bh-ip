@@ -217,7 +217,6 @@ instance Semigroup PortData where
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: Use 'IPInfo' to resolve mac ips. [current]
--- FIXME: Hardcoded vlan 500. [current]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
 -- whatever. Every maps should be inside vlan. And vlan should be removed
 -- early at start. [current]

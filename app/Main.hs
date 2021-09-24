@@ -156,10 +156,9 @@ initConfig ::
   ReaderT Config m () ->
   m ()
 initConfig cmdOp action = do
-  liftIO $ print cmdOp
   readOp <- readYaml (optConfFile cmdOp)
   let cf@MyOptions{..} = readOp <> cmdOp
-  liftIO $ print "HUUUY"
+  liftIO $ print "Resulting config:"
   liftIO $ print cf
   swInfo <- readSwInfo optAuthFile
   liftIO $ print swInfo
