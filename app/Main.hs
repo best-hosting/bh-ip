@@ -51,19 +51,34 @@ instance FromJSON VlanConfig where
       <*> v .: "net"
 
 data MyOptions = MyOptions
-  { optConfFile :: FilePath
-  , optAuthFile :: FilePath
-  , optCacheTimeStampFile :: FilePath
-  , optCacheUpdateInterval :: NominalDiffTime
+  { optConfFile :: Last FilePath
+  , optAuthFile :: Last FilePath
+  , optCacheTimeStampFile :: Last FilePath
+  , optCacheUpdateInterval :: Last NominalDiffTime
   , optMacIpFile :: FilePath
   , optVlan :: Last Vlan
   , optVlanConfig :: M.Map Vlan VlanConfig
   }
   deriving (Show)
 
+{-defaultOpts :: MyOptions
+defaultOpts = MyOptions
+  { optConfFile = "bh-ip.yaml"
+  , optAuthFile = "authinfo.yaml"
+  , optCacheTimeStampFile = "bh-ip-timestamp.txt"
+  , optCacheUpdateInterval = 600
+  , optMacIpFile = ""
+  , optVlan = Last Nothing
+  , optVlanConfig = M.empty
+  }-}
+
 instance Semigroup MyOptions where
   x <> y = y
-            { optVlan = optVlan x <> optVlan y
+            { optConfFile = optConfFile x <> optConfFile y
+            , optAuthFile = optAuthFile x <> optAuthFile y
+            , optCacheTimeStampFile = optCacheTimeStampFile x <> optCacheTimeStampFile y
+            , optCacheUpdateInterval = optCacheUpdateInterval x <> optCacheUpdateInterval y
+            , optVlan = optVlan x <> optVlan y
             , optVlanConfig = optVlanConfig y <> optVlanConfig x
             }
 
@@ -82,10 +97,10 @@ instance FromJSON MyOptions where
   -- config file) will be `mappend`-ed together before first use.
   parseJSON = withObject "MyOptions" $ \v ->
     MyOptions
-      <$> pure ""
-      <*> v .:? "authfile"  .!= ""
-      <*> v .:? "timestamp" .!= ""
-      <*> v .:? "cacheUpdate" .!= fromInteger 0
+      <$> pure (Last Nothing)
+      <*> (Last <$> v .:? "authfile")
+      <*> (Last <$> v .:? "timestamp")
+      <*> (Last <$> v .:? "cacheUpdate")
       <*> pure "mac-ip-cache.yaml"
       <*> (Last <$> v .:? "defaultVlan")
       <*> v .: "vlans"
@@ -129,31 +144,31 @@ optParser =
   globalOptions :: O.Parser MyOptions
   globalOptions =
     MyOptions
-      <$> O.strOption
+      <$> O.option (Last . Just <$> O.auto)
         ( O.long "confifile"
             <> O.short 'c'
             <> O.metavar "FILENAME"
             <> O.help "Config file."
-            <> O.value "bh-ip.yaml"
+            <> O.value (Last Nothing)
         )
-      <*> O.strOption
+      <*> O.option (Last . Just <$> O.auto)
         ( O.long "authfile"
             <> O.short 'a'
             <> O.metavar "FILENAME"
             <> O.help "File with switches authentication information."
-            <> O.value "authinfo.yaml"
+            <> O.value (Last Nothing)
         )
-      <*> O.strOption
+      <*> O.option (Last . Just <$> O.auto)
         ( O.long "timestamp"
             <> O.metavar "FILENAME"
             <> O.help "File where last cache update time is stored"
-            <> O.value "bh-ip-timestamp.txt"
+            <> O.value (Last Nothing)
         )
-      <*> O.option O.auto
+      <*> O.option (Last . Just . fromInteger <$> O.auto)
         ( O.long "cache-update"
             <> O.metavar "SECONDS"
             <> O.help "Time in seconds between cache updates"
-            <> O.value (fromInteger 600)
+            <> O.value (Last Nothing)
         )
       <*> O.strOption
         ( O.long "mac-ip-file"
@@ -177,20 +192,28 @@ initConfig ::
   ReaderT Config m () ->
   m ()
 initConfig cmdOp action = do
-  readOp <- readYaml (optConfFile cmdOp)
-  let cf@MyOptions{..} = readOp <> cmdOp
-  liftIO $ print "Resulting config:"
-  liftIO $ print cf
-  swInfo <- readSwInfo optAuthFile
-  t <- liftIO getCurrentTime
-  let d = addUTCTime (negate optCacheUpdateInterval) t
-  cacheTime <- either (const d) id . readEither <$> liftIO (readFile optCacheTimeStampFile)
+  let cf = fromMaybe "bh-ip.yaml" . getLast . optConfFile $ cmdOp
+  readOp <- readYaml cf
+  let opts = readOp <> cmdOp
+  liftIO $ print "Read config:"
+  liftIO $ print opts
+
+  let af = fromMaybe "authinfo.yaml" . getLast . optAuthFile $ opts
+  swInfo <- readSwInfo af
   liftIO $ print swInfo
+
+  t <- liftIO getCurrentTime
+  let updateInterval = fromMaybe 600 . getLast . optCacheUpdateInterval $ opts
+      timeFile = fromMaybe "bh-ip-timestamp.txt" . getLast . optCacheTimeStampFile $ opts
+      d = addUTCTime (negate updateInterval) t
+  cacheTime <- either (const d) id . readEither <$> liftIO (readFile timeFile)
+
   (runVlan, VlanConfig{..}) <- maybe (throwError "Unknown vlan") return $ do
-    v <- getLast optVlan
-    (v, ) <$> M.lookup v optVlanConfig
-  let cf0 = Config{updateInterval = optCacheUpdateInterval, timeFile = optCacheTimeStampFile, ..}
-  (mi, im) <- runReaderT (queryLinuxArp optMacIpFile vlanHost) cf0
+    v <- getLast (optVlan opts)
+    (v, ) <$> M.lookup v (optVlanConfig opts)
+  let macIpFile = optMacIpFile $ opts
+      cf0 = Config{..}
+  (mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
   runReaderT action cf0{macIpMap = mi, ipMacMap = im}
 
 
