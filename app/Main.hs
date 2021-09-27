@@ -57,12 +57,11 @@ instance FromJSON VlanConfig where
 -- 'Semigroup' instance and still have all defaults values in a single type,
 -- which i may use to print defaults in '--help'.
 data MyOptions = MyOptions
-  { optConfFile :: Last FilePath
-  , optAuthFile :: Last FilePath
-  , optCacheTimeStampFile :: Last FilePath
-  , optCacheUpdateInterval :: Last NominalDiffTime
+  { optAuthFile :: FilePath
+  , optCacheTimeStampFile :: FilePath
+  , optCacheUpdateInterval :: NominalDiffTime
   , optMacIpFile :: FilePath
-  , optVlan :: Last Vlan
+  , optVlan :: Maybe Vlan
   , optVlanConfig :: M.Map Vlan VlanConfig
   }
   deriving (Show)
@@ -78,7 +77,7 @@ defaultOpts = MyOptions
   , optVlanConfig = M.empty
   }-}
 
-instance Semigroup MyOptions where
+{-instance Semigroup MyOptions where
   x <> y = y
             { optConfFile = optConfFile x <> optConfFile y
             , optAuthFile = optAuthFile x <> optAuthFile y
@@ -86,7 +85,7 @@ instance Semigroup MyOptions where
             , optCacheUpdateInterval = optCacheUpdateInterval x <> optCacheUpdateInterval y
             , optVlan = optVlan x <> optVlan y
             , optVlanConfig = optVlanConfig y <> optVlanConfig x
-            }
+            }-}
 
 {-instance ToJSON MyOptions where
   toJSON MyOptions{..} =
@@ -103,17 +102,16 @@ instance FromJSON MyOptions where
   -- config file) will be `mappend`-ed together before first use.
   parseJSON = withObject "MyOptions" $ \v ->
     MyOptions
-      <$> pure (Last Nothing)
-      <*> (Last <$> v .:? "authfile")
-      <*> (Last <$> v .:? "timestamp")
-      <*> (Last <$> v .:? "cacheUpdate")
+      <$> v .:? "authfile" .!= "authinfo.yaml"
+      <*> v .:? "timestamp" .!= "bh-ip-timestamp.txt"
+      <*> v .:? "cacheUpdate" .!= 600
       <*> pure "mac-ip-cache.yaml"
-      <*> (Last <$> v .:? "defaultVlan")
+      <*> v .:? "defaultVlan"
       <*> v .: "vlans"
 
 optParser ::
-  (MonadError String m, MonadIO m) => O.Parser (m ())
-optParser =
+  (MonadError String m, MonadIO m) => MyOptions -> O.Parser (m ())
+optParser MyOptions{..} =
   initConfig
     <$> globalOptions
     <*> (   workQueryPorts
@@ -161,31 +159,27 @@ optParser =
       -- either user-defined values or hardcoded defaults. And this values may
       -- be either overwritten further on cmd or left as is. The order is
       -- straightforward.
-      <$> O.option (Last . Just <$> O.auto)
-        ( O.long "confifile"
-            <> O.short 'c'
-            <> O.metavar "FILENAME"
-            <> O.help "Config file."
-            <> O.value (Last Nothing)
-        )
-      <*> O.option (Last . Just <$> O.auto)
+      <$> O.strOption
         ( O.long "authfile"
             <> O.short 'a'
             <> O.metavar "FILENAME"
             <> O.help "File with switches authentication information."
-            <> O.value (Last Nothing)
+            <> O.showDefault
+            <> O.value optAuthFile
         )
-      <*> O.option (Last . Just <$> O.auto)
+      <*> O.strOption
         ( O.long "timestamp"
             <> O.metavar "FILENAME"
             <> O.help "File where last cache update time is stored"
-            <> O.value (Last Nothing)
+            <> O.showDefault
+            <> O.value optCacheTimeStampFile
         )
-      <*> O.option (Last . Just . fromInteger <$> O.auto)
+      <*> O.option (fromInteger <$> O.auto)
         ( O.long "cache-update"
             <> O.metavar "SECONDS"
             <> O.help "Time in seconds between cache updates"
-            <> O.value (Last Nothing)
+            <> O.showDefault
+            <> O.value optCacheUpdateInterval
         )
       <*> O.strOption
         ( O.long "mac-ip-file"
@@ -194,16 +188,42 @@ optParser =
             <> O.value "mac-ip-cache.yaml"
         )
       <*> O.option
-        (O.eitherReader (A.parseOnly (Last . Just <$> vlanP) . T.pack))
+        (O.eitherReader (A.parseOnly (Just <$> vlanP) . T.pack))
         ( O.long "vlan"
             <> O.short 'l'
             <> O.metavar "INT"
             <> O.help "Vlan to run in."
-            <> O.value (Last Nothing)
+            <> maybe mempty (\v -> O.showDefault <> O.value (Just v)) optVlan
         )
-      <*> pure M.empty
+      <*> pure optVlanConfig
 
 initConfig ::
+  (MonadError String m, MonadIO m) =>
+  MyOptions ->
+  ReaderT Config m () ->
+  m ()
+initConfig opts@MyOptions{..} action = do
+  liftIO $ print "Read config:"
+  liftIO $ print opts
+
+  swInfo <- readSwInfo optAuthFile
+  liftIO $ print swInfo
+
+  t <- liftIO getCurrentTime
+  let updateInterval = optCacheUpdateInterval
+      timeFile = optCacheTimeStampFile
+      d = addUTCTime (negate updateInterval) t
+  cacheTime <- either (const d) id . readEither <$> liftIO (readFile timeFile)
+
+  (runVlan, VlanConfig{..}) <- maybe (throwError "Unknown vlan") return $ do
+    v <- optVlan
+    (v, ) <$> M.lookup v optVlanConfig
+  let macIpFile = optMacIpFile
+      cf0 = Config{..}
+  (mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
+  runReaderT action cf0{macIpMap = mi, ipMacMap = im}
+
+{-initConfig ::
   (MonadError String m, MonadIO m) =>
   MyOptions ->
   ReaderT Config m () ->
@@ -231,7 +251,7 @@ initConfig cmdOp action = do
   let macIpFile = optMacIpFile $ opts
       cf0 = Config{..}
   (mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
-  runReaderT action cf0{macIpMap = mi, ipMacMap = im}
+  runReaderT action cf0{macIpMap = mi, ipMacMap = im}-}
 
 
 workQuery ::
@@ -288,15 +308,17 @@ workQueryIPs ips =
 
 main :: IO ()
 main = do
-  main_ <-
-    O.customExecParser (O.prefs O.showHelpOnError) $
+  res <- runExceptT $ do
+    cfOpts <- readYaml "bh-ip.yaml"
+    main_ <- liftIO $ O.customExecParser (O.prefs O.showHelpOnError) $
       O.info
-        (O.helper <*> optParser)
+        (O.helper <*> optParser cfOpts)
         ( O.fullDesc
             <> O.header "General program title/description"
             <> O.progDesc "What does this thing do?"
         )
-  res <- runExceptT main_
+    main_
   case res of
     Right () -> return ()
     Left err -> print err
+
