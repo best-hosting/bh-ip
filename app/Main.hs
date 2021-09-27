@@ -50,6 +50,12 @@ instance FromJSON VlanConfig where
       <$> v .: "host"
       <*> v .: "net"
 
+-- FIXME: Split 'MyOptions' in two types: CmdOptions for options read from cmd
+-- and from config and just Options. The first one should have all fields
+-- wrapped in 'Last'. But the second one should contain just plain values
+-- _with_ defaults applied. That way i may merge cmd and config options using
+-- 'Semigroup' instance and still have all defaults values in a single type,
+-- which i may use to print defaults in '--help'.
 data MyOptions = MyOptions
   { optConfFile :: Last FilePath
   , optAuthFile :: Last FilePath
@@ -144,6 +150,17 @@ optParser =
   globalOptions :: O.Parser MyOptions
   globalOptions =
     MyOptions
+      -- FIXME: Option 'conffile' overcomplicates entire program. If i can
+      -- change config file location, option parsing  and merge order is
+      -- "conffile cmd opt" -> conf file -> all other cmd options. But such
+      -- sequence is impossible, because optparse-applicative can't stop after
+      -- parsing just one option. If, on the other hand, i remove 'conffile'
+      -- option, parsing order will become conf -> cmd. And even all values
+      -- read from config may be shown for cmd options as defaults. Also, that
+      -- way i may remove all 'Last', because after reading config i will have
+      -- either user-defined values or hardcoded defaults. And this values may
+      -- be either overwritten further on cmd or left as is. The order is
+      -- straightforward.
       <$> O.option (Last . Just <$> O.auto)
         ( O.long "confifile"
             <> O.short 'c'
