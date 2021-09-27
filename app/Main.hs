@@ -13,6 +13,7 @@ import Control.Monad.State
 import qualified Data.Attoparsec.Text as A
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Options.Applicative as O
 import qualified Data.Yaml as Y
 import qualified Data.ByteString as B
@@ -23,6 +24,8 @@ import Data.List
 import Data.Aeson
 import Data.Maybe
 import Data.Monoid
+import Data.Time
+import Text.Read
 
 import BH.IP
 import BH.IP.Arp
@@ -47,10 +50,11 @@ instance FromJSON VlanConfig where
       <$> v .: "host"
       <*> v .: "net"
 
--- FIXME: Add 'opt' prefix to fields.
 data MyOptions = MyOptions
   { optConfFile :: FilePath
   , optAuthFile :: FilePath
+  , optCacheTimeStampFile :: FilePath
+  , optCacheUpdateInterval :: NominalDiffTime
   , optMacIpFile :: FilePath
   , optVlan :: Last Vlan
   , optVlanConfig :: M.Map Vlan VlanConfig
@@ -73,10 +77,15 @@ instance Semigroup MyOptions where
 -}
 
 instance FromJSON MyOptions where
+  -- Defaults are specified in option parsing code. So here i may just omit
+  -- them, because two 'MyOptions' values (one from cmd and one from yaml
+  -- config file) will be `mappend`-ed together before first use.
   parseJSON = withObject "MyOptions" $ \v ->
     MyOptions
       <$> pure ""
-      <*> v .:? "authfile" .!= "authinfo.yaml"
+      <*> v .:? "authfile"  .!= ""
+      <*> v .:? "timestamp" .!= ""
+      <*> v .:? "cacheUpdate" .!= fromInteger 0
       <*> pure "mac-ip-cache.yaml"
       <*> (Last <$> v .:? "defaultVlan")
       <*> v .: "vlans"
@@ -135,15 +144,27 @@ optParser =
             <> O.value "authinfo.yaml"
         )
       <*> O.strOption
+        ( O.long "timestamp"
+            <> O.metavar "FILENAME"
+            <> O.help "File where last cache update time is stored"
+            <> O.value "bh-ip-timestamp.txt"
+        )
+      <*> O.option O.auto
+        ( O.long "cache-update"
+            <> O.metavar "SECONDS"
+            <> O.help "Time in seconds between cache updates"
+            <> O.value (fromInteger 600)
+        )
+      <*> O.strOption
         ( O.long "mac-ip-file"
-            <> O.short 'c'
             <> O.metavar "FILENAME"
             <> O.help "File with mac to IP cache."
             <> O.value "mac-ip-cache.yaml"
         )
-      <*> O.option O.auto
+      <*> O.option
+        (O.eitherReader (A.parseOnly (Last . Just <$> vlanP) . T.pack))
         ( O.long "vlan"
-            <> O.short 'c'
+            <> O.short 'l'
             <> O.metavar "INT"
             <> O.help "Vlan to run in."
             <> O.value (Last Nothing)
@@ -161,12 +182,16 @@ initConfig cmdOp action = do
   liftIO $ print "Resulting config:"
   liftIO $ print cf
   swInfo <- readSwInfo optAuthFile
+  t <- liftIO getCurrentTime
+  let d = addUTCTime (negate optCacheUpdateInterval) t
+  cacheTime <- either (const d) id . readEither <$> liftIO (readFile optCacheTimeStampFile)
   liftIO $ print swInfo
   (runVlan, VlanConfig{..}) <- maybe (throwError "Unknown vlan") return $ do
     v <- getLast optVlan
     (v, ) <$> M.lookup v optVlanConfig
-  (macIpMap, ipMacMap) <- queryLinuxArp optMacIpFile vlanHost
-  runReaderT action Config{..}
+  let cf0 = Config{updateInterval = optCacheUpdateInterval, timeFile = optCacheTimeStampFile, ..}
+  (mi, im) <- runReaderT (queryLinuxArp optMacIpFile vlanHost) cf0
+  runReaderT action cf0{macIpMap = mi, ipMacMap = im}
 
 
 workQuery ::

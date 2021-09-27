@@ -37,6 +37,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 import Data.List
 import Data.Monoid
+import Data.Time
 
 import BH.Common
 import BH.IP
@@ -51,6 +52,9 @@ data Config = Config
                 , ipMacMap :: IpMacMap
                 , swInfo :: SwInfo
                 , runVlan :: Vlan
+                , cacheTime :: UTCTime
+                , updateInterval :: NominalDiffTime
+                , timeFile :: FilePath
                 }
   deriving (Show)
 

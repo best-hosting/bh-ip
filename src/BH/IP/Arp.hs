@@ -25,7 +25,9 @@ import qualified Data.Yaml as Y
 import qualified Shelly as Sh
 import System.Directory
 import Text.XML.Light
+import Data.Time
 
+import BH.Cache
 import BH.Main.Types
 import BH.Common
 import BH.IP
@@ -201,7 +203,7 @@ readCache cacheFile = do
     else return mempty
 
 -- | Update arp cache file, if necessary, and build corresponding maps.
-updateArpCache :: (MonadIO m, MonadError String m) => FilePath -> T.Text -> MacIpMap -> m (MacIpMap, IpMacMap)
+updateArpCache :: (MonadIO m, MonadError String m, MonadReader Config m) => FilePath -> T.Text -> MacIpMap -> m (MacIpMap, IpMacMap)
 updateArpCache cacheFile host cache
   | cache /= mempty = return (cache, M.foldrWithKey rebuild mempty cache)
   | otherwise = do
@@ -215,14 +217,30 @@ updateArpCache cacheFile host cache
   rebuild mac ips zm0 = foldr (`M.insert` mac) zm0 ips
 
 queryLinuxArp ::
-  (MonadIO m, MonadError String m) =>
+  (MonadIO m, MonadError String m, MonadReader Config m) =>
   -- | Path to yaml cache.
   FilePath ->
   -- | ssh hostname of host, from which to query.
   T.Text ->
   m (MacIpMap, IpMacMap)
-queryLinuxArp cacheFile host =
-  readCache cacheFile >>= updateArpCache cacheFile host
+queryLinuxArp cacheFile host = do
+  Config{..} <- ask
+  t <- liftIO getCurrentTime
+  if diffUTCTime t cacheTime > updateInterval
+    then do
+      liftIO (writeFile timeFile (show t))
+      updateArpCache cacheFile host M.empty
+    else readYaml cacheFile >>= updateArpCache cacheFile host
+
+{-queryLinuxArp2 ::
+  (MonadIO m, MonadError String m, MonadReader Config m) =>
+  -- | Path to yaml cache.
+  (IPInfo, MacInfo) ->
+  -- | ssh hostname of host, from which to query.
+  T.Text ->
+  m (IPInfo, MacInfo)
+queryLinuxArp2 cacheFile host =
+  readCache cacheFile >>= updateArpCache cacheFile host-}
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host =
