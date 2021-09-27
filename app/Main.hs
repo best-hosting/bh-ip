@@ -40,22 +40,12 @@ import BH.Switch.Cisco
 data VlanConfig = VlanConfig {vlanHost :: T.Text, vlanNet :: String}
   deriving (Show)
 
-{-instance ToJSON VlanConfig where
-  toJSON VlanConfig{..} =
-    object ["host" .= vlanHost, "net" .= vlanNet]-}
-
 instance FromJSON VlanConfig where
   parseJSON = withObject "VlanConfig" $ \v ->
     VlanConfig
       <$> v .: "host"
       <*> v .: "net"
 
--- FIXME: Split 'MyOptions' in two types: CmdOptions for options read from cmd
--- and from config and just Options. The first one should have all fields
--- wrapped in 'Last'. But the second one should contain just plain values
--- _with_ defaults applied. That way i may merge cmd and config options using
--- 'Semigroup' instance and still have all defaults values in a single type,
--- which i may use to print defaults in '--help'.
 data MyOptions = MyOptions
   { optAuthFile :: FilePath
   , optCacheTimeStampFile :: FilePath
@@ -66,40 +56,7 @@ data MyOptions = MyOptions
   }
   deriving (Show)
 
-{-defaultOpts :: MyOptions
-defaultOpts = MyOptions
-  { optConfFile = "bh-ip.yaml"
-  , optAuthFile = "authinfo.yaml"
-  , optCacheTimeStampFile = "bh-ip-timestamp.txt"
-  , optCacheUpdateInterval = 600
-  , optMacIpFile = ""
-  , optVlan = Last Nothing
-  , optVlanConfig = M.empty
-  }-}
-
-{-instance Semigroup MyOptions where
-  x <> y = y
-            { optConfFile = optConfFile x <> optConfFile y
-            , optAuthFile = optAuthFile x <> optAuthFile y
-            , optCacheTimeStampFile = optCacheTimeStampFile x <> optCacheTimeStampFile y
-            , optCacheUpdateInterval = optCacheUpdateInterval x <> optCacheUpdateInterval y
-            , optVlan = optVlan x <> optVlan y
-            , optVlanConfig = optVlanConfig y <> optVlanConfig x
-            }-}
-
-{-instance ToJSON MyOptions where
-  toJSON MyOptions{..} =
-    object
-      $ maybe [] (\v -> ["optVlan" .= v]) optVlan
-        ++  [ "authfile" .= optAuthFile
-            , "vlans" .= optVlanConfig
-            ]
--}
-
 instance FromJSON MyOptions where
-  -- Defaults are specified in option parsing code. So here i may just omit
-  -- them, because two 'MyOptions' values (one from cmd and one from yaml
-  -- config file) will be `mappend`-ed together before first use.
   parseJSON = withObject "MyOptions" $ \v ->
     MyOptions
       <$> v .:? "authfile" .!= "authinfo.yaml"
@@ -148,17 +105,6 @@ optParser MyOptions{..} =
   globalOptions :: O.Parser MyOptions
   globalOptions =
     MyOptions
-      -- FIXME: Option 'conffile' overcomplicates entire program. If i can
-      -- change config file location, option parsing  and merge order is
-      -- "conffile cmd opt" -> conf file -> all other cmd options. But such
-      -- sequence is impossible, because optparse-applicative can't stop after
-      -- parsing just one option. If, on the other hand, i remove 'conffile'
-      -- option, parsing order will become conf -> cmd. And even all values
-      -- read from config may be shown for cmd options as defaults. Also, that
-      -- way i may remove all 'Last', because after reading config i will have
-      -- either user-defined values or hardcoded defaults. And this values may
-      -- be either overwritten further on cmd or left as is. The order is
-      -- straightforward.
       <$> O.strOption
         ( O.long "authfile"
             <> O.short 'a'
@@ -222,37 +168,6 @@ initConfig opts@MyOptions{..} action = do
       cf0 = Config{..}
   (mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
   runReaderT action cf0{macIpMap = mi, ipMacMap = im}
-
-{-initConfig ::
-  (MonadError String m, MonadIO m) =>
-  MyOptions ->
-  ReaderT Config m () ->
-  m ()
-initConfig cmdOp action = do
-  let cf = fromMaybe "bh-ip.yaml" . getLast . optConfFile $ cmdOp
-  readOp <- readYaml cf
-  let opts = readOp <> cmdOp
-  liftIO $ print "Read config:"
-  liftIO $ print opts
-
-  let af = fromMaybe "authinfo.yaml" . getLast . optAuthFile $ opts
-  swInfo <- readSwInfo af
-  liftIO $ print swInfo
-
-  t <- liftIO getCurrentTime
-  let updateInterval = fromMaybe 600 . getLast . optCacheUpdateInterval $ opts
-      timeFile = fromMaybe "bh-ip-timestamp.txt" . getLast . optCacheTimeStampFile $ opts
-      d = addUTCTime (negate updateInterval) t
-  cacheTime <- either (const d) id . readEither <$> liftIO (readFile timeFile)
-
-  (runVlan, VlanConfig{..}) <- maybe (throwError "Unknown vlan") return $ do
-    v <- getLast (optVlan opts)
-    (v, ) <$> M.lookup v (optVlanConfig opts)
-  let macIpFile = optMacIpFile $ opts
-      cf0 = Config{..}
-  (mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
-  runReaderT action cf0{macIpMap = mi, ipMacMap = im}-}
-
 
 workQuery ::
   (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c
