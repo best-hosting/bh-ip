@@ -169,6 +169,23 @@ parseNmapXml t =
         return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
       else return z
 
+parseNmapXml2 :: MonadError String m => T.Text -> m (MacInfo, IPInfo)
+parseNmapXml2 t =
+  let xml = blank_element{elContent = parseXML t}
+      hosts =
+        findChildren (blank_name{qName = "nmaprun"}) xml
+          >>= findChildren (blank_name{qName = "host"})
+   in foldM go mempty hosts
+ where
+  go :: MonadError String m => (MacInfo, IPInfo) -> Element -> m (MacIpMap, IpMacMap)
+  go z@(macMap, ipMap) host = do
+    b <- host `xmlHostStatusIs` "arp-response"
+    if b
+      then do
+        (mac, ips) <- xmlHostAddressP host
+        return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
+      else return z
+
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
 nmapCache :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)
 nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
@@ -202,6 +219,7 @@ readCache cacheFile = do
         (\e -> liftIO (print e) >> return mempty)
     else return mempty
 
+-- TODO: Build into 'IPInfo' and 'MacInfo' .
 -- | Update arp cache file, if necessary, and build corresponding maps.
 updateArpCache :: (MonadIO m, MonadError String m, MonadReader Config m) => FilePath -> T.Text -> MacIpMap -> m (MacIpMap, IpMacMap)
 updateArpCache cacheFile host cache
