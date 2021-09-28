@@ -106,6 +106,9 @@ instance Semigroup MacData where
             , macSwPort = macSwPort x <> macSwPort y
             }
 
+instance Monoid MacData where
+  mempty = MacData{macIPs = S.empty, macSwPort = Last Nothing}
+
 instance ToJSON MacData where
   toJSON MacData{..} =
     if macSwPort == Last Nothing

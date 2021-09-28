@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 module BH.IP.Arp (
   ipNeigh,
@@ -26,6 +27,7 @@ import qualified Shelly as Sh
 import System.Directory
 import Text.XML.Light
 import Data.Time
+import Data.Monoid
 
 import BH.Cache
 import BH.Main.Types
@@ -137,6 +139,13 @@ xmlHostAddressP host = do
     [mac] -> return (mac, ips)
     _ -> throwError $ "Several mac addresses found in xml element: '" <> show host <> "'"
 
+xmlHostAddressP2 :: MonadError String m => Element -> m (M.Map IP (S.Set MacAddr))
+xmlHostAddressP2 host = do
+  let addrs = findChildren (blank_name{qName = "address"}) host
+  macs <- S.fromList . catMaybes <$> mapM (xmlAddrP "mac" macP) addrs
+  ips  <- catMaybes <$> mapM (xmlAddrP "ipv4" ipP) addrs
+  return . M.fromList . map (, macs) $ ips
+
 -- | Check that, 'reason' attribute of xml 'status' element (from inside xml
 -- 'host' element) is equal to specified value.
 xmlHostStatusIs :: MonadError String m => Element -> String -> m Bool
@@ -169,7 +178,7 @@ parseNmapXml t =
         return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
       else return z
 
-parseNmapXml2 :: MonadError String m => T.Text -> m (MacInfo, IPInfo)
+parseNmapXml2 :: MonadError String m => T.Text -> m (M.Map IP (S.Set MacAddr))
 parseNmapXml2 t =
   let xml = blank_element{elContent = parseXML t}
       hosts =
@@ -177,14 +186,58 @@ parseNmapXml2 t =
           >>= findChildren (blank_name{qName = "host"})
    in foldM go mempty hosts
  where
-  go :: MonadError String m => (MacInfo, IPInfo) -> Element -> m (MacIpMap, IpMacMap)
-  go z@(macMap, ipMap) host = do
+  go :: MonadError String m => M.Map IP (S.Set MacAddr) -> Element -> m (M.Map IP (S.Set MacAddr))
+  go z host = do
     b <- host `xmlHostStatusIs` "arp-response"
     if b
-      then do
-        (mac, ips) <- xmlHostAddressP host
-        return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
+      then M.unionWith (<>) z <$> xmlHostAddressP2 host
       else return z
+
+mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
+mergeIP ips z@(ipInfo, macInfo) =
+  let remIPs = M.keysSet ipInfo `S.difference` M.keysSet ips
+  in  flip (M.foldrWithKey addIP) ips . flip (foldr removeIP) remIPs $ z
+
+removeIP :: IP -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
+removeIP ip z@(ipInfo, macInfo) = case M.lookup ip ipInfo of
+  Nothing -> z
+  Just IPData{..} ->
+    let macs = M.keysSet ipMacPorts
+    in  ( M.delete ip ipInfo
+        , foldr (\m z -> M.adjust (\d -> d{macIPs = S.delete ip (macIPs d)}) m z) macInfo macs
+        )
+
+addIP :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
+addIP ip macs z@(ipInfo, _) = case M.lookup ip ipInfo of
+  Nothing ->
+    addIPMacs ip macs z
+  Just IPData{..} ->
+    let ipMacs = M.keysSet ipMacPorts
+        remMacs = ipMacs `S.difference` macs
+        addMacs = macs `S.difference` ipMacs
+    in  addIPMacs ip addMacs . removeIPMacs ip remMacs $ z
+
+-- | Assume, that all 'MacAddr'-es in a set are /not/ in 'IPData'.
+-- FIXME: Check, with already existing mac.
+addIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
+addIPMacs ip macs (ipInfo, macInfo) =
+  let ipd = IPData
+        { ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
+        }
+      md = MacData {macIPs = S.singleton ip}
+  in  (M.insertWith (<>) ip ipd ipInfo, foldr (\m -> M.insertWith (<>) m md) macInfo macs)
+
+-- | Assume, that all 'MacAddr'-es are in set.
+-- FIXME: Check with missed macs.
+removeIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
+removeIPMacs ip macs (ipInfo, macInfo) =
+  let f IPData{..} = IPData
+        { ipMacPorts = foldr (\m z -> M.delete m z) ipMacPorts macs
+        }
+  in  ( M.adjust f ip ipInfo
+      , foldr (\m z -> M.adjust (\d -> d{macIPs = S.delete ip (macIPs d)}) m z) macInfo macs
+      )
+
 
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
 nmapCache :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)
@@ -197,6 +250,21 @@ nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
       Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
     z <- liftIO . evaluate . force $ parseNmapXml xml
+    --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
+    void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
+    return z
+
+nmapCache2 :: (MonadIO m, MonadError String m) => T.Text -> m (M.Map IP (S.Set MacAddr))
+nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
+ where
+  go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
+  go = do
+    liftIO $ putStrLn "Updating arp cache using `nmap`..."
+    xml <- do
+      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
+      Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
+    z <- liftIO . evaluate . force $ parseNmapXml2 xml
+    --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
     void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
     return z
 
@@ -226,6 +294,7 @@ updateArpCache cacheFile host cache
   | cache /= mempty = return (cache, M.foldrWithKey rebuild mempty cache)
   | otherwise = do
     maps@(macMap, _) <- nmapCache host
+    map2 <- nmapCache2 host
     --maps@(macMap, _) <- ipNeigh host
     liftIO $ Y.encodeFile cacheFile macMap
     return maps
