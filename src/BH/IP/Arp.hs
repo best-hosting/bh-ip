@@ -193,51 +193,65 @@ parseNmapXml2 t =
       then M.unionWith (<>) z <$> xmlHostAddressP2 host
       else return z
 
+-- FIXME: Should i update all DBs at once?
+-- FIXME: This function assumes, that two dbs are in sync. If that's not the
+-- case, the result is unknown.
 mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
 mergeIP ips z@(ipInfo, macInfo) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet ips
-  in  flip (M.foldrWithKey addIP) ips . flip (foldr removeIP) remIPs $ z
+  in  flip (M.foldrWithKey addIP) ips . flip (foldr (setIPState Unreachable)) remIPs $ z
 
-removeIP :: IP -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
-removeIP ip z@(ipInfo, macInfo) = case M.lookup ip ipInfo of
-  Nothing -> z
-  Just IPData{..} ->
-    let macs = M.keysSet ipMacPorts
-    in  ( M.delete ip ipInfo
-        , foldr (\m z -> M.adjust (\d -> d{macIPs = S.delete ip (macIPs d)}) m z) macInfo macs
-        )
+-- FIXME: This function should remove IPs, whose all macs are 'Unreachable'
+-- and whose do not have any port defined.
+dbTidy :: (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+dbTidy = undefined
+
+-- Set IP State
+setIPState :: IPState -> IP -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
+setIPState st ip z@(ipInfo, macInfo) =
+  case M.lookup ip ipInfo of
+    Nothing -> z
+    Just IPData{..} ->
+      ( M.adjust (\x -> x{ipState = st}) ip ipInfo
+      , foldr (M.adjust g) macInfo . M.keysSet $ ipMacPorts
+      )
+ where
+  g :: MacData -> MacData
+  g x = x{macIPs = M.adjust (const st) ip (macIPs x)}
 
 addIP :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
 addIP ip macs z@(ipInfo, _) = case M.lookup ip ipInfo of
-  Nothing ->
-    addIPMacs ip macs z
+  Nothing -> addIPMacs ip macs z
   Just IPData{..} ->
-    let ipMacs = M.keysSet ipMacPorts
-        remMacs = ipMacs `S.difference` macs
-        addMacs = macs `S.difference` ipMacs
-    in  addIPMacs ip addMacs . removeIPMacs ip remMacs $ z
+    let remMacs = M.keysSet ipMacPorts `S.difference` macs
+    in  addIPMacs ip macs . removeIPMacs ip remMacs $ z
 
--- | Assume, that all 'MacAddr'-es in a set are /not/ in 'IPData'.
+-- | Associate specified IP with mac addresses.
 -- FIXME: Check, with already existing mac.
+-- FIXME: 'adjust' can't add new elements.
 addIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
 addIPMacs ip macs (ipInfo, macInfo) =
-  let ipd = IPData
-        { ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
-        }
-      md = MacData {macIPs = S.singleton ip}
-  in  (M.insertWith (<>) ip ipd ipInfo, foldr (\m -> M.insertWith (<>) m md) macInfo macs)
+  let d = IPData
+            { ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
+            , ipState = Answering
+            }
+  in  (M.insertWith f ip d ipInfo, foldr (M.adjust g) macInfo macs)
+ where
+  f :: IPData -> IPData -> IPData
+  f new old = new {ipMacPorts = ipMacPorts new <> ipMacPorts old}
+  g :: MacData -> MacData
+  g x = x {macIPs = M.insert ip Answering (macIPs x)}
 
--- | Assume, that all 'MacAddr'-es are in set.
+-- | Disassociate specified ip with mac addresses.
 -- FIXME: Check with missed macs.
 removeIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
 removeIPMacs ip macs (ipInfo, macInfo) =
-  let f IPData{..} = IPData
-        { ipMacPorts = foldr (\m z -> M.delete m z) ipMacPorts macs
-        }
-  in  ( M.adjust f ip ipInfo
-      , foldr (\m z -> M.adjust (\d -> d{macIPs = S.delete ip (macIPs d)}) m z) macInfo macs
-      )
-
+  (M.adjust f ip ipInfo, foldr (M.adjust g) macInfo macs)
+ where
+  f :: IPData -> IPData
+  f x = x{ipMacPorts = foldr M.delete (ipMacPorts x) macs}
+  g :: MacData -> MacData
+  g x = x{macIPs = M.delete ip (macIPs x)}
 
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
 nmapCache :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)

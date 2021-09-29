@@ -17,6 +17,7 @@ module BH.Main.Types (
   --macIPsL,
   IPInfo,
   IPData(..),
+  IPState(..),
   SwPortInfo,
   PortInfo,
   PortData(..),
@@ -38,6 +39,7 @@ import Control.Monad.Except
 import Data.List
 import Data.Monoid
 import Data.Time
+import Text.Read
 
 import BH.Common
 import BH.IP
@@ -94,11 +96,11 @@ type MacInfo = M.Map MacAddr MacData
 
 -- Single mac can't be on several ports.
 data MacData = MacData
-  { macIPs    :: S.Set IP
+  { macIPs    :: M.Map IP IPState
   , macSwPort :: Last SwPort
 --, macVendor :: T.Text
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
 instance Semigroup MacData where
   x <> y = MacData
@@ -107,7 +109,7 @@ instance Semigroup MacData where
             }
 
 instance Monoid MacData where
-  mempty = MacData{macIPs = S.empty, macSwPort = Last Nothing}
+  mempty = MacData{macIPs = M.empty, macSwPort = Last Nothing}
 
 instance ToJSON MacData where
   toJSON MacData{..} =
@@ -124,7 +126,7 @@ instance FromJSON MacData where
 toMacData :: SwName -> MacTableEl -> MacData
 toMacData portSw MacTableEl{..} =
   MacData
-    { macIPs = S.empty
+    { macIPs = M.empty
     , macSwPort = Last (Just SwPort{portSpec = elPort, ..})
     }
 
@@ -167,22 +169,41 @@ macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x-}
 -- TODO: Subnets and vlans for IPs.
 type IPInfo = M.Map IP IPData
 
+data IPState = Unreachable | Answering
+ deriving (Show, Read)
+
+instance ToJSON IPState where
+  toJSON = toJSON . show
+
+instance FromJSON IPState where
+  parseJSON = withText "IPState" (either fail return . readEither . T.unpack)
+
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
 data IPData = IPData
   { ipMacPorts :: M.Map MacAddr (Maybe SwPort)
+  , ipState :: IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
 instance Semigroup IPData where
-  x <> y = IPData {ipMacPorts = ipMacPorts y <> ipMacPorts x}
+  x <> y = IPData
+            { ipMacPorts = ipMacPorts y <> ipMacPorts x
+            , ipState = ipState y
+            }
 
 instance ToJSON IPData where
-  toJSON IPData{..} = object ["macPorts" .= ipMacPorts]
+  toJSON IPData{..} = object
+    [ "macPorts" .= ipMacPorts
+    , "state" .= ipState
+    ]
 
 instance FromJSON IPData where
-  parseJSON = withObject "IPData" $ \v -> IPData <$> v .: "macPorts"
+  parseJSON = withObject "IPData" $ \v ->
+    IPData
+      <$> v .: "macPorts"
+      <*> v .: "state"
 
 type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
@@ -198,7 +219,7 @@ data PortData = PortData
   , --, portMode :: PortMode
     portAddrs :: MacInfo
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
 portAddrsL :: LensC PortData MacInfo
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
@@ -229,7 +250,9 @@ instance Semigroup PortData where
 -- early at start. [current]
 resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
-  d{macIPs = fromMaybe S.empty (M.lookup m macIpMap)}
+  d { macIPs = fromMaybe M.empty
+                (M.lookup m macIpMap >>= return . M.fromSet (const Answering))
+    }
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
 resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
@@ -276,5 +299,7 @@ macInfoToIPInfo = M.foldrWithKey goM M.empty
   goM :: MacAddr -> MacData -> IPInfo -> IPInfo
   goM mac MacData{..} =
     let d = IPData{ipMacPorts = M.singleton mac (getLast macSwPort)}
-    in  M.unionWith (<>) (foldr (\ip -> M.insertWith (<>) ip d) M.empty macIPs)
+        y :: IPInfo
+        y = M.foldrWithKey (\ip s -> M.insertWith (<>) ip d{ipState = s}) M.empty macIPs
+    in  M.unionWith (<>) y
 
