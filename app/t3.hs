@@ -3,6 +3,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 import qualified Options.Applicative as O
 import Control.Monad.Trans.Cont
@@ -410,10 +412,45 @@ fParse3T p = shiftT $ \k -> do
       shiftT f3
       lift (k r)
 
-newtype A = A Int
-  deriving (Show)
+newtype IP = IP String
+  deriving (Show, Eq, Ord)
 
-class c ~ M.Map (MK c) (MD c) => C c where
-  type MK c
-  type MD c
+newtype Mac = Mac String
+  deriving (Show, Eq, Ord)
+
+newtype Port = Port String
+  deriving (Show, Eq, Ord)
+
+updateAB (a, b) _ _ = undefined
+updateAB (a, b) _ _ = undefined
+
+class ColKey k where
+  data Col k
+  updateIP :: (IP, Mac) -> Col Mac -> Col k -> Col k
+  updatePort :: (Port, Mac) -> Col Mac -> Col k -> Col k
+
+instance ColKey IP where
+  data Col IP = IPtoMac (M.Map IP (First Mac, First Port))
+  updateIP (ip, mac) (MacToIP mm) (IPtoMac im) =
+    IPtoMac $
+      M.insertWith (<>) ip
+        (First (Just mac), First $ M.lookup mac mm >>= getFirst . snd)
+        im
+
+instance ColKey Mac where
+  data Col Mac = MacToIP (M.Map Mac (First IP, First Port))
+  updateIP (ip, mac) _ (MacToIP mm) =
+    MacToIP $
+      M.insertWith (<>) mac
+        (First (Just ip), mempty)
+        mm
+
+instance ColKey Port where
+  data Col Port = PortToMac (M.Map Port (First Mac, First IP))
+  updateIP (ip, mac) (MacToIP mm) (PortToMac pm) =
+    PortToMac . fromMaybe pm $ do
+      port <- M.lookup mac mm >>= getFirst . snd
+      return $ M.insertWith (<>) port
+        (First (Just mac), First (Just ip))
+        pm
 

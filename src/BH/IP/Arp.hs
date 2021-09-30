@@ -242,6 +242,24 @@ addIPMacs ip macs (ipInfo, macInfo) =
   g :: MacData -> MacData
   g x = x {macIPs = M.insert ip Answering (macIPs x)}
 
+addIPMacs2 :: IP -> S.Set MacAddr -> (MacInfo, IPInfo) -> IPInfo
+addIPMacs2 ip macs (macInfo, ipInfo) =
+  let d = IPData
+            { ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
+            , ipState = Answering
+            }
+  in  M.insertWith f ip d ipInfo
+ where
+  f :: IPData -> IPData -> IPData
+  f new old = new {ipMacPorts = ipMacPorts new <> ipMacPorts old}
+
+addIPMacs3 :: IP -> S.Set MacAddr -> MacInfo -> MacInfo
+addIPMacs3 ip macs macInfo =
+  foldr (M.adjust g) macInfo macs
+ where
+  g :: MacData -> MacData
+  g x = x {macIPs = M.insert ip Answering (macIPs x)}
+
 -- | Disassociate specified ip with mac addresses.
 -- FIXME: Check with missed macs.
 removeIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
