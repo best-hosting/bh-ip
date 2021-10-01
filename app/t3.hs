@@ -4,7 +4,10 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DataKinds #-}
 
 import qualified Options.Applicative as O
 import Control.Monad.Trans.Cont
@@ -19,6 +22,11 @@ import Data.Monoid
 import Data.Maybe
 import Data.Type.Equality
 import qualified Data.Map as M
+import qualified Data.Yaml as Y
+import Data.Aeson
+import qualified Data.Aeson.Encoding as JE
+import qualified Data.ByteString as B
+import Data.Void
 
 import BH.Common
 
@@ -415,42 +423,200 @@ fParse3T p = shiftT $ \k -> do
 newtype IP = IP String
   deriving (Show, Eq, Ord)
 
+instance ToJSON IP where
+    toJSON (IP x) = toJSON x
+instance ToJSONKey IP where
+    toJSONKey = ToJSONKeyText (\(IP x) -> T.pack x) (\(IP x) -> JE.text . T.pack $ x)
+
 newtype Mac = Mac String
   deriving (Show, Eq, Ord)
+
+instance ToJSON Mac where
+    toJSON (Mac x) = toJSON x
+instance ToJSONKey Mac where
+    toJSONKey = ToJSONKeyText (\(Mac x) -> T.pack x) (\(Mac x) -> JE.text . T.pack $ x)
 
 newtype Port = Port String
   deriving (Show, Eq, Ord)
 
-updateAB (a, b) _ _ = undefined
-updateAB (a, b) _ _ = undefined
+instance ToJSON Port where
+    toJSON (Port x) = toJSON x
+instance ToJSONKey Port where
+    toJSONKey = ToJSONKeyText (\(Port x) -> T.pack x) (\(Port x) -> JE.text . T.pack $ x)
+
+tIP :: Col IP
+tIP = IPtoMac
+  $ M.fromList
+      [ (IP "ip1", (First (Just (Mac "mac1")), First (Just (Port "port1"))))
+      , (IP "ip2", (First (Just (Mac "mac2")), First (Just (Port "port2"))))
+      ]
+
+tMac :: Col Mac
+tMac = MacToIP
+  $ M.fromList
+      [ (Mac "mac1", (First (Just (IP "ip1")), First (Just (Port "port1"))))
+      , (Mac "mac2", (First (Just (IP "ip2")), First (Just (Port "port2"))))
+      ]
+
+tPort :: Col Port
+tPort = PortToMac
+  $ M.fromList
+      [ (Port "port1", (First (Just (Mac "mac1")), First (Just (IP "ip1"))))
+      , (Port "port2", (First (Just (Mac "mac2")), First (Just (IP "ip2"))))
+      ]
+
+
+p :: StateT (Col IP, Col Mac, Col Port) IO ()
+p = do
+  let tIP1 = updateIP (IP "ip3", Mac "mac3") tMac tIP
+  liftIO $ showT tIP1
+  liftIO $ showT tMac
+  liftIO $ showT tPort
+
+{-updateAll :: (IP, Mac) -> (Col IP, Col Mac, Col Port) -> (Col IP, Col Mac, Col Port) 
+updateAll (im, mm, pm) =-}
+
+data N = S N | Z
+
+data CK
 
 class ColKey k where
   data Col k
-  updateIP :: (IP, Mac) -> Col Mac -> Col k -> Col k
+  type ColRef k
+  --type ColRef2 k :: * -> *
+  updateIP :: (IP, Mac) -> ColRef k -> Col k -> Col k
+  --updateIP2 :: (IP, Mac) -> Col k -> ColRef k
+  removeIP :: IP -> Col IP -> Col k -> Col k
   updatePort :: (Port, Mac) -> Col Mac -> Col k -> Col k
+
+instance (ColKey IP, ColKey Mac) => ColKey (IP, Mac) where
+  data Col (IP, Mac) = IPM (Col IP, Col Mac)
+  type ColRef (IP, Mac) = Void
+  updateIP (ip, mac) _ (IPM (im, mm)) =
+    IPM (updateIP (ip, mac) mm im, updateIP (ip, mac) (undefined :: Void) mm)
+
+instance (ColKey IP, ColKey Mac, ColKey Port) => ColKey (IP, Mac, Port) where
+  data Col (IP, Mac, Port) = IPMP (Col IP, Col Mac, Col Port)
+  type ColRef (IP, Mac, Port) = Void
+  updateIP (ip, mac) _ (IPMP (im, mm, pm)) =
+    let mm' = updateIP (ip, mac) (undefined :: Void) mm
+    in  IPMP
+          ( updateIP (ip, mac) mm' im
+          , mm'
+          , updateIP (ip, mac) mm' pm
+          )
 
 instance ColKey IP where
   data Col IP = IPtoMac (M.Map IP (First Mac, First Port))
+  type ColRef IP = Col Mac
   updateIP (ip, mac) (MacToIP mm) (IPtoMac im) =
     IPtoMac $
       M.insertWith (<>) ip
         (First (Just mac), First $ M.lookup mac mm >>= getFirst . snd)
         im
+  --updateIP' (ip, mac) (MacToIP mm) (IPtoMac im) = undefined
+
+  removeIP ip _ (IPtoMac im) = IPtoMac (M.delete ip im)
+
+  updatePort (port, mac) (MacToIP mm) (IPtoMac im) =
+    IPtoMac . fromMaybe im $ do
+      ip <- M.lookup mac mm >>= getFirst . fst
+      return $ M.insertWith (<>) ip
+        (First (Just mac), First (Just port))
+        im
+
+deriving instance Show (Col IP)
+instance ToJSON (Col IP) where
+  toJSON (IPtoMac x) = toJSON x
 
 instance ColKey Mac where
   data Col Mac = MacToIP (M.Map Mac (First IP, First Port))
+  type ColRef Mac = Void
   updateIP (ip, mac) _ (MacToIP mm) =
     MacToIP $
       M.insertWith (<>) mac
         (First (Just ip), mempty)
         mm
+  --updateIP' (ip, mac) (IPtoMac mm) (MacToIP im) = undefined
+
+  removeIP ip (IPtoMac im) (MacToIP mm) =
+    MacToIP . fromMaybe mm $ do
+      mac <- M.lookup ip im >>= getFirst . fst
+      return $ M.delete mac mm
+
+  updatePort (port, mac) _ (MacToIP mm) =
+    MacToIP $
+      M.insertWith (<>) mac
+        (mempty, First (Just port))
+        mm
+
+deriving instance Show (Col Mac)
+instance ToJSON (Col Mac) where
+  toJSON (MacToIP x) = toJSON x
 
 instance ColKey Port where
   data Col Port = PortToMac (M.Map Port (First Mac, First IP))
+  type ColRef Port = Col Mac
   updateIP (ip, mac) (MacToIP mm) (PortToMac pm) =
     PortToMac . fromMaybe pm $ do
       port <- M.lookup mac mm >>= getFirst . snd
       return $ M.insertWith (<>) port
         (First (Just mac), First (Just ip))
         pm
+  --updateIP' (ip, mac) (IPtoMac mm) (PortToMac im) = undefined
 
+  removeIP ip (IPtoMac im) (PortToMac pm) =
+    PortToMac . fromMaybe pm $ do
+      port <- M.lookup ip im >>= getFirst . snd
+      return $ M.delete port pm
+
+  updatePort (port, mac) (MacToIP mm) (PortToMac pm) =
+    PortToMac $
+      M.insertWith (<>) port
+        (First (Just mac), First $ M.lookup mac mm >>= getFirst . fst)
+        pm
+
+deriving instance Show (Col Port)
+instance ToJSON (Col Port) where
+  toJSON (PortToMac x) = toJSON x
+
+showT :: ToJSON a => a -> IO ()
+showT = B.putStr . Y.encode
+
+data Key  = KeyPair Int String
+          | KeyInt Int
+          | KeyStr String
+  deriving(Show)
+
+instance Eq Key where
+  KeyPair x s == KeyPair y p = x == y && s == p
+  KeyInt x    == KeyInt y = x == y
+  KeyStr s == KeyStr p = s == p
+  KeyInt _ == KeyStr _ = False
+  KeyStr _ == KeyInt _ = False
+  KeyPair x _ == KeyInt y = x == y
+  KeyInt x == KeyPair y _ = x == y
+  KeyPair _ s == KeyStr p = s == p
+  KeyStr s == KeyPair _ p = s == p
+
+instance Ord Key where
+  KeyPair x s `compare` KeyPair y p =
+    if x `compare` y == EQ
+      then s `compare` p
+      else x `compare` y
+  KeyInt x `compare` KeyInt y = x `compare` y
+  KeyStr s `compare` KeyStr p = s `compare` p
+  KeyInt _ `compare` KeyStr _ = GT
+  KeyStr _ `compare` KeyInt _ = LT
+  KeyPair x _ `compare` KeyInt y = x `compare` y
+  KeyInt x `compare` KeyPair y _ = x `compare` y
+  KeyPair _ s `compare` KeyStr p = s `compare` p
+  KeyStr s `compare` KeyPair _ p = s `compare` p
+
+tk :: M.Map Key String
+tk = M.fromList
+  [ (KeyPair 1 "one", "1111")
+  , (KeyPair 2 "two", "2222")
+  , (KeyPair 3 "three", "3333")
+  , (KeyPair 4 "four", "4444")
+  ]
