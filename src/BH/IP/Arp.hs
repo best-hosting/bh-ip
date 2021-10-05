@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RankNTypes #-}
 
 module BH.IP.Arp (
   ipNeigh,
@@ -192,6 +193,73 @@ parseNmapXml2 t =
     if b
       then M.unionWith (<>) z <$> xmlHostAddressP2 host
       else return z
+
+
+--addIPMac :: (IP, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+addIPMac (ip, macs) (ipInfo, macInfo, portInfo) = do
+{-  case (M.lookup ip ipInfo, M.lookup mac macInfo) of
+    (Just ipd, Just md) ->
+      remove ip from oldMac, oldPort
+      add IP + port, add ip to newMac
+    (Just ipd, Nothing) ->
+      remove ip from oldMac, oldPort
+      addIP , add ip to newMac
+    (Nothing, Just md) ->
+      lookupPort
+      add IP + port, add ip to newMac
+    (Nothing, Nothing) -> let
+      let ipd = IPData
+                { ipMacPorts = M.singleton mac Nothing
+                , ipState = Answering
+                }
+          md  = MacData
+                  { macIPs = M.singleton IP Answering
+                  , macSwPort = Last Nothing
+                  }
+      in  (ipd, md)
+-}
+  let newIpMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
+
+  --(macInfo', portInfo') <- fromMaybe (macInfo, portInfo) $ do
+  fromMaybe (macInfo, portInfo) $ do
+    oldIPdata <- M.lookup ip ipInfo
+    let ys = M.filterWithKey (\k _ -> k `S.notMember` macs) (ipMacPorts oldIPdata)
+        oldMacs = M.keysSet ys
+        oldPorts = S.fromList . catMaybes . M.elems $ ys
+        newMacInfo = macInfoDeleteIP ip macIPsL macInfo oldMacs
+        newPortInfo = macInfoDeleteIP ip (portAddrsL . macIPsL) portInfo oldPorts
+    return (newMacInfo, newPortInfo)
+
+{-{-  case M.lookup ip ipInfo of
+    Just oldIPdata ->
+      let oldIpMacPorts = M.filter (S.notMember macs) (ipMacPorts oldIPdata)
+          oldMacs = M.keysSet oldIpMacPorts
+          oldPorts = S.fromList . catMaybes . M.elems $ oldIpMacPorts
+          newMacInfo = macInfoDeleteIP macIPsL ip macInfo oldMacs
+          newPortInfo = macInfoDeleteIP (portAddrL . macIPsL) ip portInfo oldPorts
+      return (newMacInfo, newPortInfo)-}
+
+  let newIPd = IPData
+            { ipMacPorts = newIpMacPorts
+            , ipState = Answering
+            }
+      newPorts = S.fromList . catMaybes . M.elems $ newIpMacPorts
+
+  let newIpInfo = M.insert ip newIPd ipInfo
+      newMacInfo = macInfoAddIP ip macIPsL macInfo' macs
+      newPortInfo = macInfoAddIP ip (portAddrL . macIPsL) portInfo' newPorts
+  return (newIpInfo, newMacInfo, newPortInfo)-}
+
+macInfoDeleteIP :: Ord a => IP -> LensC b (M.Map IP IPState) -> M.Map a b -> S.Set a -> M.Map a b
+macInfoDeleteIP ip l = foldr (M.adjust (modifyL l (M.delete ip)))
+
+macInfoAddIP :: (Ord a, Monoid b) => IP -> LensC b (M.Map IP IPState) -> M.Map a b -> S.Set a -> M.Map a b
+macInfoAddIP ip l z0 =
+  let addIP = modifyL l (M.insert ip Answering)
+  -- Monoid may not be commutative, but i need to be sure, that i've added IP.
+  -- So instead of using '<>' with 'insertWith' i just explicitly add IP to
+  -- old value.
+  in  foldr (\k -> M.insertWith (\_ -> addIP) k (addIP mempty)) z0
 
 -- FIXME: Should i update all DBs at once?
 -- FIXME: This function assumes, that two dbs are in sync. If that's not the

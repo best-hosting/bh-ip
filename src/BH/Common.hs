@@ -6,6 +6,7 @@ module BH.Common
     , getL
     , modifyL
     , setL
+    , idL
     , maybeL
     , nothingL
     , lexemeA
@@ -41,6 +42,9 @@ setL l x = modifyL l (const x)
 maybeL :: LensC (Maybe a) a
 maybeL g Nothing  = Just <$> g undefined
 maybeL g (Just x) = Just <$> g x
+
+idL :: LensC a a
+idL g x = g x
 
 -- | Always get and set 'Nothing' (value is not changed on 'set').
 nothingL :: LensC a (Maybe b)

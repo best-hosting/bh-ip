@@ -13,6 +13,7 @@ module BH.Main.Types (
   toMacInfo,
   toMacData,
   MacData(..),
+  macIPsL,
   resolveMacIPs,
   --macIPsL,
   IPInfo,
@@ -102,9 +103,12 @@ data MacData = MacData
   }
   deriving (Show)
 
+macIPsL :: LensC MacData (M.Map IP IPState)
+macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
+
 instance Semigroup MacData where
   x <> y = MacData
-            { macIPs    = macIPs x    <> macIPs y
+            { macIPs    = macIPs y    <> macIPs x
             , macSwPort = macSwPort x <> macSwPort y
             }
 
