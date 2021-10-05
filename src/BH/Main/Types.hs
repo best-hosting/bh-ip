@@ -219,6 +219,8 @@ type PortInfo = M.Map PortNum PortData
 -- and 'SwPort'. And this should remain. But i just need to remove duplication
 -- of 'ports' from 'PortData'.
 data PortData = PortData
+  -- FIXME: Use 'Maybe PortState', because i may not yet know port state.
+  -- [current]
   { portState :: PortState
   , --, portMode :: PortMode
     portAddrs :: MacInfo
@@ -247,6 +249,8 @@ instance Semigroup PortData where
               , portAddrs = portAddrs x <> portAddrs y
               }
 
+instance Monoid PortData where
+  mempty = PortData = 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: Use 'IPInfo' to resolve mac ips. [current]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',

@@ -34,6 +34,7 @@ import BH.Cache
 import BH.Main.Types
 import BH.Common
 import BH.IP
+import BH.Switch
 
 -- TODO: Parse nmap xml with xeno [pkg].
 -- TODO: Implement cache update strategy, where new entries are merged with
@@ -195,7 +196,7 @@ parseNmapXml2 t =
       else return z
 
 
---addIPMac :: (IP, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+{---addIPMac :: (IP, S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 addIPMac (ip, macs) (ipInfo, macInfo, portInfo) = do
 {-  case (M.lookup ip ipInfo, M.lookup mac macInfo) of
     (Just ipd, Just md) ->
@@ -220,17 +221,16 @@ addIPMac (ip, macs) (ipInfo, macInfo, portInfo) = do
 -}
   let newIpMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
 
-  --(macInfo', portInfo') <- fromMaybe (macInfo, portInfo) $ do
-  fromMaybe (macInfo, portInfo) $ do
-    oldIPdata <- M.lookup ip ipInfo
-    let ys = M.filterWithKey (\k _ -> k `S.notMember` macs) (ipMacPorts oldIPdata)
-        oldMacs = M.keysSet ys
-        oldPorts = S.fromList . catMaybes . M.elems $ ys
-        newMacInfo = macInfoDeleteIP ip macIPsL macInfo oldMacs
-        newPortInfo = macInfoDeleteIP ip (portAddrsL . macIPsL) portInfo oldPorts
-    return (newMacInfo, newPortInfo)
+      (macInfo', portInfo') = fromMaybe (macInfo, portInfo) $ do
+        oldIPdata <- M.lookup ip ipInfo
+        let ys = M.filterWithKey (\k _ -> k `S.notMember` macs) (ipMacPorts oldIPdata)
+            oldMacs = M.keysSet ys
+            oldPorts = S.fromList . catMaybes . M.elems $ ys
+            newMacInfo = macInfoDeleteIP ip macInfo oldMacs
+            newPortInfo = swPortInfoDeleteIP ip portInfo oldPorts
+        return (newMacInfo, newPortInfo)
 
-{-{-  case M.lookup ip ipInfo of
+{-  case M.lookup ip ipInfo of
     Just oldIPdata ->
       let oldIpMacPorts = M.filter (S.notMember macs) (ipMacPorts oldIPdata)
           oldMacs = M.keysSet oldIpMacPorts
@@ -243,23 +243,33 @@ addIPMac (ip, macs) (ipInfo, macInfo, portInfo) = do
             { ipMacPorts = newIpMacPorts
             , ipState = Answering
             }
-      newPorts = S.fromList . catMaybes . M.elems $ newIpMacPorts
+      newPorts = M.foldr (\(m, p) -> M.insertWith (<>) p (S.singleton m)) M.empty . M.toList . M.filter isJust $ newIpMacPorts
 
   let newIpInfo = M.insert ip newIPd ipInfo
       newMacInfo = macInfoAddIP ip macIPsL macInfo' macs
-      newPortInfo = macInfoAddIP ip (portAddrL . macIPsL) portInfo' newPorts
+      newPortInfo = swPortInfoAddIP ip portInfo' newPorts
   return (newIpInfo, newMacInfo, newPortInfo)-}
 
-macInfoDeleteIP :: Ord a => IP -> LensC b (M.Map IP IPState) -> M.Map a b -> S.Set a -> M.Map a b
-macInfoDeleteIP ip l = foldr (M.adjust (modifyL l (M.delete ip)))
+macInfoDeleteIP :: IP -> MacInfo -> S.Set MacAddr -> MacInfo
+macInfoDeleteIP ip = foldr (M.adjust (modifyL macIPsL (M.delete ip)))
 
-macInfoAddIP :: (Ord a, Monoid b) => IP -> LensC b (M.Map IP IPState) -> M.Map a b -> S.Set a -> M.Map a b
-macInfoAddIP ip l z0 =
-  let addIP = modifyL l (M.insert ip Answering)
+swPortInfoDeleteIP :: IP -> SwPortInfo -> S.Set SwPort -> SwPortInfo
+swPortInfoDeleteIP ip =
+  let f m = macInfoDeleteIP ip m (M.keysSet m)
+  in  foldr (M.adjust (modifyL portAddrsL f))
+
+macInfoAddIP :: IP -> MacInfo -> S.Set MacAddr -> MacInfo
+macInfoAddIP ip z0 =
+  let f = modifyL macIPsL (M.insert ip Answering)
   -- Monoid may not be commutative, but i need to be sure, that i've added IP.
   -- So instead of using '<>' with 'insertWith' i just explicitly add IP to
   -- old value.
-  in  foldr (\k -> M.insertWith (\_ -> addIP) k (addIP mempty)) z0
+  in  foldr (\k -> M.insertWith (\_ -> f) k (f mempty)) z0
+
+swPortInfoAddIP :: IP -> SwPortInfo -> S.Set (SwPort, S.Set MacAddr) -> SwPortInfo
+swPortInfoAddIP ip z0 =
+  let f ms = modifyL portAddrsL (\y -> macInfoAddIP ip y ms)
+  in  foldr (\(k, ms) -> M.insertWith (\_ -> f ms) k (f ms mempty)) z0
 
 -- FIXME: Should i update all DBs at once?
 -- FIXME: This function assumes, that two dbs are in sync. If that's not the
