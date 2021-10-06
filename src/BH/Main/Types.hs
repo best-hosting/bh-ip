@@ -186,16 +186,20 @@ instance FromJSON IPState where
 -- can be on several ports.
 data IPData = IPData
   { ipMacPorts :: M.Map MacAddr (Maybe SwPort)
-  , ipState :: IPState
+  , ipState :: Last IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
 instance Semigroup IPData where
   x <> y = IPData
+            -- Map's 'Monoid' instance uses left-biased 'union'.
             { ipMacPorts = ipMacPorts y <> ipMacPorts x
             , ipState = ipState y
             }
+
+instance Monoid IPData where
+  mempty = IPData {ipMacPorts = M.empty, ipState = Last Nothing}
 
 instance ToJSON IPData where
   toJSON IPData{..} = object
@@ -221,9 +225,9 @@ type PortInfo = M.Map PortNum PortData
 data PortData = PortData
   -- FIXME: Use 'Maybe PortState', because i may not yet know port state.
   -- [current]
-  { portState :: PortState
-  , --, portMode :: PortMode
-    portAddrs :: MacInfo
+  { portAddrs :: MacInfo
+  , portState :: Last PortState
+  --, portMode :: PortMode
   }
   deriving (Show)
 
@@ -233,24 +237,25 @@ portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
 instance ToJSON PortData where
   toJSON PortData{..} =
     object $
-      [ "state" .= portState
-      , "addrs" .= portAddrs
+      [ "addrs" .= portAddrs
+      , "state" .= portState
       ]
 
 instance FromJSON PortData where
   parseJSON = withObject "PortData" $ \v ->
     PortData
-      <$> v .: "state"
-      <*> v .: "addrs"
+      <$> v .: "addrs"
+      <*> v .: "state"
 
 instance Semigroup PortData where
     x <> y = PortData
-              { portState = portState y
-              , portAddrs = portAddrs x <> portAddrs y
+              { portAddrs = M.unionWith (<>) (portAddrs x) (portAddrs y)
+              , portState = portState x <> portState y
               }
 
 instance Monoid PortData where
-  mempty = PortData = 
+  mempty = PortData {portAddrs = M.empty, portState = Last Nothing}
+
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: Use 'IPInfo' to resolve mac ips. [current]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
@@ -308,6 +313,6 @@ macInfoToIPInfo = M.foldrWithKey goM M.empty
   goM mac MacData{..} =
     let d = IPData{ipMacPorts = M.singleton mac (getLast macSwPort)}
         y :: IPInfo
-        y = M.foldrWithKey (\ip s -> M.insertWith (<>) ip d{ipState = s}) M.empty macIPs
+        y = M.foldrWithKey (\ip s -> M.insertWith (<>) ip d{ipState = Last (Just s)}) M.empty macIPs
     in  M.unionWith (<>) y
 
