@@ -29,6 +29,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Char
 import Control.Applicative.Combinators
+import Data.Monoid
 
 import BH.Common
 import BH.IP
@@ -137,7 +138,7 @@ findPortState p = do
 findPortData :: PortNum -> TelnetRunM TelnetParserResult a b PortData
 findPortData p = do
   portAddrs <- findPortMacs p
-  portState <- findPortState p
+  portState <- Last . Just <$> findPortState p
   return PortData{..}
 
 findPortInfo :: [PortNum] -> TelnetRunM TelnetParserResult a b PortInfo
@@ -162,7 +163,7 @@ findMacPort mac = do
   case mt of
     []    -> return mempty
     (_:_) ->
-      let upPort portAddrs = PortData{portState = Up, ..}
+      let upPort portAddrs = PortData{portState = Last (Just Up), ..}
       in  foldr
             (\p mz -> M.insertWith (<>) p <$> (upPort <$> findPortMacs p) <*> mz)
             (pure mempty)
