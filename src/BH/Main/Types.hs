@@ -18,6 +18,7 @@ module BH.Main.Types (
   --macIPsL,
   IPInfo,
   IPData(..),
+  ipMacPortsL,
   IPState(..),
   SwPortInfo,
   PortInfo,
@@ -190,6 +191,9 @@ data IPData = IPData
   --, ipSubnet :: T.Text
   }
  deriving (Show)
+
+ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe SwPort))
+ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
 
 instance Semigroup IPData where
   x <> y = IPData

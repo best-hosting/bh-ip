@@ -196,46 +196,81 @@ parseNmapXml2 t =
       then M.unionWith (<>) z <$> xmlHostAddressP2 host
       else return z
 
+addPortMac :: (SwPort, S.Set MacAddr) -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
+addPortMac = undefined
 
+modifyMap :: (Ord a, Monoid b) => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
+modifyMap l g xs zs =
+  let f = modifyL l g
+  in  foldr (\x -> M.insertWith (const f) x (f mempty)) zs xs
+
+adjustMap :: Ord a => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
+adjustMap l g xs zs = foldr (M.adjust (modifyL l g)) zs xs
+
+modifyIPState :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+modifyIPState ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
+  xs <- ipMacPorts <$> M.lookup ip ipInfo
+  let (macs, ports) = M.keysSet &&& S.fromList . catMaybes . M.elems $ xs
+      -- I use function 'f' below to modify 'MacInfo' in 'PortData' /without/
+      -- filtering out macs missed on particular port. Thus, i should either
+      -- filter only macs present on port beforehand or just use 'adjustMap'
+      -- here.
+      f = adjustMap macIPsL (M.adjust (const st) ip) macs
+  return
+    ( M.adjust (\x -> x{ipState = Last (Just st)}) ip ipInfo
+    , f macInfo
+    , adjustMap portAddrsL f ports swPortInfo
+    )
+
+{-macInfoModifyIP :: (M.Map IP IPState -> M.Map IP IPState) -> S.Set MacAddr -> MacInfo -> MacInfo
+--macInfoModifyIP g ms zs = foldr (M.adjust (modifyL macIPsL g)) zs ms
+macInfoModifyIP = modifyMap macIPsL
+macInfoModifyIP g ms zs =
+  let f = modifyL macIPsL g
+  in  foldr (\m -> M.insertWith (const f) m (f mempty)) zs ms-}
+
+-- | I can't add new ports here, because in addtion request i only have 'IP'
+-- and 'MacAddr', so there should be no new ports (well, at least if DBs were
+-- in sync before).
+{-swPortInfoModifyMac :: (MacInfo -> MacInfo) -> S.Set SwPort -> SwPortInfo -> SwPortInfo
+swPortInfoModifyMac = modifyMap portAddrsL
+swPortInfoModifyMac g ps zs =
+  let f = modifyL portAddrsL g
+  in  foldr (\p -> M.insertWith (const f) p (f mempty)) zs ps-}
+
+-- | Delete 'IP' on 'MacAddr'-es, on which predicate returns 'True'
+delIPMac :: IP -> (MacAddr -> Bool) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+delIPMac ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
+    xs <- ipMacPorts <$> M.lookup ip ipInfo
+    let (macs, ports) = M.keysSet &&& S.fromList . catMaybes . M.elems
+          $ M.filterWithKey (\k -> const (p k)) xs
+        -- I use function 'f' below to modify 'MacInfo' in 'PortData'
+        -- /without/ filtering out macs missed on particular port. Thus, i
+        -- should either filter only macs present on port beforehand or just
+        -- use 'adjustMap' here.
+        f = adjustMap macIPsL (M.delete ip) macs
+    return
+      -- If not IP deleted not from /all/ its macs, i'll update 'IPData' to
+      -- contain remaining macs.
+      ( if S.size macs /= S.size (M.keysSet xs)
+          then adjustMap ipMacPortsL (\z0 -> foldr M.delete z0 macs) (S.singleton ip) ipInfo
+          else M.delete ip ipInfo
+      , f macInfo
+      , adjustMap portAddrsL f ports swPortInfo
+      )
+
+-- | Set 'IP' to use specified 'MacAddr'-es.
 addIPMac :: (IP, S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac (ip, macs) (ipInfo, macInfo, portInfo) =
-  let (macInfo', portInfo') = deleteOld
-
+addIPMac (ip, macs) z@(ipInfo, macInfo, swPortInfo) =
+  let (_, macInfo', swPortInfo') = delIPMac ip (`S.notMember` macs) z
       ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
       ipState = Last (Just Answering)
       ports =  S.fromList . catMaybes . M.elems $ ipMacPorts
-      f = macInfoAddIP ip macs
-  in  (M.insert ip IPData{..} ipInfo, f macInfo', modifyPorts f ports portInfo')
- where
-  -- | Delete old IP from no longer used macs and corresponding ports.
-  deleteOld :: (MacInfo, SwPortInfo)
-  deleteOld = fromMaybe (macInfo, portInfo) $ do
-    xs <- ipMacPorts <$> M.lookup ip ipInfo
-    let (oldMacs, oldPorts) = M.keysSet &&& S.fromList . catMaybes . M.elems
-          $ M.filterWithKey (\k _ -> k `S.notMember` macs) xs
-        f = macInfoDeleteIP ip oldMacs
-    return (f macInfo, modifyPorts f oldPorts portInfo)
-  -- | I can't add new ports here, because in addtion request i only have 'IP'
-  -- and 'MacAddr', so there should be no new ports (well, at least if DBs were
-  -- in sync before).
-  modifyPorts :: (MacInfo -> MacInfo) -> S.Set SwPort -> SwPortInfo -> SwPortInfo
-  modifyPorts g ps zs = foldr (M.adjust (modifyL portAddrsL g)) zs ps
-
-macInfoDeleteIP :: IP -> S.Set MacAddr -> MacInfo -> MacInfo
-macInfoDeleteIP ip ms zs = foldr (M.adjust (modifyL macIPsL (M.delete ip))) zs ms
-
-macInfoAddIP :: IP -> S.Set MacAddr -> MacInfo -> MacInfo
-macInfoAddIP ip ms z0 =
-  let f = modifyL macIPsL (M.insert ip Answering)
-  -- Monoid may not be commutative, but i need to be sure, that i've added IP.
-  -- So instead of using '<>' with 'insertWith' i just explicitly add IP to
-  -- old value.
-  in  foldr (\k -> M.insertWith (\_ -> f) k (f mempty)) z0 ms
-
-swPortInfoAddIP :: IP -> SwPortInfo -> M.Map SwPort (S.Set MacAddr) -> SwPortInfo
-swPortInfoAddIP ip z0 =
-  let f ms = modifyL portAddrsL (\y -> macInfoAddIP ip ms y)
-  in  M.foldrWithKey (\k ms -> M.insertWith (\_ -> f ms) k (f ms mempty)) z0
+      f = modifyMap macIPsL (M.insert ip Answering) macs
+  in  ( M.insert ip IPData{..} ipInfo
+      , f macInfo'
+      , modifyMap portAddrsL f ports swPortInfo'
+      )
 
 -- FIXME: Should i update all DBs at once?
 -- FIXME: This function assumes, that two dbs are in sync. If that's not the
