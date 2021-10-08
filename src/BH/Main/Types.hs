@@ -59,6 +59,7 @@ data Config = Config
                 , cacheTime :: UTCTime
                 , updateInterval :: NominalDiffTime
                 , timeFile :: FilePath
+                , nmapHost :: T.Text
                 }
   deriving (Show)
 

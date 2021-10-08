@@ -8,6 +8,7 @@ module BH.IP.Arp (
   ipNeigh,
   nmapCache,
   queryLinuxArp,
+  queryLinuxArp2,
 ) where
 
 import Control.Concurrent
@@ -30,6 +31,7 @@ import Text.XML.Light
 import Data.Time
 import Data.Monoid
 import Control.Arrow
+import Control.Monad.State
 
 import BH.Cache
 import BH.Main.Types
@@ -199,6 +201,11 @@ parseNmapXml2 t =
 addPortMac :: (SwPort, S.Set MacAddr) -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
 addPortMac = undefined
 
+mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergeIP2 xs z@(ipInfo, _, _) =
+  let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
+  in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (`modifyIPState` Unreachable)) remIPs $ z
+
 modifyMap :: (Ord a, Monoid b) => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
 modifyMap l g xs zs =
   let f = modifyL l g
@@ -260,8 +267,8 @@ delIPMac ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
       )
 
 -- | Set 'IP' to use specified 'MacAddr'-es.
-addIPMac :: (IP, S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac (ip, macs) z@(ipInfo, macInfo, swPortInfo) =
+addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+addIPMac ip macs z@(ipInfo, macInfo, swPortInfo) =
   let (_, macInfo', swPortInfo') = delIPMac ip (`S.notMember` macs) z
       ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
       ipState = Last (Just Answering)
@@ -370,7 +377,7 @@ nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
  where
   go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
   go = do
-    liftIO $ putStrLn "Updating arp cache using `nmap`..."
+    liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
     xml <- do
       Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
@@ -429,6 +436,19 @@ queryLinuxArp cacheFile host = do
       liftIO (writeFile timeFile (show t))
       updateArpCache cacheFile host M.empty
     else readYaml cacheFile >>= updateArpCache cacheFile host
+
+-- FIXME: Host should be obtained from 'Config'.
+queryLinuxArp2 ::
+  (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  m ()
+queryLinuxArp2 = do
+  Config{..} <- ask
+  t <- liftIO getCurrentTime
+  if diffUTCTime t cacheTime > updateInterval
+    then do
+      mergeIP2 <$> nmapCache2 nmapHost <*> get >>= put
+      liftIO (writeFile timeFile (show t))
+    else return ()
 
 {-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m) =>

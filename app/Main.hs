@@ -165,9 +165,31 @@ initConfig opts@MyOptions{..} action = do
     v <- optVlan
     (v, ) <$> M.lookup v optVlanConfig
   let macIpFile = optMacIpFile
+      nmapHost = vlanHost
       cf0 = Config{..}
-  (mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
-  runReaderT action cf0{macIpMap = mi, ipMacMap = im}
+  --(mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
+  runReaderT (readAll >>= execStateT queryLinuxArp2 >>= writeAll) cf0
+  --runReaderT action cf0{macIpMap = mi, ipMacMap = im}
+
+readAll :: (MonadIO m, MonadError String m) => m (IPInfo, MacInfo, SwPortInfo)
+readAll =
+  (,,)
+    <$> readYaml "ipinfo2.yaml"
+    <*> readYaml "macinfo2.yaml"
+    <*> readYaml "swportinfo2.yaml"
+
+writeAll :: (MonadIO m, MonadError String m) => (IPInfo, MacInfo, SwPortInfo) -> m ()
+writeAll (ipInfo, macInfo, swPortInfo) = do
+  writeCache "ipinfo2.yaml" ipInfo
+  writeCache "macinfo2.yaml" macInfo
+  writeCache "swportinfo2.yaml" swPortInfo
+ where
+  writeCache :: (MonadIO m, ToJSON a) => FilePath -> a -> m ()
+  writeCache f x = liftIO $ do
+    cwd <- getCurrentDirectory
+    (t, _) <- openTempFile cwd f
+    Y.encodeFile t x
+    renameFile t f
 
 workQuery ::
   (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c
