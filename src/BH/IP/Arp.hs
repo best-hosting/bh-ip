@@ -198,9 +198,6 @@ parseNmapXml2 t =
       then M.unionWith (<>) z <$> xmlHostAddressP2 host
       else return z
 
-addPortMac :: (SwPort, S.Set MacAddr) -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
-addPortMac = undefined
-
 mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 mergeIP2 xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
@@ -278,6 +275,9 @@ addIPMac ip macs z@(ipInfo, macInfo, swPortInfo) =
       , f macInfo'
       , modifyMap portAddrsL f ports swPortInfo'
       )
+
+addPortMac :: SwPort -> S.Set MacAddr -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
+addPortMac = undefined
 
 -- FIXME: Should i update all DBs at once?
 -- FIXME: This function assumes, that two dbs are in sync. If that's not the

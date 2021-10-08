@@ -94,6 +94,9 @@ searchIPs ips = do
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   macInfoToIPInfo <$> searchMacs macs
 
+-- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, SwPortInfo) ?
+-- And then add function for obtaining 'InfoKey' indexed map from a generic db
+-- type [current]
 class c ~ M.Map (InfoKey c) (InfoData c) => Searchable c where
   -- FIXME: Rename to 'SearchKey' and 'SearchData' or 'SearchResult'
   type InfoKey c

@@ -620,3 +620,33 @@ tk = M.fromList
   , (KeyPair 3 "three", "3333")
   , (KeyPair 4 "four", "4444")
   ]
+
+newtype A = A ([Int], [String], [Double])
+  deriving (Show)
+
+newtype B = B [String]
+  deriving (Show)
+
+class Listable c where
+  type ListDb c
+  getList :: ListDb c -> [c]
+
+instance Listable Int where
+  type ListDb Int = A
+  getList (A (z, _, _)) = z
+
+instance Listable String where
+  type ListDb String = A
+  getList (A (_, z, _)) = z
+
+instance Listable Double where
+  type ListDb Double = A
+  getList (A (_, _, z)) = z
+
+getList2 :: Listable a => (ListDb a) -> [a]
+getList2 = getList
+
+ttt :: String
+ttt = let db = (A ([1], ["abc"], [1.0]))
+      in  show ((2 :: Int) : getList2 db) ++ show (("ghi" :: String) : getList2 db)
+
