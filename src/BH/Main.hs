@@ -92,7 +92,7 @@ searchIPs ::
 searchIPs ips = do
   Config{..} <- ask
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
-  macInfoToIPInfo <$> searchMacs macs
+  searchMacs macs
 
 -- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, SwPortInfo) ?
 -- And then add function for obtaining 'InfoKey' indexed map from a generic db

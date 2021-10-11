@@ -214,16 +214,17 @@ adjustMap l g xs zs = foldr (M.adjust (modifyL l g)) zs xs
 modifyIPState :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modifyIPState ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   xs <- ipMacPorts <$> M.lookup ip ipInfo
-  let (macs, ports) = M.keysSet &&& S.fromList . catMaybes . M.elems $ xs
-      -- I use function 'f' below to modify 'MacInfo' in 'PortData' /without/
-      -- filtering out macs missed on particular port. Thus, i should either
-      -- filter only macs present on port beforehand or just use 'adjustMap'
-      -- here.
-      f = adjustMap macIPsL (M.adjust (const st) ip) macs
+  let f :: MacAddr -> M.Map MacAddr (M.Map IP IPState) -> M.Map MacAddr (M.Map IP IPState)
+      f mac = M.adjust (M.insert ip st) mac
+      swPortInfo' = M.foldrWithKey (\mac mp z -> case mp of
+                        Just (port, _)  -> M.adjust (modifyL portAddrsL (f mac)) port z
+                        Nothing         -> z
+                      )
+                      swPortInfo xs
   return
     ( M.adjust (\x -> x{ipState = Last (Just st)}) ip ipInfo
-    , f macInfo
-    , adjustMap portAddrsL f ports swPortInfo
+    , adjustMap macIPsL (M.adjust (const st) ip) (M.keysSet xs) macInfo
+    , swPortInfo'
     )
 
 {-macInfoModifyIP :: (M.Map IP IPState -> M.Map IP IPState) -> S.Set MacAddr -> MacInfo -> MacInfo
@@ -276,8 +277,17 @@ addIPMac ip macs z@(ipInfo, macInfo, swPortInfo) =
       , modifyMap portAddrsL f ports swPortInfo'
       )
 
+delPortMac :: SwPort -> (MacAddr -> Bool) -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
+delPortMac port p z@(ipInfo, macInfo, swPortInfo) = undefined
+{-fromMaybe z $ do
+  xs <- portAddrs <$> M.lookup port swPortInfo
+  let (macs, ip) = M.keysSet &&& foldr ((<>) . M.keysSet . macIPs) S.empty
+        $ M.filterWithKey (\k -> const (p k)) xs-}
+
+
+
 addPortMac :: SwPort -> S.Set MacAddr -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
-addPortMac = undefined
+addPortMac port macs (ipInfo, macInfo, swPortInfo) = undefined
 
 -- FIXME: Should i update all DBs at once?
 -- FIXME: This function assumes, that two dbs are in sync. If that's not the

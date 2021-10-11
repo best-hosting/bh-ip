@@ -4,6 +4,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 
 module BH.Main.Types (
   MacIpMap,
@@ -14,7 +15,6 @@ module BH.Main.Types (
   toMacData,
   MacData(..),
   macIPsL,
-  resolveMacIPs,
   --macIPsL,
   IPInfo,
   IPData(..),
@@ -24,9 +24,7 @@ module BH.Main.Types (
   PortInfo,
   PortData(..),
   portAddrsL,
-  resolvePortIPs,
   ToSwPortInfo(..),
-  macInfoToIPInfo,
 )
 where
 
@@ -100,7 +98,7 @@ type MacInfo = M.Map MacAddr MacData
 -- Single mac can't be on several ports.
 data MacData = MacData
   { macIPs    :: M.Map IP IPState
-  , macSwPort :: Last SwPort
+  , macSwPort :: Last (SwPort, PortState)
 --, macVendor :: T.Text
   }
   deriving (Show)
@@ -133,7 +131,7 @@ toMacData :: SwName -> MacTableEl -> MacData
 toMacData portSw MacTableEl{..} =
   MacData
     { macIPs = M.empty
-    , macSwPort = Last (Just SwPort{portSpec = elPort, ..})
+    , macSwPort = Last (Just (SwPort{portSpec = elPort, ..}, Up))
     }
 
 toMacInfo :: SwName -> MacTableEl -> MacInfo
@@ -187,13 +185,13 @@ instance FromJSON IPState where
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
 data IPData = IPData
-  { ipMacPorts :: M.Map MacAddr (Maybe SwPort)
+  { ipMacPorts :: M.Map MacAddr (Maybe (SwPort, PortState))
   , ipState :: Last IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
-ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe SwPort))
+ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe (SwPort, PortState)))
 ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
 
 instance Semigroup IPData where
@@ -228,15 +226,13 @@ type PortInfo = M.Map PortNum PortData
 -- and 'SwPort'. And this should remain. But i just need to remove duplication
 -- of 'ports' from 'PortData'.
 data PortData = PortData
-  -- FIXME: Use 'Maybe PortState', because i may not yet know port state.
-  -- [current]
-  { portAddrs :: MacInfo
+  { portAddrs :: M.Map MacAddr (M.Map IP IPState)
   , portState :: Last PortState
   --, portMode :: PortMode
   }
   deriving (Show)
 
-portAddrsL :: LensC PortData MacInfo
+portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP IPState))
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
 
 instance ToJSON PortData where
@@ -266,14 +262,14 @@ instance Monoid PortData where
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
 -- whatever. Every maps should be inside vlan. And vlan should be removed
 -- early at start. [current]
-resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
+{-resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
 resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
   d { macIPs = fromMaybe M.empty
                 (M.lookup m macIpMap >>= return . M.fromSet (const Answering))
     }
 
 resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
-resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)
+resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)-}
 
 -- FIXME: Rename to 'HasPorts'.
 class ToSwPortInfo a where
@@ -292,14 +288,16 @@ instance ToSwPortInfo MacInfo where
   -- type to 'S.Set' to force uniqueness? [current]
   -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
   -- entire program run to single vlan? [current]
-  getSwPorts = nub . mapMaybe (getLast . macSwPort) . M.elems
+  getSwPorts = nub . mapMaybe (fmap fst . getLast . macSwPort) . M.elems
   fromSwPortInfo = M.foldrWithKey go M.empty
    where
     go :: SwPort -> PortData -> MacInfo -> MacInfo
-    go sp PortData{..} z = M.unionWith (<>) z portAddrs
+    go sp PortData{..} z =
+      let macSwPort = Last $ maybe Nothing (Just . (sp, )) . getLast $ portState
+      in  M.foldrWithKey (\mac macIPs -> M.insertWith (<>) mac MacData{..}) z portAddrs
 
 instance ToSwPortInfo IPInfo where
-  getSwPorts = nub . catMaybes . concatMap (M.elems . ipMacPorts) . M.elems
+  getSwPorts = nub . map fst . catMaybes . concatMap (M.elems . ipMacPorts) . M.elems
   -- Here there're two places, where 'SwPort' may be defined: key of
   -- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i
   -- will explicitly overwrite 'SwPort' obtained from 'portAddrs' with value
@@ -309,7 +307,19 @@ instance ToSwPortInfo IPInfo where
   fromSwPortInfo = M.foldrWithKey go M.empty
    where
     go :: SwPort -> PortData -> IPInfo -> IPInfo
-    go p PortData{..} = M.unionWith (<>) (macInfoToIPInfo portAddrs)
+    go port PortData{..} z =
+      M.foldrWithKey goMac z portAddrs
+     where
+      portRef :: Maybe (SwPort, PortState)
+      portRef = maybe Nothing (Just . (port, )) . getLast $ portState
+      goMac :: MacAddr -> M.Map IP IPState -> IPInfo -> IPInfo
+      goMac mac xs z' =
+        M.foldrWithKey (\ip st -> M.insertWith (<>) ip
+          IPData
+            { ipState = Last (Just st)
+            , ipMacPorts = M.singleton mac portRef
+            }
+          ) z' xs
 
 macInfoToIPInfo :: MacInfo -> IPInfo
 macInfoToIPInfo = M.foldrWithKey goM M.empty
