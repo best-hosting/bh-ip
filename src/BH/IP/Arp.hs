@@ -211,6 +211,15 @@ modifyMap l g xs zs =
 adjustMap :: Ord a => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
 adjustMap l g xs zs = foldr (M.adjust (modifyL l g)) zs xs
 
+modifyIP :: (M.Map IP IPState -> M.Map IP IPState) -> a -> a
+modifyIP = undefined
+
+modifyMac :: Monoid b => (M.Map MacAddr b -> M.Map MacAddr b) -> a -> a
+modifyMac = undefined
+
+modifyPprt :: (Maybe (SwPort, PortState) -> Maybe (SwPort, PortState)) -> a -> a
+modifyPort = undefined
+
 modifyIPState :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modifyIPState ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   xs <- ipMacPorts <$> M.lookup ip ipInfo

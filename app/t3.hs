@@ -650,3 +650,4 @@ ttt :: String
 ttt = let db = (A ([1], ["abc"], [1.0]))
       in  show ((2 :: Int) : getList2 db) ++ show (("ghi" :: String) : getList2 db)
 
+data U = U
