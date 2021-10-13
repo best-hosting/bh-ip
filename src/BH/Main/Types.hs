@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RankNTypes #-}
 
 module BH.Main.Types (
   MacIpMap,
@@ -102,6 +103,14 @@ data MacData = MacData
 --, macVendor :: T.Text
   }
   deriving (Show)
+
+class C3 a where
+  type C3Args a
+  ipLens :: C3Args a -> LensC a (M.Map IP IPState)
+
+instance C3 MacData where
+  type C3Args MacData = ()
+  ipLens _ = macIPsL
 
 macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
@@ -231,6 +240,10 @@ data PortData = PortData
   --, portMode :: PortMode
   }
   deriving (Show)
+
+instance C3 PortData where
+  type C3Args PortData = MacAddr
+  ipLens mac = portAddrsL . mapL mac . maybeL M.empty
 
 portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP IPState))
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x

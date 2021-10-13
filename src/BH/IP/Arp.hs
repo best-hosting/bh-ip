@@ -217,7 +217,7 @@ modifyIP = undefined
 modifyMac :: Monoid b => (M.Map MacAddr b -> M.Map MacAddr b) -> a -> a
 modifyMac = undefined
 
-modifyPprt :: (Maybe (SwPort, PortState) -> Maybe (SwPort, PortState)) -> a -> a
+modifyPort :: (Maybe (SwPort, PortState) -> Maybe (SwPort, PortState)) -> a -> a
 modifyPort = undefined
 
 modifyIPState :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
