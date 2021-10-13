@@ -26,6 +26,7 @@ module BH.Main.Types (
   PortData(..),
   portAddrsL,
   ToSwPortInfo(..),
+  C3(..),
 )
 where
 
