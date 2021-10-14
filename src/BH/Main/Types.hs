@@ -204,6 +204,9 @@ data IPData = IPData
 ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe (SwPort, PortState)))
 ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
 
+ipStateL :: LensC IPData (Maybe IPState)
+ipStateL = undefined
+
 instance Semigroup IPData where
   x <> y = IPData
             -- Map's 'Monoid' instance uses left-biased 'union'.
