@@ -221,13 +221,14 @@ modifyMac = undefined
 modifyPort :: (Maybe (SwPort, PortState) -> Maybe (SwPort, PortState)) -> a -> a
 modifyPort = undefined
 
-modIP :: (forall a. ModIP a => IP -> M.Map IP a -> M.Map IP a) -- ^ modifies
+modIP :: (forall a. ModIP a => S.Set MacAddr -> IP -> M.Map IP a -> M.Map IP a) -- ^ modifies
       -> IP -- ^ selects
       -> (MacAddr -> Bool) -- ^ restricts spread
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modIP k ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   xs <- M.filterWithKey (\k _ -> p k) . ipMacPorts <$> M.lookup ip ipInfo
-  let h = k ip
+  let macs = M.keysSet xs
+      h = k macs ip
       swPortInfo' = M.foldrWithKey (\mac mp z -> case mp of
                         Just (port, _)  -> M.adjust (modifyL portAddrsL (M.adjust h mac)) port z
                         Nothing         -> z
@@ -237,34 +238,44 @@ modIP k ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
       macInfo' = S.foldr (\mac z -> M.adjust (modifyL macIPsL h) mac z)
                     macInfo (M.keysSet xs)
 
-      macs = S.filter p . M.keysSet $ xs
   return
-    ( k ip ipInfo
+    ( k macs ip ipInfo
     , macInfo'
     , swPortInfo'
     )
 
+modIP' :: (forall a. ModIP a => IP -> M.Map IP a -> M.Map IP a) -- ^ modifies
+      -> IP -- ^ selects
+      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+modIP' k ip z@(ipInfo, macInfo, swPortInfo) = modIP (const k) ip (const True) z
+
 
 class ModIP a where
   setIPState :: IPState -> IP -> M.Map IP a -> M.Map IP a
-  delIP :: IP -> M.Map IP a -> M.Map IP a
+  delIP :: S.Set MacAddr -> IP -> M.Map IP a -> M.Map IP a
   addIP :: IPData -> IP -> M.Map IP a -> M.Map IP a
 
 instance ModIP IPData where
   setIPState s = M.adjust (\d -> d{ipState = Last (Just s)})
-  delIP = M.delete
+  delIP macs ip ipInfo = fromMaybe ipInfo $ do
+    IPData{..} <- M.lookup ip ipInfo
+    let f | S.size macs /= S.size (M.keysSet ipMacPorts) =
+              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
+              M.adjust (modifyL ipMacPortsL (\z -> foldr M.delete z macs))
+          | otherwise = M.delete
+    return (f ip ipInfo)
   addIP d ip = M.insert ip d
 
 instance ModIP IPState where
   setIPState s = M.adjust (const s)
-  delIP = M.delete
+  delIP _ = M.delete
   addIP d ip = case getLast (ipState d) of
     Just s  -> M.insert ip s
     Nothing -> id
 
 
 modifyIPState :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modifyIPState ip st = modIP (setIPState st) ip (const True)
+modifyIPState ip st = modIP' (setIPState st) ip
 {-modifyIPState ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   xs <- ipMacPorts <$> M.lookup ip ipInfo
   let h :: M.Map IP IPState -> M.Map IP IPState
@@ -311,7 +322,7 @@ delIPMac ip p = modIP delIP ip p
     )-}
 
 addIPMac :: IP -> IPData -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac ip d = modIP (addIP d) ip (const True)
+addIPMac ip d = modIP' (addIP d) ip
 {-addIPMac ip d@IPData{..} z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   st <- getLast ipState
   let h = M.insert ip st
