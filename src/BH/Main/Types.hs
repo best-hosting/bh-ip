@@ -16,7 +16,7 @@ module BH.Main.Types (
   toMacData,
   MacData(..),
   macIPsL,
-  --macIPsL,
+  macSwPortL,
   IPInfo,
   IPData(..),
   ipMacPortsL,
@@ -115,6 +115,9 @@ instance C3 MacData where
 
 macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
+
+macSwPortL :: LensC MacData (Maybe (SwPort, PortState))
+macSwPortL g z@MacData{macSwPort = x} = (\x' -> z{macSwPort = (Last x')}) <$> g (getLast x)
 
 instance Semigroup MacData where
   x <> y = MacData

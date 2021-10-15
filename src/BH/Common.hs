@@ -10,6 +10,8 @@ module BH.Common
     , maybeL
     , nothingL
     , mapL
+    , fstL
+    , sndL
     , lexemeA
     , symbolA
     , maybeErr
@@ -59,6 +61,12 @@ idL g x = g x
 -- | Lens version of Map's lookup.
 mapL :: Ord k => k -> LensC (M.Map k b) (Maybe b)
 mapL k g x = (maybe x (\y' -> M.insert k y' x)) <$> g (M.lookup k x)
+
+fstL :: LensC (a, b) a
+fstL g (x, y) = (\x' -> (x', y)) <$> g x
+
+sndL :: LensC (a, b) b
+sndL g (x, y) = (\y' -> (x, y')) <$> g y
 
 symbolA :: T.Text -> A.Parser T.Text
 symbolA   = lexemeA . A.string
