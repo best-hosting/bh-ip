@@ -287,6 +287,43 @@ modPort' k port p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
     , k macs port swPortInfo
     )
 
+modIP'2 :: (forall a. ModIP a => IP -> S.Set MacAddr -> a -> a) -- ^ modifies
+      -> IP -- ^ selects
+      -> S.Set MacAddr -- ^ selects references
+      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+modIP'2 k ip macs z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
+  xs <- M.filterWithKey (\k _ -> p k) . ipMacPorts <$> M.lookup ip ipInfo
+  let swPortInfo' = M.foldrWithKey
+        (\mac mp z -> case mp of
+          Just (port, _)  -> M.adjust (modifyL portAddrsL (M.adjust (k macs ip) mac)) port z
+          Nothing         -> z
+        )
+        swPortInfo xs
+      macInfo' = S.foldr (M.adjust (modifyL macIPsL (k macs ip))) macInfo macs
+  return
+    ( k macs ip ipInfo
+    , macInfo'
+    , swPortInfo'
+    )
+
+  let md = MacData{macIPs = M.singleton ip Answering, macSwPort = Last Nothing}
+      -- FIXME: Do i need 'macs' parameter here? Convert it to class type family.
+      f :: MacData -> MacData
+      f = modifyL macIPsL (k macs ip)
+      goM :: MacAddr -> MacInfo -> MacInfo
+      goM mac =
+          M.update (\y@MacData{..} ->
+                if M.null macIPs && isNothing (getLast macSwPort)
+                  then Nothing
+                  else y
+              )
+          . M.insertWith (const f) mac (f md)
+      macInfo' = S.foldr goM macInfo macs
+  in  ( k macs ip ipInfo
+      , macInfo'
+      , undefined
+      )
+
 modIP' :: (forall a. ModIP a => S.Set MacAddr -> IP -> M.Map IP a -> M.Map IP a) -- ^ modifies
       -> IP -- ^ selects
       -> (MacAddr -> Bool) -- ^ restricts spread
