@@ -39,6 +39,8 @@ readSwInfo file = toSwInfo <$> readYaml file
   toSwInfo :: [SwData] -> SwInfo
   toSwInfo = M.fromList . map (\x -> (swName x, x))
 
+resolvePortIPs = error "resolvePortIPs"
+
 -- | This is not really "search", but just quering info about ports. It names
 -- this way just to make show its relevant to 'searchX' family of functions.
 searchPorts ::
@@ -61,6 +63,8 @@ searchPorts swPorts = do
     res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ps
     putResult res
     sendExit
+
+resolveMacIPs = error "resolveMacIPs"
 
 -- TODO: I may use hash to determine changed db file. And then treat /that/
 -- file as source and generate others from it.
@@ -93,6 +97,7 @@ searchIPs ips = do
   Config{..} <- ask
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   searchMacs macs
+  error "searchIPs"
 
 -- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, SwPortInfo) ?
 -- And then add function for obtaining 'InfoKey' indexed map from a generic db

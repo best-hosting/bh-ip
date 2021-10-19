@@ -120,6 +120,7 @@ portStateP PortNum{..} = do
     | otherwise = fail $ "Unrecognized port state: '" <> show t <> "'"
 
 -- | Find all mac addresses visible on port.
+-- FIXME: Parse directly to 'M.Map MacAddr (M.Map IP IPState)' .
 findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b MacInfo
 findPortMacs p = do
   SwData{..} <- asks switchData
@@ -137,7 +138,7 @@ findPortState p = do
 -- | Find all mac addresses visible on port and return 'PortData'.
 findPortData :: PortNum -> TelnetRunM TelnetParserResult a b PortData
 findPortData p = do
-  portAddrs <- findPortMacs p
+  portAddrs <- M.map macIPs <$> findPortMacs p
   portState <- Last . Just <$> findPortState p
   return PortData{..}
 
@@ -165,7 +166,7 @@ findMacPort mac = do
     (_:_) ->
       let upPort portAddrs = PortData{portState = Last (Just Up), ..}
       in  foldr
-            (\p mz -> M.insertWith (<>) p <$> (upPort <$> findPortMacs p) <*> mz)
+            (\p mz -> M.insertWith (<>) p <$> (upPort . M.map macIPs <$> findPortMacs p) <*> mz)
             (pure mempty)
             (map elPort mt)
 

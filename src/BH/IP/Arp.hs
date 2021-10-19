@@ -10,7 +10,7 @@ module BH.IP.Arp (
   ipNeigh,
   nmapCache,
   queryLinuxArp,
-  --queryLinuxArp2,
+  queryLinuxArp2,
 ) where
 
 import Control.Concurrent
@@ -146,12 +146,12 @@ xmlHostAddressP host = do
     [mac] -> return (mac, ips)
     _ -> throwError $ "Several mac addresses found in xml element: '" <> show host <> "'"
 
-{-xmlHostAddressP2 :: MonadError String m => Element -> m (M.Map IP (S.Set MacAddr))
+xmlHostAddressP2 :: MonadError String m => Element -> m (M.Map IP (S.Set MacAddr))
 xmlHostAddressP2 host = do
   let addrs = findChildren (blank_name{qName = "address"}) host
   macs <- S.fromList . catMaybes <$> mapM (xmlAddrP "mac" macP) addrs
   ips  <- catMaybes <$> mapM (xmlAddrP "ipv4" ipP) addrs
-  return . M.fromList . map (, macs) $ ips-}
+  return . M.fromList . map (, macs) $ ips
 
 -- | Check that, 'reason' attribute of xml 'status' element (from inside xml
 -- 'host' element) is equal to specified value.
@@ -185,7 +185,7 @@ parseNmapXml t =
         return (M.insertWith (<>) mac (S.fromList ips) macMap, foldr (`M.insert` mac) ipMap ips)
       else return z
 
-{-parseNmapXml2 :: MonadError String m => T.Text -> m (M.Map IP (S.Set MacAddr))
+parseNmapXml2 :: MonadError String m => T.Text -> m (M.Map IP (S.Set MacAddr))
 parseNmapXml2 t =
   let xml = blank_element{elContent = parseXML t}
       hosts =
@@ -198,13 +198,19 @@ parseNmapXml2 t =
     b <- host `xmlHostStatusIs` "arp-response"
     if b
       then M.unionWith (<>) z <$> xmlHostAddressP2 host
-      else return z-}
+      else return z
 
--- FIXME: [current]
-{-mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 mergeIP2 xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
-  in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (`modifyIPState` Unreachable)) remIPs $ z-}
+  in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
+
+addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+addIPMac ip macs z =
+  let z'@(ipInfo', macInfo', swPortInfo') = modIP' delIP ip (`S.notMember` macs) z
+      ipMacPorts = M.fromSet (\m -> M.lookup m macInfo' >>= getLast . macSwPort) macs
+      ipState = Last (Just Answering)
+  in  modIP (addIP IPData{..}) ip  z'
 
 {-modifyMap :: (Ord a, Monoid b) => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
 modifyMap l g xs zs =
@@ -349,8 +355,8 @@ modifyIPState ip st = modIP (setIPState st) ip
     , swPortInfo'
     )-}
 
-delIPMac :: IP -> (MacAddr -> Bool) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-delIPMac ip p = modIP' delIP ip p
+{-delIPMac :: IP -> (MacAddr -> Bool) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+delIPMac ip p = modIP' delIP ip p-}
 {-delIPMac ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   d <- M.lookup ip ipInfo
   (xs, ys) <- M.partitionWithKey (\k _ -> p k) . ipMacPorts <$> M.lookup ip ipInfo
@@ -376,8 +382,8 @@ delIPMac ip p = modIP' delIP ip p
     , swPortInfo'
     )-}
 
-addIPMac :: IP -> IPData -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac ip d = modIP (addIP d) ip
+{-addIPMac :: IP -> IPData -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+addIPMac ip d = modIP (addIP d) ip-}
 {-addIPMac ip d@IPData{..} z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
   st <- getLast ipState
   let h = M.insert ip st
@@ -394,13 +400,6 @@ addIPMac ip d = modIP (addIP d) ip
     , macInfo'
     , swPortInfo'
     )-}
-
-addIPMacReal :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMacReal ip macs z =
-  let z'@(ipInfo', macInfo', swPortInfo') = delIPMac ip (`S.notMember` macs) z
-      ipMacPorts = M.fromSet (\m -> M.lookup m macInfo' >>= getLast . macSwPort) macs
-      ipState = Last (Just Answering)
-  in  addIPMac ip IPData{..} z'
 
 {-modifyIPStateC3 :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modifyIPStateC3 ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
@@ -574,7 +573,7 @@ nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
     void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
     return z
 
-{-nmapCache2 :: (MonadIO m, MonadError String m) => T.Text -> m (M.Map IP (S.Set MacAddr))
+nmapCache2 :: (MonadIO m, MonadError String m) => T.Text -> m (M.Map IP (S.Set MacAddr))
 nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
  where
   go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
@@ -586,7 +585,7 @@ nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
     z <- liftIO . evaluate . force $ parseNmapXml2 xml
     --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
     void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
-    return z-}
+    return z
 
 -- Read and initialize mac/IP cache.
 
@@ -640,7 +639,7 @@ queryLinuxArp cacheFile host = do
     else readYaml cacheFile >>= updateArpCache cacheFile host
 
 -- FIXME: Host should be obtained from 'Config'.
-{-queryLinuxArp2 ::
+queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
   m ()
 queryLinuxArp2 = do
@@ -650,7 +649,7 @@ queryLinuxArp2 = do
     then do
       mergeIP2 <$> nmapCache2 nmapHost <*> get >>= put
       liftIO (writeFile timeFile (show t))
-    else return ()-}
+    else return ()
 
 {-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m) =>

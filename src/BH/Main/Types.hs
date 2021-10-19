@@ -197,6 +197,8 @@ instance FromJSON IPState where
 
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
+-- FIXME: Do i really need this 'Last' ? What's wrong with just setting
+-- something (maybe wrong) and then verifying it? [current]
 data IPData = IPData
   { ipMacPorts :: M.Map MacAddr (Maybe (SwPort, PortState))
   , ipState :: Last IPState
