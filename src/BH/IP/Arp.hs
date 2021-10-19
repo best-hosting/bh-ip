@@ -203,14 +203,16 @@ parseNmapXml2 t =
 mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 mergeIP2 xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
-  in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
+  --in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
+  in  flip (M.foldrWithKey addIPMac) xs $ z
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 addIPMac ip macs z =
   let z'@(ipInfo', macInfo', swPortInfo') = modIP' delIP ip (`S.notMember` macs) z
       ipMacPorts = M.fromSet (\m -> M.lookup m macInfo' >>= getLast . macSwPort) macs
       ipState = Last (Just Answering)
-  in  modIP (addIP IPData{..}) ip  z'
+  --in  modIP (addIP IPData{..}) ip  z'
+  in  modIP (addIP IPData{..}) ip z
 
 {-modifyMap :: (Ord a, Monoid b) => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
 modifyMap l g xs zs =
@@ -580,11 +582,12 @@ nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
   go = do
     liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
     xml <- do
-      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
+      --Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
     z <- liftIO . evaluate . force $ parseNmapXml2 xml
+    liftIO $ print z
     --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
-    void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
+    --void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
     return z
 
 -- Read and initialize mac/IP cache.
