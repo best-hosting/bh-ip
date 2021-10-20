@@ -26,6 +26,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.Time
 import Text.Read
+import qualified Data.Set as S
 
 import BH.IP
 import BH.IP.Arp
@@ -168,8 +169,12 @@ initConfig opts@MyOptions{..} action = do
       nmapHost = vlanHost
       cf0 = Config{..}
   --(mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
-  runReaderT (readAll >>= execStateT queryLinuxArp2 >>= writeAll) cf0
+  pm <- readPorts
+  runReaderT (readAll >>= execStateT queryLinuxArp2 . mergePorts pm >>= writeAll) cf0
   --runReaderT action cf0{macIpMap = mi, ipMacMap = im}
+
+readPorts :: (MonadIO m, MonadError String m) => m (M.Map SwPort (PortState, S.Set MacAddr))
+readPorts = readYaml "portmap.yml"
 
 readAll :: (MonadIO m, MonadError String m) => m (IPInfo, MacInfo, SwPortInfo)
 readAll =

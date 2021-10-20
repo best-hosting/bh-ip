@@ -65,6 +65,8 @@ data SwData = SwData
   , swUser :: T.Text
   , swPassword :: T.Text
   , swRootPassword :: T.Text
+  -- FIXME: Or just embed here function 'showPort', which substitutes already
+  -- known default values.
   , swDefaultPortSpeed :: PortSpeed
   , swDefaultPortSlot :: Int
   , swTrunkPorts :: [PortNum]
