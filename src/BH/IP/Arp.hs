@@ -207,14 +207,6 @@ mergeIP2 xs z@(ipInfo, _, _) =
   --in  flip (M.foldrWithKey addIPMac2) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
   --in  flip (M.foldrWithKey addIPMac) xs $ z
 
-addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac ip macs z =
-  let z'@(ipInfo', macInfo', swPortInfo') = modIP' delIP ip (`S.notMember` macs) z
-      ipMacPorts = M.fromSet (\m -> M.lookup m macInfo' >>= getLast . macSwPort) macs
-      ipState = Last (Just Answering)
-  --in  modIP (addIP IPData{..}) ip  z'
-  in  modIP (addIP IPData{..}) ip z
-
 addIPMac2 :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 addIPMac2 ip macs z@(ipInfo, macInfo, _) =
   let ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
@@ -224,24 +216,6 @@ addIPMac2 ip macs z@(ipInfo, macInfo, _) =
   remMacs =
     let oldMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
     in  oldMacs `S.difference` macs
-
-
-{-modifyMap :: (Ord a, Monoid b) => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
-modifyMap l g xs zs =
-  let f = modifyL l g
-  in  foldr (\x -> M.insertWith (const f) x (f mempty)) zs xs
-
-adjustMap :: Ord a => LensC b c -> (c -> c) -> S.Set a -> M.Map a b -> M.Map a b
-adjustMap l g xs zs = foldr (M.adjust (modifyL l g)) zs xs
-
-modifyIP :: (M.Map IP IPState -> M.Map IP IPState) -> a -> a
-modifyIP = undefined
-
-modifyMac :: Monoid b => (M.Map MacAddr b -> M.Map MacAddr b) -> a -> a
-modifyMac = undefined
-
-modifyPort :: (Maybe (SwPort, PortState) -> Maybe (SwPort, PortState)) -> a -> a
-modifyPort = undefined-}
 
 class ModPort a where
   setPortState :: PortState -> SwPort -> a -> a
@@ -333,32 +307,6 @@ modIP2' k ip macs z@(ipInfo, macInfo, swPortInfo) =
   h :: (a -> a) -> a -> MacAddr -> M.Map MacAddr a -> M.Map MacAddr a
   h f def mac = M.insertWith (const f) mac (f def)
 
-modIP' :: (forall a. ModIP a => S.Set MacAddr -> IP -> M.Map IP a -> M.Map IP a) -- ^ modifies
-      -> IP -- ^ selects
-      -> (MacAddr -> Bool) -- ^ restricts spread
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modIP' k ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
-  xs <- M.filterWithKey (\k _ -> p k) . ipMacPorts <$> M.lookup ip ipInfo
-  let macs = M.keysSet xs
-      swPortInfo' = M.foldrWithKey
-        (\mac mp z -> case mp of
-          Just (port, _)  -> M.adjust (modifyL portAddrsL (M.adjust (k macs ip) mac)) port z
-          Nothing         -> z
-        )
-        swPortInfo xs
-      macInfo' = S.foldr (M.adjust (modifyL macIPsL (k macs ip))) macInfo macs
-  return
-    ( k macs ip ipInfo
-    , macInfo'
-    , swPortInfo'
-    )
-
-modIP :: (forall a. ModIP a => IP -> M.Map IP a -> M.Map IP a) -- ^ modifies
-      -> IP -- ^ selects
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modIP k x = modIP' (const k) x (const True)
-
-
 class ModIP2 a where
   setIPState2 :: IPState -> IP -> a -> a
   delIP2 :: S.Set MacAddr -> IP -> a -> a
@@ -382,252 +330,10 @@ instance ModIP2 (M.Map IP IPState) where
     Just s  -> M.insert ip s
     Nothing -> id
 
-class ModIP a where
-  setIPState :: IPState -> IP -> M.Map IP a -> M.Map IP a
-  delIP :: S.Set MacAddr -> IP -> M.Map IP a -> M.Map IP a
-  addIP :: IPData -> IP -> M.Map IP a -> M.Map IP a
-
-instance ModIP IPData where
-  setIPState s = M.adjust (\d -> d{ipState = Last (Just s)})
-  delIP macs ip ipInfo = fromMaybe ipInfo $ do
-    IPData{..} <- M.lookup ip ipInfo
-    let f | S.size macs /= S.size (M.keysSet ipMacPorts) =
-              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
-              M.adjust (modifyL ipMacPortsL (\z -> foldr M.delete z macs))
-          | otherwise = M.delete
-    return (f ip ipInfo)
-  addIP d ip = M.insert ip d
-
-instance ModIP IPState where
-  setIPState s = M.adjust (const s)
-  delIP _ = M.delete
-  addIP d ip = case getLast (ipState d) of
-    Just s  -> M.insert ip s
-    Nothing -> id
-
-
-modifyIPState :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modifyIPState ip st = modIP (setIPState st) ip
-{-modifyIPState ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
-  xs <- ipMacPorts <$> M.lookup ip ipInfo
-  let h :: M.Map IP IPState -> M.Map IP IPState
-      h = M.adjust (const st) ip
-
-      swPortInfo' = M.foldrWithKey (\mac mp z -> case mp of
-                        Just (port, _)  -> M.adjust (modifyL portAddrsL (M.adjust h mac)) port z
-                        Nothing         -> z
-                      )
-                      swPortInfo xs
-
-      macInfo' = S.foldr (\mac z -> M.adjust (modifyL macIPsL h) mac z) macInfo (M.keysSet xs)
-  return
-    ( M.adjust (\x -> x{ipState = Last (Just st)}) ip ipInfo
-    , macInfo'
-    , swPortInfo'
-    )-}
-
-{-delIPMac :: IP -> (MacAddr -> Bool) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-delIPMac ip p = modIP' delIP ip p-}
-{-delIPMac ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
-  d <- M.lookup ip ipInfo
-  (xs, ys) <- M.partitionWithKey (\k _ -> p k) . ipMacPorts <$> M.lookup ip ipInfo
-  let h :: M.Map IP IPState -> M.Map IP IPState
-      h = M.delete ip
-
-      swPortInfo' = M.foldrWithKey (\mac mp z -> case mp of
-                        Just (port, _)  -> M.adjust (modifyL portAddrsL (M.adjust h mac)) port z
-                        Nothing         -> z
-                      )
-                      swPortInfo xs
-
-      macs = S.filter p . M.keysSet $ xs
-      macInfo' = S.foldr (\mac z -> M.adjust (modifyL macIPsL h) mac z)
-                    macInfo (M.keysSet xs)
-  return
-    -- If not IP deleted not from /all/ its macs, i'll update 'IPData' to
-    -- contain remaining macs.
-    ( if S.size macs /= S.size (M.keysSet xs)
-        then M.adjust (\d -> d{ipMacPorts = ys}) ip ipInfo
-        else M.delete ip ipInfo
-    , macInfo'
-    , swPortInfo'
-    )-}
-
-{-addIPMac :: IP -> IPData -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac ip d = modIP (addIP d) ip-}
-{-addIPMac ip d@IPData{..} z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
-  st <- getLast ipState
-  let h = M.insert ip st
-
-      swPortInfo' = M.foldrWithKey (\mac mp z -> case mp of
-                        Just (port, _)  -> M.adjust (modifyL portAddrsL (M.adjust h mac)) port z
-                        Nothing         -> z
-                      )
-                      swPortInfo ipMacPorts
-
-      macInfo' = S.foldr (\mac z -> M.adjust (modifyL macIPsL h) mac z) macInfo (M.keysSet ipMacPorts)
-  return
-    ( M.insert ip d ipInfo
-    , macInfo'
-    , swPortInfo'
-    )-}
-
-{-modifyIPStateC3 :: IP -> IPState -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modifyIPStateC3 ip st z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
-  xs <- ipMacPorts <$> M.lookup ip ipInfo
-  let f :: MacAddr -> M.Map MacAddr (M.Map IP IPState) -> M.Map MacAddr (M.Map IP IPState)
-      f mac = M.adjust (M.insert ip st) mac
-      swPortInfo' = M.foldrWithKey (\mac mp z -> case mp of
-                        Just (port, _)  -> M.adjust (modifyL portAddrsL (f mac)) port z
-                        Nothing         -> z
-                      )
-                      swPortInfo xs
-  return
-    ( M.adjust (\x -> x{ipState = Last (Just st)}) ip ipInfo
-    --, adjustMap macIPsL (M.adjust (const st) ip) (M.keysSet xs) macInfo
-    , adjustMap (ipLens ()) (M.adjust (const st) ip) (M.keysSet xs) macInfo
-    , swPortInfo'
-    )-}
-
-{-macInfoModifyIP :: (M.Map IP IPState -> M.Map IP IPState) -> S.Set MacAddr -> MacInfo -> MacInfo
---macInfoModifyIP g ms zs = foldr (M.adjust (modifyL macIPsL g)) zs ms
-macInfoModifyIP = modifyMap macIPsL
-macInfoModifyIP g ms zs =
-  let f = modifyL macIPsL g
-  in  foldr (\m -> M.insertWith (const f) m (f mempty)) zs ms-}
-
--- | I can't add new ports here, because in addtion request i only have 'IP'
--- and 'MacAddr', so there should be no new ports (well, at least if DBs were
--- in sync before).
-{-swPortInfoModifyMac :: (MacInfo -> MacInfo) -> S.Set SwPort -> SwPortInfo -> SwPortInfo
-swPortInfoModifyMac = modifyMap portAddrsL
-swPortInfoModifyMac g ps zs =
-  let f = modifyL portAddrsL g
-  in  foldr (\p -> M.insertWith (const f) p (f mempty)) zs ps-}
-
--- | Delete 'IP' on 'MacAddr'-es, on which predicate returns 'True'
-{-delIPMac :: IP -> (MacAddr -> Bool) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-delIPMac ip p z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
-    xs <- ipMacPorts <$> M.lookup ip ipInfo
-    let (macs, ports) = M.keysSet &&& S.fromList . catMaybes . M.elems
-          $ M.filterWithKey (\k -> const (p k)) xs
-        -- I use function 'f' below to modify 'MacInfo' in 'PortData'
-        -- /without/ filtering out macs missed on particular port. Thus, i
-        -- should either filter only macs present on port beforehand or just
-        -- use 'adjustMap' here.
-        f = adjustMap macIPsL (M.delete ip) macs
-    return
-      -- If not IP deleted not from /all/ its macs, i'll update 'IPData' to
-      -- contain remaining macs.
-      ( if S.size macs /= S.size (M.keysSet xs)
-          then adjustMap ipMacPortsL (\z0 -> foldr M.delete z0 macs) (S.singleton ip) ipInfo
-          else M.delete ip ipInfo
-      , f macInfo
-      , adjustMap portAddrsL f ports swPortInfo
-      )-}
-
--- | Set 'IP' to use specified 'MacAddr'-es.
-{-addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addIPMac ip macs z@(ipInfo, macInfo, swPortInfo) =
-  let (_, macInfo', swPortInfo') = delIPMac ip (`S.notMember` macs) z
-      ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
-      ipState = Last (Just Answering)
-      ports =  S.fromList . catMaybes . M.elems $ ipMacPorts
-      f = modifyMap macIPsL (M.insert ip Answering) macs
-  in  ( M.insert ip IPData{..} ipInfo
-      , f macInfo'
-      , modifyMap portAddrsL f ports swPortInfo'
-      )-}
-
-delPortMac :: SwPort -> (MacAddr -> Bool) -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
-delPortMac port p z@(ipInfo, macInfo, swPortInfo) = undefined
-{-fromMaybe z $ do
-  xs <- portAddrs <$> M.lookup port swPortInfo
-  let (macs, ip) = M.keysSet &&& foldr ((<>) . M.keysSet . macIPs) S.empty
-        $ M.filterWithKey (\k -> const (p k)) xs-}
-
-
-
-addPortMac :: SwPort -> S.Set MacAddr -> (IPInfo, MacIpMap, SwPortInfo) -> (IPInfo, MacIpMap, SwPortInfo)
-addPortMac port macs (ipInfo, macInfo, swPortInfo) = undefined
-
--- FIXME: Should i update all DBs at once?
--- FIXME: This function assumes, that two dbs are in sync. If that's not the
--- case, the result is unknown.
-{-mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
-mergeIP ips z@(ipInfo, macInfo) =
-  let remIPs = M.keysSet ipInfo `S.difference` M.keysSet ips
-  in  flip (M.foldrWithKey addIP) ips . flip (foldr (setIPState Unreachable)) remIPs $ z-}
-
 -- FIXME: This function should remove IPs, whose all macs are 'Unreachable'
 -- and whose do not have any port defined.
 dbTidy :: (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 dbTidy = undefined
-
--- Set IP State
-{-setIPState :: IPState -> IP -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
-setIPState st ip z@(ipInfo, macInfo) =
-  case M.lookup ip ipInfo of
-    Nothing -> z
-    Just IPData{..} ->
-      ( M.adjust (\x -> x{ipState = Last (Just st)}) ip ipInfo
-      , foldr (M.adjust g) macInfo . M.keysSet $ ipMacPorts
-      )
- where
-  g :: MacData -> MacData
-  g x = x{macIPs = M.adjust (const st) ip (macIPs x)}-}
-
-{-addIP :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
-addIP ip macs z@(ipInfo, _) = case M.lookup ip ipInfo of
-  Nothing -> addIPMacs ip macs z
-  Just IPData{..} ->
-    let remMacs = M.keysSet ipMacPorts `S.difference` macs
-    in  addIPMacs ip macs . removeIPMacs ip remMacs $ z-}
-
--- | Associate specified IP with mac addresses.
--- FIXME: Check, with already existing mac.
--- FIXME: 'adjust' can't add new elements.
-{-addIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
-addIPMacs ip macs (ipInfo, macInfo) =
-  let d = IPData
-            { ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
-            , ipState = Last (Just Answering)
-            }
-  in  (M.insertWith f ip d ipInfo, foldr (M.adjust g) macInfo macs)
- where
-  f :: IPData -> IPData -> IPData
-  f new old = new {ipMacPorts = ipMacPorts new <> ipMacPorts old}
-  g :: MacData -> MacData
-  g x = x {macIPs = M.insert ip Answering (macIPs x)}-}
-
-{-addIPMacs2 :: IP -> S.Set MacAddr -> (MacInfo, IPInfo) -> IPInfo
-addIPMacs2 ip macs (macInfo, ipInfo) =
-  let d = IPData
-            { ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
-            , ipState = Last (Just Answering)
-            }
-  in  M.insertWith f ip d ipInfo
- where
-  f :: IPData -> IPData -> IPData
-  f new old = new {ipMacPorts = ipMacPorts new <> ipMacPorts old}-}
-
-{-addIPMacs3 :: IP -> S.Set MacAddr -> MacInfo -> MacInfo
-addIPMacs3 ip macs macInfo =
-  foldr (M.adjust g) macInfo macs
- where
-  g :: MacData -> MacData
-  g x = x {macIPs = M.insert ip Answering (macIPs x)}-}
-
--- | Disassociate specified ip with mac addresses.
--- FIXME: Check with missed macs.
-{-removeIPMacs :: IP -> S.Set MacAddr -> (IPInfo, MacInfo) -> (IPInfo, MacInfo)
-removeIPMacs ip macs (ipInfo, macInfo) =
-  (M.adjust f ip ipInfo, foldr (M.adjust g) macInfo macs)
- where
-  f :: IPData -> IPData
-  f x = x{ipMacPorts = foldr M.delete (ipMacPorts x) macs}
-  g :: MacData -> MacData
-  g x = x{macIPs = M.delete ip (macIPs x)}-}
 
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
 nmapCache :: (MonadIO m, MonadError String m) => T.Text -> m (MacIpMap, IpMacMap)
@@ -640,7 +346,6 @@ nmapCache host = Sh.shelly (Sh.silently go) >>= liftEither
       Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
     z <- liftIO . evaluate . force $ parseNmapXml xml
-    --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
     void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
     return z
 
@@ -678,7 +383,6 @@ readCache cacheFile = do
         (\e -> liftIO (print e) >> return mempty)
     else return mempty
 
--- TODO: Build into 'IPInfo' and 'MacInfo' .
 -- | Update arp cache file, if necessary, and build corresponding maps.
 updateArpCache :: (MonadIO m, MonadError String m, MonadReader Config m) => FilePath -> T.Text -> MacIpMap -> m (MacIpMap, IpMacMap)
 updateArpCache cacheFile host cache
@@ -722,16 +426,6 @@ queryLinuxArp2 = do
       mergeIP2 <$> nmapCache2 nmapHost <*> get >>= put
       liftIO (writeFile timeFile (show t))
     else return ()
-
-{-queryLinuxArp2 ::
-  (MonadIO m, MonadError String m, MonadReader Config m) =>
-  -- | Path to yaml cache.
-  (IPInfo, MacInfo) ->
-  -- | ssh hostname of host, from which to query.
-  T.Text ->
-  m (IPInfo, MacInfo)
-queryLinuxArp2 cacheFile host =
-  readCache cacheFile >>= updateArpCache cacheFile host-}
 
 queryMikrotikArp :: T.Text -> IO MacIpMap
 queryMikrotikArp host =
