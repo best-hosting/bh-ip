@@ -98,6 +98,7 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
 type MacInfo = M.Map MacAddr MacData
 
 -- Single mac can't be on several ports.
+-- FIXME: Do not user pairs, there're lists in yaml..
 data MacData = MacData
   { macIPs    :: M.Map IP IPState
   , macSwPort :: Last (SwPort, PortState)

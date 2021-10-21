@@ -72,7 +72,7 @@ optParser ::
 optParser MyOptions{..} =
   initConfig
     <$> globalOptions
-    <*> (   workQueryPorts
+    <*> (   workQueryPorts2
               <$> some
                 ( O.strOption
                     ( O.long "switch-port"
@@ -169,9 +169,9 @@ initConfig opts@MyOptions{..} action = do
       nmapHost = vlanHost
       cf0 = Config{..}
   --(mi, im) <- runReaderT (queryLinuxArp macIpFile vlanHost) cf0
-  pm <- readPorts
-  runReaderT (readAll >>= execStateT queryLinuxArp2 . mergePorts pm >>= writeAll) cf0
-  --runReaderT action cf0{macIpMap = mi, ipMacMap = im}
+  --pm <- readPorts
+  --runReaderT (readAll >>= execStateT queryLinuxArp2 . mergePorts pm >>= writeAll) cf0
+  runReaderT action cf0
 
 readPorts :: (MonadIO m, MonadError String m) => m (M.Map SwPort (PortState, S.Set MacAddr))
 readPorts = readYaml "portmap.yml"
@@ -229,6 +229,22 @@ workQueryPorts ts = do
   let f :: SwPortInfo -> SwPortInfo
       f = id
   workQuery "swportinfo.yaml" swports >>= liftIO . B.putStr . Y.encode . f
+
+workQueryPorts2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [T.Text] ->
+  m ()
+workQueryPorts2 ts = do
+  Config{..} <- ask
+  let getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
+      getSwDefaults sn =
+        let m = M.lookup sn swInfo
+         in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
+  swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
+  readAll >>= execStateT (searchPorts2 swports) >>= writeAll
+  -- TODO: Use 'Config' parameter to store swport db filename.
+  -- FIXME: Update all dbs after each query.
+
 
 -- TODO: Query only cache, if requested. On the other hand, i probably may not
 -- offer such functionality. After all, cache is yaml and `yq` will be better

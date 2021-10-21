@@ -10,9 +10,11 @@ module BH.Switch.Cisco (
   switchConfigP,
   portStateP,
   findPortMacs,
+  findPortMacs2,
   findPortState,
   findPortData,
   findPortInfo,
+  findPortInfo2,
   findMacPort,
   findMacsPort,
   findMacData,
@@ -30,6 +32,7 @@ import qualified Data.Text as T
 import Data.Char
 import Control.Applicative.Combinators
 import Data.Monoid
+import qualified Data.Set as S
 
 import BH.Common
 import BH.IP
@@ -129,8 +132,15 @@ findPortMacs p = do
           macTableP
           (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
 
+findPortMacs2 :: PortNum -> TelnetRunM TelnetParserResult a b (S.Set MacAddr)
+findPortMacs2 p =
+  S.fromList . map elMac
+    <$> sendAndParse pMacTableL
+          macTableP
+          (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
+
 findPortState :: PortNum -> TelnetRunM TelnetParserResult a b PortState
-findPortState p = do
+findPortState p =
   sendAndParse pResPortStateL
           (portStateP p)
           (cmd $ "show interfaces " <> showCiscoPort p)
@@ -144,6 +154,12 @@ findPortData p = do
 
 findPortInfo :: [PortNum] -> TelnetRunM TelnetParserResult a b PortInfo
 findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempty)
+
+findPortInfo2 :: [PortNum] -> TelnetRunM TelnetParserResult a b (M.Map PortNum (PortState, S.Set MacAddr))
+findPortInfo2 = foldr (\p mz -> M.insert p <$> go p <*> mz) (pure mempty)
+ where
+  --go :: PortNum -> TelnetRunM TelnetParserResult a b (PortState, S.Set MacAddr)
+  go p = (,) <$> findPortState p <*> findPortMacs2 p
 
 -- FIXME: The same mac may be used in different vlans. Should i handle this
 -- correctly? That means, i should have maps indexed by (MacAddr, Vlan)

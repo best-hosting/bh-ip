@@ -382,6 +382,9 @@ instance ModIP (M.Map IP IPState) where
 -- and whose do not have any port defined.
 -- FIXME: Add function to remove Macs, which does not have IPs and undefined
 -- port.
+-- FIXME: Unreachable IPs may be on 'Up' ports, because this simply means,
+-- that this IP is no longer used by this server. Though, 'Disabled' or
+-- 'NotConnect' ports can't have 'Answering' IPs.
 dbTidy :: (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 dbTidy = undefined
 
@@ -448,6 +451,8 @@ updateArpCache cacheFile host cache
   rebuild :: MacAddr -> S.Set IP -> IpMacMap -> IpMacMap
   rebuild mac ips zm0 = foldr (`M.insert` mac) zm0 ips
 
+-- FIXME: Do not query all IPs at once. I don't need this, really. I may just
+-- nmap single IP in question and do all the other stuff with it. [current]
 queryLinuxArp ::
   (MonadIO m, MonadError String m, MonadReader Config m) =>
   -- | Path to yaml cache.

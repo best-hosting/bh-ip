@@ -11,6 +11,7 @@ module BH.Main (
   readSwInfo,
   InfoDb(..),
   Searchable(..),
+  searchPorts2,
 )
 where
 
@@ -31,6 +32,7 @@ import BH.Switch
 import BH.Switch.Cisco
 import BH.Cache
 import BH.Telnet
+import BH.IP.Arp
 
 -- FIXME: Use generic yaml reading func.
 readSwInfo :: (MonadIO m, MonadError String m) => FilePath -> m SwInfo
@@ -61,6 +63,28 @@ searchPorts swPorts = do
     portSw <- asks (swName . switchData)
     ps <- asks telnetIn
     res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo ps
+    putResult res
+    sendExit
+
+searchPorts2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  [SwPort] -> m ()
+searchPorts2 swPorts = do
+  Config{..} <- ask
+  f <- mergePorts <$> runReaderT (runOn onPorts swNames go) swInfo
+  modify f
+ where
+  -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
+  -- need to change it everywhere, includeing findX funcs.. [refactor]
+  onPorts :: SwName -> [PortNum]
+  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
+  swNames :: [SwName]
+  swNames = nub . map portSw $ swPorts
+  go :: TelnetRunM TelnetParserResult [PortNum] (M.Map SwPort (PortState, S.Set MacAddr)) ()
+  go = do
+    portSw <- asks (swName . switchData)
+    ps <- asks telnetIn
+    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo2 ps
     putResult res
     sendExit
 
