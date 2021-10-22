@@ -246,6 +246,7 @@ type PortInfo = M.Map PortNum PortData
 -- of 'ports' from 'PortData'.
 data PortData = PortData
   { portAddrs :: M.Map MacAddr (M.Map IP IPState)
+  -- FIXME: Make 'portState' into plain 'PortState', really.
   , portState :: Last PortState
   --, portMode :: PortMode
   }

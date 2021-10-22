@@ -19,6 +19,7 @@ module BH.Switch.Cisco (
   findMacsPort,
   findMacData,
   findMacInfo,
+  findMacInfo2,
 ) where
 
 import Control.Applicative
@@ -199,9 +200,25 @@ findMacData mac = do
     [x]   -> return . Just $ toMacData swName x
     (_:_) -> error "Several ports for a single mac"
 
+findMacData2 :: MacAddr -> TelnetRunM TelnetParserResult a b (Maybe PortNum)
+findMacData2 mac = do
+  SwData{..} <- asks switchData
+  let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
+  mt <- notTrunks
+        <$> sendAndParse pMacTableL
+            macTableP
+            (cmd $ "show mac address-table address " <> showMacAddr mac)
+  case mt of
+    []    -> return Nothing
+    [x]   -> return . Just $ elPort x
+    (_:_) -> error "Several ports for a single mac"
+
 findMacsPort :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
 findMacsPort = foldr (\m mz -> M.insert m <$> findMacPort m <*> mz) (pure mempty)
 
 findMacInfo :: [MacAddr] -> TelnetRunM TelnetParserResult a b MacInfo
 findMacInfo = foldr (\m mz -> maybe id (M.insert m) <$> findMacData m <*> mz) (pure mempty)
+
+findMacInfo2 :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortNum)
+findMacInfo2 = foldr (\m mz -> maybe id (M.insert m) <$> findMacData2 m <*> mz) (pure mempty)
 

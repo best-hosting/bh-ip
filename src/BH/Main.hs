@@ -113,6 +113,29 @@ searchMacs macs = do
     findMacInfo ms >>= putResult
     sendExit
 
+-- | Search mac on all switches.
+searchMacs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  [MacAddr] ->
+  m ()
+searchMacs2 macs = do
+  Config{..} <- ask
+  _ <- runReaderT (runTill maybeMacs go) swInfo
+  return ()
+ where
+  -- FIXME: Hardcoded vlan! [current]
+  maybeMacs :: M.Map MacAddr (SwPort, PortState) -> Maybe [MacAddr]
+  maybeMacs res = let found = M.keys res
+                  in  case filter (`notElem` found) macs of
+                        [] -> Nothing
+                        xs -> Just xs
+  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr (SwPort, PortState)) ()
+  go = do
+    portSw <- asks (swName . switchData)
+    ms  <- asks telnetIn
+    M.map (\p -> (SwPort{portSpec = p, ..}, Up)) <$> (findMacInfo2 ms) >>= putResult
+    sendExit
+
 searchIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
