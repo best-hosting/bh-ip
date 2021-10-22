@@ -323,6 +323,9 @@ class ModMac a where
 
 instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
   addMac d mac = M.insert mac (macIPs d)
+  -- FIXME: Wrong!  This should be just 'M.delete' and nothing more. The only
+  -- place, where i should really check references is 'MacInfo' instance
+  -- itself. [current]
   delMac (ips, _) mac portAddrs = fromMaybe portAddrs $ do
     m <- M.lookup mac portAddrs
     let f | ips == M.keysSet m =
@@ -332,9 +335,16 @@ instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
 
 instance ModMac (M.Map MacAddr (Maybe (SwPort, PortState))) where
   addMac d mac = M.insert mac (getLast . macSwPort $ d)
+  delMac _ = M.delete
 
 instance ModMac MacInfo where
   addMac = flip M.insert
+  delMac (ips, mp) mac macInfo = fromMaybe portAddrs $ do
+    MacData{..} <- M.lookup mac macInfo
+    let g = maybe id (setL macSwPortL Nothing) mp
+        f | ips == macIPs && isJust mp = M.delete
+          | otherwise = M.adjust (\z -> foldr M.delete (g z) ips)
+    return (f mac macInfo)
 
 modMac' :: (forall a. ModMac a
               => MacAddr
@@ -345,6 +355,13 @@ modMac' :: (forall a. ModMac a
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modMac' k mac (ips, mport) z@(ipInfo, macInfo, swPortInfo) =
   let
+  -- FIXME: This code is wrong. '(S.Set IP, Maybe SwPort)' is _affected_
+  -- references. I should find port/IP bound to this references using
+  -- references itself. I.e. if i delete mac from IPs, i should find ports,
+  -- which to edit, from modified IPs, but not from selector. I.e. if port is
+  -- unaffected, it should not be included in selector. From this also comes
+  -- 'ModMac' instance for IP and port: i 'delMac' was called, i should delete
+  -- mac from IP/Port, because it was already selected. [current]
       ipState = Last (Just Answering)
       ipInfo' = foldr (insertAdjust (modifyL ipMacPortsL (k mac)) IPData{ipMacPorts = M.empty, ..}) ipInfo ips
       portState = Last (Just Up)
