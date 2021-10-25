@@ -353,8 +353,8 @@ modMac' :: (forall a. ModMac a
       -> MacAddr -- ^ selects
       -> (S.Set IP, Maybe SwPort) -- ^ selects references
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modMac' k mac (ips, mport) z@(ipInfo, macInfo, swPortInfo) =
-  let
+modMac' k mac (ips, mport) = modMac'I k mac ips . modMac'P k mac mport
+{-  let
   -- FIXME: This code is wrong. '(S.Set IP, Maybe SwPort)' is _affected_
   -- references. I should find port/IP bound to this references using
   -- references itself. I.e. if i delete mac from IPs, i should find ports,
@@ -369,13 +369,13 @@ modMac' k mac (ips, mport) z@(ipInfo, macInfo, swPortInfo) =
   in  ( ipInfo'
       , k mac macInfo
       , swPortInfo
-      )
+      )-}
 
 modMac'I :: (forall a. ModMac a
               => MacAddr
               -> a
               -> a) -- ^ modifies
-      -> MacAddr -- ^ selects
+      -> MacAddr  -- ^ selects
       -> S.Set IP -- ^ selects references
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modMac'I k mac ips z@(ipInfo, macInfo, swPortInfo) =
@@ -398,6 +398,32 @@ modMac'I k mac ips z@(ipInfo, macInfo, swPortInfo) =
       , k mac macInfo
       , swPortInfo'
       )
+
+modMac'P :: (forall a. ModMac a
+              => MacAddr
+              -> a
+              -> a) -- ^ modifies
+      -> MacAddr -- ^ selects
+      -> Maybe SwPort -- ^ selects references
+      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+modMac'P k mac mport z@(ipInfo, macInfo, swPortInfo) = fromMaybe z $ do
+  port <- mport
+  let md = M.lookup mac macInfo
+      mport = md >>= getLast . macSwPort
+      ipMacPorts = M.singleton mac mport
+      ips = fromMaybe S.empty (M.keysSet . macIPs <$> md)
+      ipInfo' = foldr
+        (\ip -> let ipState = Last (md >>= M.lookup ip . macIPs)
+                in  insertAdjust (modifyL ipMacPortsL (k mac)) IPData{..} ip)
+        ipInfo
+        ips
+      portState = Last (snd <$> mport)
+      portAddrs = M.singleton mac (maybe M.empty macIPs md)
+      swPortInfo' = insertAdjust (modifyL portAddrsL (k mac)) PortData{..} port $ swPortInfo
+  return  ( ipInfo'
+          , k mac macInfo
+          , swPortInfo'
+          )
 
 -- | 'insert' /or/ 'adjust', but /not/ 'insertWith'.
 insertAdjust :: Ord a => (b -> b) -> b -> a -> M.Map a b -> M.Map a b
