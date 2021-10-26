@@ -97,10 +97,17 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
 -- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
 
+data PortRef = PortRef
+                { refPort  :: SwPort
+                , refState :: PortState
+                }
+  deriving (Show)
+
 -- Single mac can't be on several ports.
--- FIXME: Do not user pairs, there're lists in yaml..
 data MacData = MacData
   { macIPs    :: M.Map IP IPState
+  -- FIXME: Do i really need Semigroup for MacData?
+-- FIXME: Do not use pairs, there're lists in yaml. Use 'PortRef' instead.
   , macSwPort :: Last (SwPort, PortState)
 --, macVendor :: T.Text
   }

@@ -120,8 +120,8 @@ searchMacs2 ::
   m ()
 searchMacs2 macs = do
   Config{..} <- ask
-  _ <- runReaderT (runTill maybeMacs go) swInfo
-  return ()
+  f <- mergeMacs <$> runReaderT (runTill maybeMacs go) swInfo
+  modify f
  where
   -- FIXME: Hardcoded vlan! [current]
   maybeMacs :: M.Map MacAddr (SwPort, PortState) -> Maybe [MacAddr]
