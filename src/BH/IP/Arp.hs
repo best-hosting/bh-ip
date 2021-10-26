@@ -351,10 +351,9 @@ modMac' :: (forall a. ModMac a
               -> a
               -> a) -- ^ modifies
       -> MacAddr -- ^ selects
-      -> (S.Set IP, Maybe SwPort) -- ^ selects references
+      -> (S.Set IP, Bool) -- ^ selects references
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-modMac' k mac (ips, mport) = modMac'I k mac ips . modMac'P k mac mport
-{-  let
+modMac' k mac (ips0, b) z@(ipInfo, macInfo, swPortInfo) = --modMac'I k mac ips . modMac'P k mac mport
   -- FIXME: This code is wrong. '(S.Set IP, Maybe SwPort)' is _affected_
   -- references. I should find port/IP bound to this references using
   -- references itself. I.e. if i delete mac from IPs, i should find ports,
@@ -362,14 +361,26 @@ modMac' k mac (ips, mport) = modMac'I k mac ips . modMac'P k mac mport
   -- unaffected, it should not be included in selector. From this also comes
   -- 'ModMac' instance for IP and port: i 'delMac' was called, i should delete
   -- mac from IP/Port, because it was already selected. [current]
-      ipState = Last (Just Answering)
-      ipInfo' = foldr (insertAdjust (modifyL ipMacPortsL (k mac)) IPData{ipMacPorts = M.empty, ..}) ipInfo ips
-      portState = Last (Just Up)
-      swPortInfo' = maybe id (insertAdjust (modifyL portAddrsL (k mac)) PortData{portAddrs = M.empty, ..}) mport $ swPortInfo
+  let ips = if b then fromMaybe S.empty (M.keysSet . macIPs <$> md) `S.union` ips0 else ips0
+      mport = md >>= getLast . macSwPort
+      md = M.lookup mac macInfo
+      ipMacPorts = M.singleton mac mport
+      ipInfo' = foldr
+        (\ip -> let ipState = Last (md >>= M.lookup ip . macIPs)
+                in  insertAdjust (modifyL ipMacPortsL (k mac)) IPData{..} ip)
+        ipInfo
+        ips
+      portState = Last (snd <$> mport)
+      portAddrs = M.singleton mac (maybe M.empty macIPs md)
+      swPortInfo' =
+        maybe id
+            (insertAdjust (modifyL portAddrsL (k mac)) PortData{..})
+            (fst <$> mport)
+          $ swPortInfo
   in  ( ipInfo'
       , k mac macInfo
-      , swPortInfo
-      )-}
+      , swPortInfo'
+      )
 
 modMac'I :: (forall a. ModMac a
               => MacAddr
