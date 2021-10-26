@@ -318,33 +318,39 @@ modPort2' k port st macs z@(ipInfo, macInfo, swPortInfo) =
       )
 
 class ModMac a where
-  delMac :: (S.Set IP, Maybe SwPort) -> MacAddr -> a -> a
+  delMac :: (S.Set IP, Bool) -> MacAddr -> a -> a
   addMac :: MacData -> MacAddr -> a -> a
 
+-- For 'PortData'.
 instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
   addMac d mac = M.insert mac (macIPs d)
-  -- FIXME: Wrong!  This should be just 'M.delete' and nothing more. The only
-  -- place, where i should really check references is 'MacInfo' instance
-  -- itself. [current]
   delMac (ips, _) mac portAddrs = fromMaybe portAddrs $ do
     m <- M.lookup mac portAddrs
-    let f | ips == M.keysSet m =
-              M.adjust (\z -> foldr M.delete z ips)
+    let f | ips /= M.keysSet m = M.adjust (\x -> foldr M.delete x ips)
           | otherwise = M.delete
     return (f mac portAddrs)
 
+-- For 'IPData'.
 instance ModMac (M.Map MacAddr (Maybe (SwPort, PortState))) where
   addMac d mac = M.insert mac (getLast . macSwPort $ d)
   delMac _ = M.delete
 
 instance ModMac MacInfo where
   addMac = flip M.insert
-  delMac (ips, mp) mac macInfo = fromMaybe macInfo $ do
+  delMac (ips, b) mac macInfo = fromMaybe macInfo $ do
     MacData{..} <- M.lookup mac macInfo
-    let g = maybe id (const $ setL macSwPortL Nothing) mp
-        f | ips == M.keysSet macIPs && isJust mp = M.delete
+    let g = if b then setL macSwPortL Nothing else id
+        f | ips == M.keysSet macIPs && b = M.delete
           | otherwise = M.adjust (\z -> foldr (\ip -> modifyL macIPsL (M.delete ip)) (g z) ips)
     return (f mac macInfo)
+
+modMac :: (forall a. ModMac a
+              => MacAddr
+              -> a
+              -> a) -- ^ modifies
+      -> MacAddr -- ^ selects
+      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+modMac k mac = modMac' k mac (S.empty, True)
 
 modMac' :: (forall a. ModMac a
               => MacAddr
@@ -354,24 +360,21 @@ modMac' :: (forall a. ModMac a
       -> (S.Set IP, Bool) -- ^ selects references
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modMac' k mac (ips0, b) z@(ipInfo, macInfo, swPortInfo) = --modMac'I k mac ips . modMac'P k mac mport
-  -- FIXME: This code is wrong. '(S.Set IP, Maybe SwPort)' is _affected_
-  -- references. I should find port/IP bound to this references using
-  -- references itself. I.e. if i delete mac from IPs, i should find ports,
-  -- which to edit, from modified IPs, but not from selector. I.e. if port is
-  -- unaffected, it should not be included in selector. From this also comes
-  -- 'ModMac' instance for IP and port: i 'delMac' was called, i should delete
-  -- mac from IP/Port, because it was already selected. [current]
-  let ips = if b then fromMaybe S.empty (M.keysSet . macIPs <$> md) `S.union` ips0 else ips0
-      mport = md >>= getLast . macSwPort
-      md = M.lookup mac macInfo
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Last Nothing})
+                      $ M.lookup mac macInfo
+      ips = if b then M.keysSet macIPs `S.union` ips0 else ips0
+      mport = getLast macSwPort
       ipMacPorts = M.singleton mac mport
+      -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not
+      -- add these new 'IP's to 'MacData': this should be done in 'k'
+      -- callback, because i just call 'k' for entire 'macInfo'.
       ipInfo' = foldr
-        (\ip -> let ipState = Last (md >>= M.lookup ip . macIPs)
+        (\ip -> let ipState = Last (M.lookup ip macIPs)
                 in  insertAdjust (modifyL ipMacPortsL (k mac)) IPData{..} ip)
         ipInfo
         ips
       portState = Last (snd <$> mport)
-      portAddrs = M.singleton mac (maybe M.empty macIPs md)
+      portAddrs = M.singleton mac macIPs
       swPortInfo' =
         maybe id
             (insertAdjust (modifyL portAddrsL (k mac)) PortData{..})
@@ -486,7 +489,7 @@ instance ModIP IPInfo where
     IPData{..} <- M.lookup ip ipInfo
     let f | macs /= M.keysSet ipMacPorts =
               --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
-              M.adjust (modifyL ipMacPortsL (\z -> foldr M.delete z macs))
+              M.adjust (modifyL ipMacPortsL (\x -> foldr M.delete x macs))
           | otherwise = M.delete
     return (f ip ipInfo)
   addIP d ip = M.insert ip d
