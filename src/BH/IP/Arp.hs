@@ -205,6 +205,8 @@ parseNmapXml2 t =
       then M.unionWith (<>) z <$> xmlHostAddressP2 host
       else return z
 
+-- FIXME: Split removal of missed IPs into separate function. This should be
+-- done by default. [current]
 mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 mergeIP xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
