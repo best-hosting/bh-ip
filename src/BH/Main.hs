@@ -157,7 +157,7 @@ searchIPs2 ::
   m ()
 searchIPs2 ips = do
   Config{..} <- ask
-  f <- mergeIP <$> nmapCache3 ips nmapHost
+  f <- mergeIP2 <$> nmapCache3 ips nmapHost
   modify f
 
 -- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, SwPortInfo) ?

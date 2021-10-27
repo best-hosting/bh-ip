@@ -15,6 +15,7 @@ module BH.IP.Arp (
   mergePorts,
   mergeMacs,
   mergeIP,
+  mergeIP2,
 ) where
 
 import Control.Concurrent
@@ -208,6 +209,9 @@ mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo,
 mergeIP xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
   in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
+
+mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergeIP2 xs z@(ipInfo, _, _) = M.foldrWithKey addIPMac z xs
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
