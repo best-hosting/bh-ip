@@ -9,10 +9,12 @@
 module BH.IP.Arp (
   ipNeigh,
   nmapCache,
+  nmapCache3,
   queryLinuxArp,
   queryLinuxArp2,
   mergePorts,
   mergeMacs,
+  mergeIP,
 ) where
 
 import Control.Concurrent
@@ -496,6 +498,23 @@ nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
     liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
     xml <- do
       --Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
+      Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
+    z <- liftIO . evaluate . force $ parseNmapXml2 xml
+    liftIO $ print z
+    --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
+    --void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
+    return z
+
+nmapCache3 :: (MonadIO m, MonadError String m) => [IP] -> T.Text -> m (M.Map IP (S.Set MacAddr))
+nmapCache3 ips0 host = Sh.shelly (Sh.silently go) >>= liftEither
+ where
+  go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
+  go = do
+    liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
+    let ips | ips0 == []  = ["213.108.248.0/21"]
+            | otherwise   = map (T.pack . showIP) ips0
+    xml <- do
+      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml" ++ ips)
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
     z <- liftIO . evaluate . force $ parseNmapXml2 xml
     liftIO $ print z

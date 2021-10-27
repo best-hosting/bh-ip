@@ -13,6 +13,7 @@ module BH.Main (
   Searchable(..),
   searchPorts2,
   searchMacs2,
+  searchIPs2,
 )
 where
 
@@ -115,6 +116,9 @@ searchMacs macs = do
     sendExit
 
 -- | Search mac on all switches.
+-- FIXME: I should obtain full info. Here or not, but query over mac implies
+-- full result, including both port and IP. And if some part is missing, i
+-- should query it as well. [current]
 searchMacs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
   [MacAddr] ->
@@ -146,6 +150,15 @@ searchIPs ips = do
   let macs = mapMaybe (flip M.lookup ipMacMap) ips
   searchMacs macs
   error "searchIPs"
+
+searchIPs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  [IP] ->
+  m ()
+searchIPs2 ips = do
+  Config{..} <- ask
+  f <- mergeIP <$> nmapCache3 ips nmapHost
+  modify f
 
 -- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, SwPortInfo) ?
 -- And then add function for obtaining 'InfoKey' indexed map from a generic db

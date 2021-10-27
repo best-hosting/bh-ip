@@ -204,6 +204,7 @@ showsIP IP{..} =
         . shows ipOctet3 . showString "."
         . shows ipOctet4
 
+-- FIXME: Show to 'Text' ?
 showIP :: IP -> String
 showIP m = showsIP m ""
 
