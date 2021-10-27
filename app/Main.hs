@@ -81,7 +81,7 @@ optParser MyOptions{..} =
                         <> O.help "Switch port to look for."
                     )
                 )
-            <|> workQueryMacs
+            <|> workQueryMacs2
               <$> some
                 ( O.option
                     (O.eitherReader (A.parseOnly macP . T.pack))
@@ -255,6 +255,14 @@ workQueryMacs ::
   m ()
 workQueryMacs macs = do
   workQuery "macinfo.yaml" macs >>= \res -> liftIO . B.putStr . Y.encode $ (res :: MacInfo)
+
+workQueryMacs2 ::
+  (MonadReader Config m, MonadError String m, MonadIO m) =>
+  [MacAddr] ->
+  m ()
+workQueryMacs2 macs = do
+  readAll >>= execStateT (searchMacs2 macs) >>= writeAll
+
 
 workQueryIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>

@@ -12,6 +12,7 @@ module BH.Main (
   InfoDb(..),
   Searchable(..),
   searchPorts2,
+  searchMacs2,
 )
 where
 
