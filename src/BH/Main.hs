@@ -40,7 +40,7 @@ import BH.Cache
 import BH.Telnet
 import BH.IP.Arp
 
-modPort2' :: (forall a. ModPort a
+modPort' :: (forall a. ModPort a
               => Port -- ^ FIXME: This should be selector. I.e. (Port, PortState) .
               -> a
               -> a) -- ^ modifies
@@ -48,7 +48,7 @@ modPort2' :: (forall a. ModPort a
       -> PortState -- ^ selects
       -> S.Set MacAddr -- ^ selects references
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort2' k port st macs z@(ipInfo, macInfo, swPortInfo) =
+modPort' k port st macs z@(ipInfo, macInfo, swPortInfo) =
   let macPort = Just (port, st)
       macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) MacData{macIPs = M.empty, ..}) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
@@ -64,17 +64,17 @@ modPort2' k port st macs z@(ipInfo, macInfo, swPortInfo) =
       , k port swPortInfo
       )
 
-modPort2 :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
+modPort :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
       -> Port -- ^ selects
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort2 k port z@(_, _, swPortInfo) =
+modPort k port z@(_, _, swPortInfo) =
   let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
-  in  modPort2' k port Up allMacs z
+  in  modPort' k port Up allMacs z
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (portState, macs) z@(_, macInfo, swPortInfo) =
   let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
-  in  modPort2' (addPort PortData{..}) port portState macs . modPort2' (delPort remMacs) port portState remMacs $ z
+  in  modPort' (addPort PortData{..}) port portState macs . modPort' (delPort remMacs) port portState remMacs $ z
  where
   remMacs =
     let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
@@ -86,6 +86,11 @@ modMac' :: (forall a. ModMac a
               -> a) -- ^ modifies
       -> MacAddr -- ^ selects
       -> (S.Set IP, Maybe (Port, PortState)) -- ^ selects references
+      -- FIXME: If current operation if addition and 'IPData' will contain IP
+      -- in non-default (not 'Answering') state result the db become
+      -- inconsistent, because here, when adding 'IP' to references i'll
+      -- _assume_, that state is 'Answering'. Thus, i should provide _all_
+      -- info required for constructing references. [current]
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
   -- FIXME: Default value hardcoded.
@@ -263,16 +268,17 @@ searchMacs macs = do
 
 -- FIXME: If i'll switch to ip package i may call this with 'Either IP
 -- IPRange' or smth. But for now i may just use empty list..
-findIPInfo :: (MonadIO m, MonadError String m) => [IP] -> T.Text -> m (M.Map IP (S.Set MacAddr))
-findIPInfo ips0 host = Sh.shelly (Sh.silently go) >>= liftEither
+findIPInfo :: (MonadIO m, MonadError String m) => Either [T.Text] [IP] -> T.Text -> m (M.Map IP (S.Set MacAddr))
+findIPInfo xs host = Sh.shelly (Sh.silently (go (nmapArgs xs))) >>= liftEither
  where
-  go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
-  go = do
+  nmapArgs :: Either [T.Text] [IP] -> [T.Text]
+  nmapArgs (Left nets) = nets
+  nmapArgs (Right ips) = map (T.pack . showIP) ips
+  go :: [T.Text] -> Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
+  go argv = do
     liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
-    let ips | ips0 == []  = ["213.108.248.0/21"]
-            | otherwise   = map (T.pack . showIP) ips0
     xml <- do
-      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml" ++ ips)
+      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml" ++ argv)
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
     z <- liftIO . evaluate . force $ parseNmapXml xml
     liftIO $ print z
@@ -285,18 +291,27 @@ searchIPs ::
   m ()
 searchIPs ips = do
   Config{..} <- ask
-  xs <- findIPInfo ips nmapHost
-  modify (flip (M.foldrWithKey addIPMac) xs)
-
--- FIXME: Can i generalize following 'readCache' and 'updateArpCache'
--- functions to just read _any_ yaml cache and update it upon some conditions?
--- This cache may include regular ansible invetory. Also, replace 'readSwInfo'
--- with generic version of this. [cache]
+  case ips of
+    [] -> do
+      t <- liftIO getCurrentTime
+      if diffUTCTime t cacheTime > updateInterval
+        then do
+          xs <- findIPInfo (Left ["213.108.248.0/21"]) nmapHost
+          modify (flip (M.foldrWithKey addIPMac) xs)
+        else return ()
+    _ ->  do
+      xs <- findIPInfo (Left ["213.108.248.0/21"]) nmapHost
+      modify (flip (M.foldrWithKey addIPMac) xs)
 
 -- FIXME: Do not query all IPs at once. I don't need this, really. I may just
 -- nmap single IP in question and do all the other stuff with it. [current]
 -- FIXME: Host should be obtained from 'Config'.
-queryLinuxArp2 ::
+-- FIXME: I may replace this function with just quering all relevant IPs/macs
+-- at each run. Though, when doing search by mac/port i can't be sure, that
+-- no new IPs are used there. Thus.. i still need to query all IPs, which may
+-- be time-consuming. So, cache update time (used here) may be still relevant.
+-- [current]
+{-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   m ()
 queryLinuxArp2 = do
@@ -306,7 +321,7 @@ queryLinuxArp2 = do
     then do
       mergeIP <$> findIPInfo [] nmapHost <*> get >>= put
       liftIO (writeFile timeFile (show t))
-    else return ()
+    else return ()-}
 
 -- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, PortInfo) ?
 -- And then add function for obtaining 'InfoKey' indexed map from a generic db
