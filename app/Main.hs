@@ -173,17 +173,17 @@ initConfig opts@MyOptions{..} action = do
   --runReaderT (readAll >>= execStateT queryLinuxArp2 . mergePorts pm >>= writeAll) cf0
   runReaderT action cf0
 
-readPorts :: (MonadIO m, MonadError String m) => m (M.Map SwPort (PortState, S.Set MacAddr))
+readPorts :: (MonadIO m, MonadError String m) => m (M.Map Port (PortState, S.Set MacAddr))
 readPorts = readYaml "portmap.yml"
 
-readAll :: (MonadIO m, MonadError String m) => m (IPInfo, MacInfo, SwPortInfo)
+readAll :: (MonadIO m, MonadError String m) => m (IPInfo, MacInfo, PortInfo)
 readAll =
   (,,)
     <$> readYaml "ipinfo2.yaml"
     <*> readYaml "macinfo2.yaml"
     <*> readYaml "swportinfo2.yaml"
 
-writeAll :: (MonadIO m, MonadError String m) => (IPInfo, MacInfo, SwPortInfo) -> m ()
+writeAll :: (MonadIO m, MonadError String m) => (IPInfo, MacInfo, PortInfo) -> m ()
 writeAll (ipInfo, macInfo, swPortInfo) = do
   writeCache "ipinfo2.yaml" ipInfo
   writeCache "macinfo2.yaml" macInfo

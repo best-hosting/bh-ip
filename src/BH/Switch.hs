@@ -6,10 +6,10 @@ module BH.Switch (
   SwName (..),
   SwData (..),
   SwInfo,
-  SwPort (..),
+  Port (..),
   swPortP,
   swPortP',
-  showSwPort,
+  showPort,
   PortState (..),
   PortMode (..),
   MacTableEl (..),
@@ -99,34 +99,34 @@ instance FromJSON SwData where
       <*> v .:? "trunkPorts" .!= []
 
 -- FIXME: Rename 'portSpec' to 'portNum' ?
-data SwPort = SwPort {portSw :: SwName, portSpec :: PortNum}
+data Port = Port {portName :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 
-instance ToJSON SwPort where
-  toJSON = toJSON . showSwPort
-  toEncoding = toEncoding . showSwPort
-instance ToJSONKey SwPort where
-  toJSONKey = ToJSONKeyText showSwPort (J.text . showSwPort)
+instance ToJSON Port where
+  toJSON = toJSON . showPort
+  toEncoding = toEncoding . showPort
+instance ToJSONKey Port where
+  toJSONKey = ToJSONKeyText showPort (J.text . showPort)
 
-instance FromJSON SwPort where
-  parseJSON = withText "SwPort" (either fail pure . A.parseOnly swPortP)
-instance FromJSONKey SwPort where
+instance FromJSON Port where
+  parseJSON = withText "Port" (either fail pure . A.parseOnly swPortP)
+instance FromJSONKey Port where
   fromJSONKey = FromJSONKeyTextParser (either fail pure . A.parseOnly swPortP)
 
 -- | Parse fully specified switch port.
-swPortP :: A.Parser SwPort
+swPortP :: A.Parser Port
 swPortP = swPortP' (const (Nothing, Nothing))
 
 -- | Parse switch port providing function for determining defaults for port
 -- specification parser.
-swPortP' :: (SwName -> (Maybe PortSpeed, Maybe Int)) -> A.Parser SwPort
+swPortP' :: (SwName -> (Maybe PortSpeed, Maybe Int)) -> A.Parser Port
 swPortP' getDefs = do
   pn <- SwName <$> A.takeWhile1 (/= '/') <* A.string "/" A.<?> "switch name"
   let (defSpeed, defSlot) = getDefs $ pn
-  SwPort pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
+  Port pn <$> portNumP' defSpeed defSlot A.<?> "switch port"
 
-showSwPort :: SwPort -> T.Text
-showSwPort SwPort{..} = getSwName portSw <> "/" <> showCiscoPortShort portSpec
+showPort :: Port -> T.Text
+showPort Port{..} = getSwName portName <> "/" <> showCiscoPortShort portSpec
 
 -- FIXME: "show interfaces fa0/3 switchport" and there look for
 -- "Administrative Mode" and "Trunking Native Mode VLAN". "show interfaces

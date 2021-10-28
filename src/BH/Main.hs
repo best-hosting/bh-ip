@@ -41,21 +41,21 @@ import BH.Telnet
 import BH.IP.Arp
 
 modPort2' :: (forall a. ModPort a
-              => SwPort -- ^ FIXME: This should be selector. I.e. (SwPort, PortState) .
+              => Port -- ^ FIXME: This should be selector. I.e. (Port, PortState) .
               -> a
               -> a) -- ^ modifies
-      -> SwPort -- ^ selects. FIXME: This should be complete reference, i.e. (SwPort, PortState)
+      -> Port -- ^ selects. FIXME: This should be complete reference, i.e. (Port, PortState)
       -> PortState -- ^ selects
       -> S.Set MacAddr -- ^ selects references
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modPort2' k port st macs z@(ipInfo, macInfo, swPortInfo) =
-  let macSwPort = Just (port, st)
-      macInfo' = S.foldr (insertAdjust (modifyL macSwPortL (k port)) MacData{macIPs = M.empty, ..}) macInfo macs
+  let macPort = Just (port, st)
+      macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) MacData{macIPs = M.empty, ..}) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       ipInfo' = M.foldrWithKey
         (\mac -> flip $ M.foldrWithKey
           (\ip _ z ->
-            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) macSwPort mac)) ip z
+            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) macPort mac)) ip z
           )
         )
         ipInfo xs
@@ -64,14 +64,14 @@ modPort2' k port st macs z@(ipInfo, macInfo, swPortInfo) =
       , k port swPortInfo
       )
 
-modPort2 :: (forall a. ModPort a => SwPort -> a -> a) -- ^ modifies
-      -> SwPort -- ^ selects
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+modPort2 :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
+      -> Port -- ^ selects
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modPort2 k port z@(_, _, swPortInfo) =
   let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
   in  modPort2' k port Up allMacs z
 
-addPortMac :: SwPort -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (portState, macs) z@(_, macInfo, swPortInfo) =
   let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
   in  modPort2' (addPort PortData{..}) port portState macs . modPort2' (delPort remMacs) port portState remMacs $ z
@@ -80,7 +80,7 @@ addPortMac port (portState, macs) z@(_, macInfo, swPortInfo) =
     let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
     in  oldMacs `S.difference` macs
 
-mergePorts :: M.Map SwPort (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergePorts :: M.Map Port (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergePorts = flip (M.foldrWithKey addPortMac)
 
 modMac' :: (forall a. ModMac a
@@ -88,11 +88,11 @@ modMac' :: (forall a. ModMac a
               -> a
               -> a) -- ^ modifies
       -> MacAddr -- ^ selects
-      -> (S.Set IP, Maybe (SwPort, PortState)) -- ^ selects references
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+      -> (S.Set IP, Maybe (Port, PortState)) -- ^ selects references
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
   -- FIXME: Default value hardcoded.
-  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Nothing})
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macPort = Nothing})
                       $ M.lookup mac macInfo
       ips = if isJust mp then M.keysSet macIPs `S.union` ips0 else ips0
       ipMacPorts = M.singleton mac mp
@@ -123,30 +123,30 @@ modMac :: (forall a. ModMac a
               -> a
               -> a) -- ^ modifies
       -> MacAddr -- ^ selects
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modMac k mac z@(_, macInfo, _) =
   -- FIXME: Default value hardcoded.
-  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Nothing}) (M.lookup mac macInfo)
-  in  modMac' k mac (M.keysSet macIPs, macSwPort) z
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macPort = Nothing}) (M.lookup mac macInfo)
+  in  modMac' k mac (M.keysSet macIPs, macPort) z
 
-addMacPort :: MacAddr -> (SwPort, PortState) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addMacPort mac p z@(_, macInfo, _) =
-  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Just p}) $ M.lookup mac macInfo
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macPort = Just p}) $ M.lookup mac macInfo
       remPort = do
-        oldPort <- fst <$> macSwPort
+        oldPort <- fst <$> macPort
         if fst p /= oldPort
-          then macSwPort
+          then macPort
           else Nothing
-  in  modMac' (addMac MacData{macSwPort = Just p, ..}) mac (S.empty, Just p) . modMac' (delMac (S.empty, remPort)) mac (S.empty, remPort) $ z
+  in  modMac' (addMac MacData{macPort = Just p, ..}) mac (S.empty, Just p) . modMac' (delMac (S.empty, remPort)) mac (S.empty, remPort) $ z
 
-mergeMacs :: M.Map MacAddr (SwPort, PortState) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
 
 -- FIXME: I should take 'IPState' as argument.
 modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
       -> IP -- ^ selects
       -> S.Set MacAddr -- ^ selects references
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
   let -- FIXME: Wrong! Values should be taken from current 'IPData', and if not found,
       -- should default to 'Answering' and 'Nothing'. But only if not found!
@@ -156,9 +156,9 @@ modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
       -- /correctly/ [current].
       macIPs = M.singleton ip Answering
       macInfo' = S.foldr
-        (insertAdjust (modifyL macIPsL (k ip)) MacData{macSwPort = Nothing, ..})
+        (insertAdjust (modifyL macIPsL (k ip)) MacData{macPort = Nothing, ..})
         macInfo macs
-      xs = M.map macSwPort . M.filterWithKey (const . (`S.member` macs)) $ macInfo
+      xs = M.map macPort . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       swPortInfo' = M.foldrWithKey
         (\mac mp z -> case mp of
           Just (port, _)  -> M.adjust (modifyL portAddrsL (insertAdjust (k ip) macIPs mac)) port z
@@ -173,14 +173,14 @@ modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
 -- | Selects IP with all macs.
 modIP :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
       -> IP -- ^ selects
-      -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modIP f ip z@(ipInfo, _, _) =
   let allMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
   in  modIP' f ip allMacs z
 
-addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
-  let ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= macSwPort) macs
+  let ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= macPort) macs
       ipState = Answering
   in  modIP' (addIP IPData{..}) ip macs . modIP' (delIP remMacs) ip remMacs $ z
  where
@@ -188,12 +188,12 @@ addIPMac ip macs z@(ipInfo, macInfo, _) =
     let oldMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
     in  oldMacs `S.difference` macs
 
-mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeIP2 xs z@(ipInfo, _, _) = M.foldrWithKey addIPMac z xs
 
 -- FIXME: Split removal of missed IPs into separate function. This should be
 -- done by default. [current]
-mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeIP xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
   in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
@@ -205,7 +205,7 @@ mergeIP xs z@(ipInfo, _, _) =
 -- FIXME: Unreachable IPs may be on 'Up' ports, because this simply means,
 -- that this IP is no longer used by this server. Though, 'Disabled' or
 -- 'NotConnect' ports can't have 'Answering' IPs.
-dbTidy :: (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
+dbTidy :: (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 dbTidy = undefined
 
 -- FIXME: Use generic yaml reading func.
@@ -218,8 +218,8 @@ readSwInfo file = toSwInfo <$> readYaml file
 -- | This is not really "search", but just quering info about ports. It names
 -- this way just to make show its relevant to 'searchX' family of functions.
 searchPorts2 ::
-  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
-  [SwPort] -> m ()
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
+  [Port] -> m ()
 searchPorts2 swPorts = do
   Config{..} <- ask
   f <- mergePorts <$> runReaderT (runOn onPorts swNames go) swInfo
@@ -228,14 +228,14 @@ searchPorts2 swPorts = do
   -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
   -- need to change it everywhere, includeing findX funcs.. [refactor]
   onPorts :: SwName -> [PortNum]
-  onPorts sn = nub . map portSpec . filter ((== sn) . portSw) $ swPorts
+  onPorts sn = nub . map portSpec . filter ((== sn) . portName) $ swPorts
   swNames :: [SwName]
-  swNames = nub . map portSw $ swPorts
-  go :: TelnetRunM TelnetParserResult [PortNum] (M.Map SwPort (PortState, S.Set MacAddr)) ()
+  swNames = nub . map portName $ swPorts
+  go :: TelnetRunM TelnetParserResult [PortNum] (M.Map Port (PortState, S.Set MacAddr)) ()
   go = do
-    portSw <- asks (swName . switchData)
+    portName <- asks (swName . switchData)
     ps <- asks telnetIn
-    res <- M.mapKeys (\p -> SwPort{portSpec = p, ..}) <$> findPortInfo2 ps
+    res <- M.mapKeys (\p -> Port{portSpec = p, ..}) <$> findPortInfo2 ps
     putResult res
     sendExit
 
@@ -246,7 +246,7 @@ searchPorts2 swPorts = do
 -- should query it as well. [current]
 -- | Search mac on all switches.
 searchMacs2 ::
-  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   [MacAddr] ->
   m ()
 searchMacs2 macs = do
@@ -255,16 +255,16 @@ searchMacs2 macs = do
   modify f
  where
   -- FIXME: Hardcoded vlan! [current]
-  maybeMacs :: M.Map MacAddr (SwPort, PortState) -> Maybe [MacAddr]
+  maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys res
                   in  case filter (`notElem` found) macs of
                         [] -> Nothing
                         xs -> Just xs
-  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr (SwPort, PortState)) ()
+  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr (Port, PortState)) ()
   go = do
-    portSw <- asks (swName . switchData)
+    portName <- asks (swName . switchData)
     ms  <- asks telnetIn
-    M.map (\p -> (SwPort{portSpec = p, ..}, Up)) <$> (findMacInfo2 ms) >>= putResult
+    M.map (\p -> (Port{portSpec = p, ..}, Up)) <$> (findMacInfo2 ms) >>= putResult
     sendExit
 
 -- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
@@ -301,7 +301,7 @@ nmapCache3 ips0 host = Sh.shelly (Sh.silently go) >>= liftEither
     return z
 
 searchIPs2 ::
-  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   [IP] ->
   m ()
 searchIPs2 ips = do
@@ -318,7 +318,7 @@ searchIPs2 ips = do
 -- nmap single IP in question and do all the other stuff with it. [current]
 -- FIXME: Host should be obtained from 'Config'.
 queryLinuxArp2 ::
-  (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, SwPortInfo) m) =>
+  (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   m ()
 queryLinuxArp2 = do
   Config{..} <- ask
@@ -329,7 +329,7 @@ queryLinuxArp2 = do
       liftIO (writeFile timeFile (show t))
     else return ()
 
--- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, SwPortInfo) ?
+-- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, PortInfo) ?
 -- And then add function for obtaining 'InfoKey' indexed map from a generic db
 -- type [current]
 

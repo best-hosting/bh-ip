@@ -12,12 +12,11 @@ module BH.Main.Types (
   MacInfo,
   MacData(..),
   macIPsL,
-  macSwPortL,
+  macPortL,
   IPInfo,
   IPData(..),
   ipMacPortsL,
   IPState(..),
-  SwPortInfo,
   PortInfo,
   PortData(..),
   portAddrsL,
@@ -54,7 +53,7 @@ data Config = Config
 type VlanInfo a = M.Map Vlan a
 
 {-data VlanData a = VlanData
-                    { vlanSwPort :: Maybe SwPort
+                    { vlanPort :: Maybe Port
                     , vlanAddrs  :: S.Set a
                     }
   deriving(Eq, Show)
@@ -62,7 +61,7 @@ type VlanInfo a = M.Map Vlan a
 instance ToJSON a => ToJSON (VlanData a) where
   toJSON VlanData{..} =
     object $
-      [ "port"  .= vlanSwPort
+      [ "port"  .= vlanPort
       , "addrs" .= vlanAddrs
       ]
 
@@ -77,7 +76,7 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
 type MacInfo = M.Map MacAddr MacData
 
 data PortRef = PortRef
-                { refPort  :: SwPort
+                { refPort  :: Port
                 , refState :: PortState
                 }
   deriving (Show)
@@ -87,7 +86,7 @@ data MacData = MacData
   { macIPs    :: M.Map IP IPState
   -- FIXME: Do i really need Semigroup for MacData?
 -- FIXME: Do not use pairs, there're lists in yaml. Use 'PortRef' instead.
-  , macSwPort :: Maybe (SwPort, PortState)
+  , macPort :: Maybe (Port, PortState)
 --, macVendor :: T.Text
   }
   deriving (Show)
@@ -95,14 +94,14 @@ data MacData = MacData
 macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
-macSwPortL :: LensC MacData (Maybe (SwPort, PortState))
-macSwPortL g z@MacData{macSwPort = x} = (\x' -> z{macSwPort = x'}) <$> g x
+macPortL :: LensC MacData (Maybe (Port, PortState))
+macPortL g z@MacData{macPort = x} = (\x' -> z{macPort = x'}) <$> g x
 
 instance ToJSON MacData where
   toJSON MacData{..} =
-    if macSwPort == Nothing
+    if macPort == Nothing
       then object ["ips" .= macIPs]
-      else object ["ips" .= macIPs, "port" .= macSwPort]
+      else object ["ips" .= macIPs, "port" .= macPort]
 
 instance FromJSON MacData where
   parseJSON = withObject "MacData" $ \v ->
@@ -119,12 +118,12 @@ instance FromJSON MacData where
 -- maps. [current]
 {-data MacData = MacData
   { macIPs :: VlanInfo IP
-  , macSwPorts :: S.Set SwPort
+  , macPorts :: S.Set Port
   }
 
 data IPData = IPData
   { ipMacs :: VlanInfo MacAddr
-  , ipSwPorts :: S.Set SwPort
+  , ipPorts :: S.Set Port
   }
 
 data PortData = PortData
@@ -150,13 +149,13 @@ instance FromJSON IPState where
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
 data IPData = IPData
-  { ipMacPorts :: M.Map MacAddr (Maybe (SwPort, PortState))
+  { ipMacPorts :: M.Map MacAddr (Maybe (Port, PortState))
   , ipState :: IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
-ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe (SwPort, PortState)))
+ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe (Port, PortState)))
 ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
 
 instance ToJSON IPData where
@@ -171,8 +170,7 @@ instance FromJSON IPData where
       <$> v .: "macPorts"
       <*> v .: "state"
 
-type SwPortInfo = M.Map SwPort PortData
-type PortInfo = M.Map PortNum PortData
+type PortInfo = M.Map Port PortData
 
 -- TODO: Read port mode (access/trunk) to 'PortData'.
 data PortData = PortData
@@ -209,11 +207,11 @@ instance FromJSON PortData where
 -- entire program run to single vlan? [current]
 
 class ModPort a where
-  setPortState :: PortState -> SwPort -> a -> a
-  delPort :: S.Set MacAddr -> SwPort -> a -> a
-  addPort :: PortData -> SwPort -> a -> a
+  setPortState :: PortState -> Port -> a -> a
+  delPort :: S.Set MacAddr -> Port -> a -> a
+  addPort :: PortData -> Port -> a -> a
 
-instance ModPort SwPortInfo where
+instance ModPort PortInfo where
   setPortState s = M.adjust (\d -> d{portState = s})
   delPort macs port swPortInfo = fromMaybe swPortInfo $ do
     PortData{..} <- M.lookup port swPortInfo
@@ -223,17 +221,17 @@ instance ModPort SwPortInfo where
     return (f port swPortInfo)
   addPort pd p = M.insert p pd
 
--- FIXME: Or i may write instance for 'M.Map MacAddr (Maybe (SwPort,
+-- FIXME: Or i may write instance for 'M.Map MacAddr (Maybe (Port,
 -- PortState)) instead, because i send selection (S.Set MacAddr) in any case..
 -- That's depends on does 'MacAddr -- Nothing' has sense or not. And it seems
 -- it does.
-instance ModPort (Maybe (SwPort, PortState)) where
+instance ModPort (Maybe (Port, PortState)) where
   setPortState s _ mx = maybe mx (\(p, _) -> Just (p, s)) mx
   delPort _ _ _ = Nothing
   addPort PortData{..} port _ = Just (port, portState)
 
 class ModMac a where
-  delMac :: (S.Set IP, Maybe (SwPort, PortState)) -> MacAddr -> a -> a
+  delMac :: (S.Set IP, Maybe (Port, PortState)) -> MacAddr -> a -> a
   addMac :: MacData -> MacAddr -> a -> a
 
 -- For 'PortData'.
@@ -246,15 +244,15 @@ instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
     return (f mac portAddrs)
 
 -- For 'IPData'.
-instance ModMac (M.Map MacAddr (Maybe (SwPort, PortState))) where
-  addMac d mac = M.insert mac (macSwPort d)
+instance ModMac (M.Map MacAddr (Maybe (Port, PortState))) where
+  addMac d mac = M.insert mac (macPort d)
   delMac _ = M.delete
 
 instance ModMac MacInfo where
   addMac = flip M.insert
   delMac (ips, mp) mac macInfo = fromMaybe macInfo $ do
     MacData{..} <- M.lookup mac macInfo
-    let g = if isJust mp then setL macSwPortL Nothing else id
+    let g = if isJust mp then setL macPortL Nothing else id
         f | ips == M.keysSet macIPs && isJust mp = M.delete
           | otherwise = M.adjust (\z -> foldr (\ip -> modifyL macIPsL (M.delete ip)) (g z) ips)
     return (f mac macInfo)
