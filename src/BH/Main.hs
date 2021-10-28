@@ -49,13 +49,13 @@ modPort2' :: (forall a. ModPort a
       -> S.Set MacAddr -- ^ selects references
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modPort2' k port st macs z@(ipInfo, macInfo, swPortInfo) =
-  let macSwPort = Last (Just (port, st))
+  let macSwPort = Just (port, st)
       macInfo' = S.foldr (insertAdjust (modifyL macSwPortL (k port)) MacData{macIPs = M.empty, ..}) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       ipInfo' = M.foldrWithKey
         (\mac -> flip $ M.foldrWithKey
           (\ip _ z ->
-            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) (getLast macSwPort) mac)) ip z
+            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) macSwPort mac)) ip z
           )
         )
         ipInfo xs
@@ -72,10 +72,9 @@ modPort2 k port z@(_, _, swPortInfo) =
   in  modPort2' k port Up allMacs z
 
 addPortMac :: SwPort -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
-addPortMac port (st, macs) z@(_, macInfo, swPortInfo) =
+addPortMac port (portState, macs) z@(_, macInfo, swPortInfo) =
   let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
-      portState = Last (Just st)
-  in  modPort2' (addPort PortData{..}) port st macs . modPort2' (delPort remMacs) port st remMacs $ z
+  in  modPort2' (addPort PortData{..}) port portState macs . modPort2' (delPort remMacs) port portState remMacs $ z
  where
   remMacs =
     let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
@@ -93,19 +92,21 @@ modMac' :: (forall a. ModMac a
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
   -- FIXME: Default value hardcoded.
-  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Last Nothing})
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Nothing})
                       $ M.lookup mac macInfo
       ips = if isJust mp then M.keysSet macIPs `S.union` ips0 else ips0
       ipMacPorts = M.singleton mac mp
       -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not
       -- add these new 'IP's to 'MacData': this should be done in 'k'
       -- callback, because i just call 'k' for entire 'macInfo'.
+      -- FIXME: Hardcoded default 'IPState' 'Answering'. [current]
+      -- FIXME: Hardcoded default 'PortState' 'Up'. [current]
       ipInfo' = foldr
-        (\ip -> let ipState = Last (M.lookup ip macIPs)
+        (\ip -> let ipState = fromMaybe Answering (M.lookup ip macIPs)
                 in  insertAdjust (modifyL ipMacPortsL (k mac)) IPData{..} ip)
         ipInfo
         ips
-      portState = Last (snd <$> mp)
+      portState = fromMaybe Up (snd <$> mp)
       portAddrs = M.singleton mac macIPs
       swPortInfo' =
         maybe id
@@ -125,18 +126,18 @@ modMac :: (forall a. ModMac a
       -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 modMac k mac z@(_, macInfo, _) =
   -- FIXME: Default value hardcoded.
-  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Last Nothing}) (M.lookup mac macInfo)
-  in  modMac' k mac (M.keysSet macIPs, getLast macSwPort) z
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Nothing}) (M.lookup mac macInfo)
+  in  modMac' k mac (M.keysSet macIPs, macSwPort) z
 
 addMacPort :: MacAddr -> (SwPort, PortState) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 addMacPort mac p z@(_, macInfo, _) =
-  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Last (Just p)}) $ M.lookup mac macInfo
+  let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macSwPort = Just p}) $ M.lookup mac macInfo
       remPort = do
-        oldPort <- fst <$> getLast macSwPort
+        oldPort <- fst <$> macSwPort
         if fst p /= oldPort
-          then getLast macSwPort
+          then macSwPort
           else Nothing
-  in  modMac' (addMac MacData{macSwPort = Last (Just p), ..}) mac (S.empty, Just p) . modMac' (delMac (S.empty, remPort)) mac (S.empty, remPort) $ z
+  in  modMac' (addMac MacData{macSwPort = Just p, ..}) mac (S.empty, Just p) . modMac' (delMac (S.empty, remPort)) mac (S.empty, remPort) $ z
 
 mergeMacs :: M.Map MacAddr (SwPort, PortState) -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
@@ -155,11 +156,11 @@ modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
       -- /correctly/ [current].
       macIPs = M.singleton ip Answering
       macInfo' = S.foldr
-        (insertAdjust (modifyL macIPsL (k ip)) MacData{macSwPort = Last Nothing, ..})
+        (insertAdjust (modifyL macIPsL (k ip)) MacData{macSwPort = Nothing, ..})
         macInfo macs
       xs = M.map macSwPort . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       swPortInfo' = M.foldrWithKey
-        (\mac (Last mp) z -> case mp of
+        (\mac mp z -> case mp of
           Just (port, _)  -> M.adjust (modifyL portAddrsL (insertAdjust (k ip) macIPs mac)) port z
           Nothing         -> z
         )
@@ -179,8 +180,8 @@ modIP f ip z@(ipInfo, _, _) =
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, SwPortInfo) -> (IPInfo, MacInfo, SwPortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
-  let ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= getLast . macSwPort) macs
-      ipState = Last (Just Answering)
+  let ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= macSwPort) macs
+      ipState = Answering
   in  modIP' (addIP IPData{..}) ip macs . modIP' (delIP remMacs) ip remMacs $ z
  where
   remMacs =

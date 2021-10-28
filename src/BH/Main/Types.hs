@@ -87,7 +87,7 @@ data MacData = MacData
   { macIPs    :: M.Map IP IPState
   -- FIXME: Do i really need Semigroup for MacData?
 -- FIXME: Do not use pairs, there're lists in yaml. Use 'PortRef' instead.
-  , macSwPort :: Last (SwPort, PortState)
+  , macSwPort :: Maybe (SwPort, PortState)
 --, macVendor :: T.Text
   }
   deriving (Show)
@@ -96,11 +96,11 @@ macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
 macSwPortL :: LensC MacData (Maybe (SwPort, PortState))
-macSwPortL g z@MacData{macSwPort = x} = (\x' -> z{macSwPort = (Last x')}) <$> g (getLast x)
+macSwPortL g z@MacData{macSwPort = x} = (\x' -> z{macSwPort = x'}) <$> g x
 
 instance ToJSON MacData where
   toJSON MacData{..} =
-    if macSwPort == Last Nothing
+    if macSwPort == Nothing
       then object ["ips" .= macIPs]
       else object ["ips" .= macIPs, "port" .= macSwPort]
 
@@ -108,7 +108,7 @@ instance FromJSON MacData where
   parseJSON = withObject "MacData" $ \v ->
     MacData
       <$> v .:  "ips"
-      <*> (Last <$> v .:? "port")
+      <*> (v .:? "port")
 
 -- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
 -- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
@@ -149,11 +149,9 @@ instance FromJSON IPState where
 
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
--- FIXME: Do i really need this 'Last' ? What's wrong with just setting
--- something (maybe wrong) and then verifying it? [current]
 data IPData = IPData
   { ipMacPorts :: M.Map MacAddr (Maybe (SwPort, PortState))
-  , ipState :: Last IPState
+  , ipState :: IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
@@ -179,8 +177,7 @@ type PortInfo = M.Map PortNum PortData
 -- TODO: Read port mode (access/trunk) to 'PortData'.
 data PortData = PortData
   { portAddrs :: M.Map MacAddr (M.Map IP IPState)
-  -- FIXME: Make 'portState' into plain 'PortState', really.
-  , portState :: Last PortState
+  , portState :: PortState
   --, portMode :: PortMode
   }
   deriving (Show)
@@ -217,7 +214,7 @@ class ModPort a where
   addPort :: PortData -> SwPort -> a -> a
 
 instance ModPort SwPortInfo where
-  setPortState s = M.adjust (\d -> d{portState = Last (Just s)})
+  setPortState s = M.adjust (\d -> d{portState = s})
   delPort macs port swPortInfo = fromMaybe swPortInfo $ do
     PortData{..} <- M.lookup port swPortInfo
     let f | S.size macs /= S.size (M.keysSet portAddrs) =
@@ -233,9 +230,7 @@ instance ModPort SwPortInfo where
 instance ModPort (Maybe (SwPort, PortState)) where
   setPortState s _ mx = maybe mx (\(p, _) -> Just (p, s)) mx
   delPort _ _ _ = Nothing
-  addPort PortData{..} port _ = do
-    s <- getLast portState
-    return (port, s)
+  addPort PortData{..} port _ = Just (port, portState)
 
 class ModMac a where
   delMac :: (S.Set IP, Maybe (SwPort, PortState)) -> MacAddr -> a -> a
@@ -252,7 +247,7 @@ instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
 
 -- For 'IPData'.
 instance ModMac (M.Map MacAddr (Maybe (SwPort, PortState))) where
-  addMac d mac = M.insert mac (getLast . macSwPort $ d)
+  addMac d mac = M.insert mac (macSwPort d)
   delMac _ = M.delete
 
 instance ModMac MacInfo where
@@ -270,7 +265,7 @@ class ModIP a where
   addIP :: IPData -> IP -> a -> a
 
 instance ModIP IPInfo where
-  setIPState s = M.adjust (\d -> d{ipState = Last (Just s)})
+  setIPState s = M.adjust (\d -> d{ipState = s})
   delIP macs ip ipInfo = fromMaybe ipInfo $ do
     IPData{..} <- M.lookup ip ipInfo
     let f | macs /= M.keysSet ipMacPorts =
@@ -283,7 +278,5 @@ instance ModIP IPInfo where
 instance ModIP (M.Map IP IPState) where
   setIPState s = M.adjust (const s)
   delIP _ = M.delete
-  addIP d ip = case getLast (ipState d) of
-    Just s  -> M.insert ip s
-    Nothing -> id
+  addIP d ip = M.insert ip (ipState d)
 
