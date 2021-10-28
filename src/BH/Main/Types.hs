@@ -8,8 +8,6 @@
 {-# LANGUAGE RankNTypes #-}
 
 module BH.Main.Types (
-  MacIpMap,
-  IpMacMap,
   Config(..),
   MacInfo,
   toMacInfo,
@@ -25,8 +23,6 @@ module BH.Main.Types (
   PortInfo,
   PortData(..),
   portAddrsL,
-  ToSwPortInfo(..),
-  C3(..),
 )
 where
 
@@ -112,14 +108,6 @@ data MacData = MacData
 --, macVendor :: T.Text
   }
   deriving (Show)
-
-class C3 a where
-  type C3Args a
-  ipLens :: C3Args a -> LensC a (M.Map IP IPState)
-
-instance C3 MacData where
-  type C3Args MacData = ()
-  ipLens _ = macIPsL
 
 macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
@@ -259,10 +247,6 @@ data PortData = PortData
   }
   deriving (Show)
 
-instance C3 PortData where
-  type C3Args PortData = MacAddr
-  ipLens mac = portAddrsL . mapL mac . maybeL M.empty
-
 portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP IPState))
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
 
@@ -289,76 +273,12 @@ instance Monoid PortData where
   mempty = PortData {portAddrs = M.empty, portState = Last Nothing}
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
--- FIXME: Use 'IPInfo' to resolve mac ips. [current]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
 -- whatever. Every maps should be inside vlan. And vlan should be removed
 -- early at start. [current]
-{-resolveMacIPs :: MacIpMap -> MacInfo -> MacInfo
-resolveMacIPs macIpMap = M.mapWithKey $ \m d ->
-  d { macIPs = fromMaybe M.empty
-                (M.lookup m macIpMap >>= return . M.fromSet (const Answering))
-    }
 
-resolvePortIPs :: MacIpMap -> M.Map a PortData -> M.Map a PortData
-resolvePortIPs macIpMap = M.map $ modifyL portAddrsL (resolveMacIPs macIpMap)-}
-
--- FIXME: Rename to 'HasPorts'.
-class ToSwPortInfo a where
-  getSwPorts :: a -> [SwPort]
-  fromSwPortInfo :: SwPortInfo -> a
-
-instance ToSwPortInfo SwPortInfo where
-  getSwPorts = M.keys
-  fromSwPortInfo = id
-
-{-instance ToSwPortInfo (VlanInfo a) where
-  getSwPorts = nub . mapMaybe vlanSwPort . M.elems-}
-
-instance ToSwPortInfo MacInfo where
-  -- FIXME: In fact, in all queryX functions i need unique items. May be change
-  -- type to 'S.Set' to force uniqueness? [current]
-  -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
-  -- entire program run to single vlan? [current]
-  getSwPorts = nub . mapMaybe (fmap fst . getLast . macSwPort) . M.elems
-  fromSwPortInfo = M.foldrWithKey go M.empty
-   where
-    go :: SwPort -> PortData -> MacInfo -> MacInfo
-    go sp PortData{..} z =
-      let macSwPort = Last $ maybe Nothing (Just . (sp, )) . getLast $ portState
-      in  M.foldrWithKey (\mac macIPs -> M.insertWith (<>) mac MacData{..}) z portAddrs
-
-instance ToSwPortInfo IPInfo where
-  getSwPorts = nub . map fst . catMaybes . concatMap (M.elems . ipMacPorts) . M.elems
-  -- Here there're two places, where 'SwPort' may be defined: key of
-  -- 'SwPortInfo' and 'macSwPorts' record in 'portAddrs :: MacInfo'. And i
-  -- will explicitly overwrite 'SwPort' obtained from 'portAddrs' with value
-  -- of current 'SwPortInfo' key.
-  -- FIXME: Do not use 'MacInfo' in 'PortData'. Use just 'S.Set MacAddr'
-  -- instead.
-  fromSwPortInfo = M.foldrWithKey go M.empty
-   where
-    go :: SwPort -> PortData -> IPInfo -> IPInfo
-    go port PortData{..} z =
-      M.foldrWithKey goMac z portAddrs
-     where
-      portRef :: Maybe (SwPort, PortState)
-      portRef = maybe Nothing (Just . (port, )) . getLast $ portState
-      goMac :: MacAddr -> M.Map IP IPState -> IPInfo -> IPInfo
-      goMac mac xs z' =
-        M.foldrWithKey (\ip st -> M.insertWith (<>) ip
-          IPData
-            { ipState = Last (Just st)
-            , ipMacPorts = M.singleton mac portRef
-            }
-          ) z' xs
-
-macInfoToIPInfo :: MacInfo -> IPInfo
-macInfoToIPInfo = M.foldrWithKey goM M.empty
- where
-  goM :: MacAddr -> MacData -> IPInfo -> IPInfo
-  goM mac MacData{..} =
-    let d = IPData{ipMacPorts = M.singleton mac (getLast macSwPort)}
-        y :: IPInfo
-        y = M.foldrWithKey (\ip s -> M.insertWith (<>) ip d{ipState = Last (Just s)}) M.empty macIPs
-    in  M.unionWith (<>) y
+-- FIXME: In fact, in all queryX functions i need unique items. May be change
+-- type to 'S.Set' to force uniqueness? [current]
+-- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
+-- entire program run to single vlan? [current]
 

@@ -196,40 +196,6 @@ writeAll (ipInfo, macInfo, swPortInfo) = do
     Y.encodeFile t x
     renameFile t f
 
-workQuery ::
-  (MonadReader Config m, MonadError String m, MonadIO m, InfoDb c
-      , FromJSONKey (InfoKey c)
-      , FromJSON (InfoData c)
-      , ToJSONKey (InfoKey c)
-      , ToJSON (InfoData c)
-  ) =>
-  FilePath -> [InfoKey c] -> m c
-workQuery p xs = do
-  (res, newMacInfo) <- readYaml p >>= runStateT (query xs)
-  -- TODO: Use 'Config' parameter to store swport db filename.
-  -- FIXME: Update all dbs after each query.
-  liftIO $ do
-    cwd <- getCurrentDirectory
-    (f, _) <- openTempFile cwd p
-    Y.encodeFile f newMacInfo
-    renameFile f p
-  return res
-
-workQueryPorts ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [T.Text] ->
-  m ()
-workQueryPorts ts = do
-  Config{..} <- ask
-  let getSwDefaults :: SwName -> (Maybe PortSpeed, Maybe Int)
-      getSwDefaults sn =
-        let m = M.lookup sn swInfo
-         in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
-  swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  let f :: SwPortInfo -> SwPortInfo
-      f = id
-  workQuery "swportinfo.yaml" swports >>= liftIO . B.putStr . Y.encode . f
-
 workQueryPorts2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [T.Text] ->
@@ -243,32 +209,16 @@ workQueryPorts2 ts = do
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
   readAll >>= execStateT (searchPorts2 swports) >>= writeAll
   -- TODO: Use 'Config' parameter to store swport db filename.
-  -- FIXME: Update all dbs after each query.
-
 
 -- TODO: Query only cache, if requested. On the other hand, i probably may not
 -- offer such functionality. After all, cache is yaml and `yq` will be better
 -- in querying it anyway. But in case `yq` is not available.. well..
-workQueryMacs ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [MacAddr] ->
-  m ()
-workQueryMacs macs = do
-  workQuery "macinfo.yaml" macs >>= \res -> liftIO . B.putStr . Y.encode $ (res :: MacInfo)
-
 workQueryMacs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [MacAddr] ->
   m ()
 workQueryMacs2 macs = do
   readAll >>= execStateT (searchMacs2 macs) >>= writeAll
-
-workQueryIPs ::
-  (MonadReader Config m, MonadError String m, MonadIO m) =>
-  [IP] ->
-  m ()
-workQueryIPs ips =
-  workQuery "ipinfo.yaml" ips >>= \res -> liftIO . B.putStr . Y.encode $ (res :: IPInfo)
 
 workQueryIPs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
