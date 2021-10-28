@@ -30,10 +30,6 @@ import Text.ParserCombinators.ReadP
 import Control.Applicative
 import Control.DeepSeq
 import GHC.Generics (Generic)
-import qualified Data.Set as S
-import qualified Data.Map as M
-
-import BH.Common
 
 
 -- TODO: Use 'ip' package instead of this module. [pkg]

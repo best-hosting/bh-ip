@@ -19,6 +19,7 @@ module BH.Common
     , anyP
     , allP
     , isWords
+    , insertAdjust
     )
   where
 
@@ -89,3 +90,8 @@ allP ps x = all ($ x) ps
 
 isWords :: Char -> Bool
 isWords = anyP [isAlpha, A.isHorizontalSpace]
+
+-- | 'insert' /or/ 'adjust', but /not/ 'insertWith'.
+insertAdjust :: Ord a => (b -> b) -> b -> a -> M.Map a b -> M.Map a b
+insertAdjust f def x = M.insertWith (const f) x (f def)
+

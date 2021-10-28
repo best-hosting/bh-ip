@@ -21,6 +21,9 @@ module BH.Main.Types (
   PortInfo,
   PortData(..),
   portAddrsL,
+  ModPort(..),
+  ModMac(..),
+  ModIP(..),
 )
 where
 
@@ -29,10 +32,6 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Maybe
-import Control.Monad.State
-import Control.Monad.Reader
-import Control.Monad.Except
-import Data.List
 import Data.Monoid
 import Data.Time
 import Text.Read
@@ -162,9 +161,6 @@ data IPData = IPData
 ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe (SwPort, PortState)))
 ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
 
-ipStateL :: LensC IPData (Maybe IPState)
-ipStateL = undefined
-
 instance ToJSON IPData where
   toJSON IPData{..} = object
     [ "macPorts" .= ipMacPorts
@@ -214,4 +210,80 @@ instance FromJSON PortData where
 -- type to 'S.Set' to force uniqueness? [current]
 -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
 -- entire program run to single vlan? [current]
+
+class ModPort a where
+  setPortState :: PortState -> SwPort -> a -> a
+  delPort :: S.Set MacAddr -> SwPort -> a -> a
+  addPort :: PortData -> SwPort -> a -> a
+
+instance ModPort SwPortInfo where
+  setPortState s = M.adjust (\d -> d{portState = Last (Just s)})
+  delPort macs port swPortInfo = fromMaybe swPortInfo $ do
+    PortData{..} <- M.lookup port swPortInfo
+    let f | S.size macs /= S.size (M.keysSet portAddrs) =
+              M.adjust (modifyL portAddrsL (\z -> foldr M.delete z macs))
+          | otherwise = M.delete
+    return (f port swPortInfo)
+  addPort pd p = M.insert p pd
+
+-- FIXME: Or i may write instance for 'M.Map MacAddr (Maybe (SwPort,
+-- PortState)) instead, because i send selection (S.Set MacAddr) in any case..
+-- That's depends on does 'MacAddr -- Nothing' has sense or not. And it seems
+-- it does.
+instance ModPort (Maybe (SwPort, PortState)) where
+  setPortState s _ mx = maybe mx (\(p, _) -> Just (p, s)) mx
+  delPort _ _ _ = Nothing
+  addPort PortData{..} port _ = do
+    s <- getLast portState
+    return (port, s)
+
+class ModMac a where
+  delMac :: (S.Set IP, Maybe (SwPort, PortState)) -> MacAddr -> a -> a
+  addMac :: MacData -> MacAddr -> a -> a
+
+-- For 'PortData'.
+instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
+  addMac d mac = M.insert mac (macIPs d)
+  delMac (ips, _) mac portAddrs = fromMaybe portAddrs $ do
+    m <- M.lookup mac portAddrs
+    let f | ips /= M.keysSet m = M.adjust (\x -> foldr M.delete x ips)
+          | otherwise = M.delete
+    return (f mac portAddrs)
+
+-- For 'IPData'.
+instance ModMac (M.Map MacAddr (Maybe (SwPort, PortState))) where
+  addMac d mac = M.insert mac (getLast . macSwPort $ d)
+  delMac _ = M.delete
+
+instance ModMac MacInfo where
+  addMac = flip M.insert
+  delMac (ips, mp) mac macInfo = fromMaybe macInfo $ do
+    MacData{..} <- M.lookup mac macInfo
+    let g = if isJust mp then setL macSwPortL Nothing else id
+        f | ips == M.keysSet macIPs && isJust mp = M.delete
+          | otherwise = M.adjust (\z -> foldr (\ip -> modifyL macIPsL (M.delete ip)) (g z) ips)
+    return (f mac macInfo)
+
+class ModIP a where
+  setIPState :: IPState -> IP -> a -> a
+  delIP :: S.Set MacAddr -> IP -> a -> a
+  addIP :: IPData -> IP -> a -> a
+
+instance ModIP IPInfo where
+  setIPState s = M.adjust (\d -> d{ipState = Last (Just s)})
+  delIP macs ip ipInfo = fromMaybe ipInfo $ do
+    IPData{..} <- M.lookup ip ipInfo
+    let f | macs /= M.keysSet ipMacPorts =
+              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
+              M.adjust (modifyL ipMacPortsL (\x -> foldr M.delete x macs))
+          | otherwise = M.delete
+    return (f ip ipInfo)
+  addIP d ip = M.insert ip d
+
+instance ModIP (M.Map IP IPState) where
+  setIPState s = M.adjust (const s)
+  delIP _ = M.delete
+  addIP d ip = case getLast (ipState d) of
+    Just s  -> M.insert ip s
+    Nothing -> id
 
