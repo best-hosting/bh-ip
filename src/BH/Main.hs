@@ -10,9 +10,9 @@
 module BH.Main (
   module BH.Main.Types,
   readSwInfo,
-  searchPorts2,
-  searchMacs2,
-  searchIPs2,
+  searchPorts,
+  searchMacs,
+  searchIPs,
 )
 where
 
@@ -79,9 +79,6 @@ addPortMac port (portState, macs) z@(_, macInfo, swPortInfo) =
   remMacs =
     let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
     in  oldMacs `S.difference` macs
-
-mergePorts :: M.Map Port (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-mergePorts = flip (M.foldrWithKey addPortMac)
 
 modMac' :: (forall a. ModMac a
               => MacAddr
@@ -188,9 +185,6 @@ addIPMac ip macs z@(ipInfo, macInfo, _) =
     let oldMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
     in  oldMacs `S.difference` macs
 
-mergeIP2 :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-mergeIP2 xs z@(ipInfo, _, _) = M.foldrWithKey addIPMac z xs
-
 -- FIXME: Split removal of missed IPs into separate function. This should be
 -- done by default. [current]
 mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
@@ -217,13 +211,13 @@ readSwInfo file = toSwInfo <$> readYaml file
 
 -- | This is not really "search", but just quering info about ports. It names
 -- this way just to make show its relevant to 'searchX' family of functions.
-searchPorts2 ::
+searchPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   [Port] -> m ()
-searchPorts2 swPorts = do
+searchPorts swPorts = do
   Config{..} <- ask
-  f <- mergePorts <$> runReaderT (runOn onPorts swNames go) swInfo
-  modify f
+  xs <- runReaderT (runOn onPorts swNames go) swInfo
+  modify (flip (M.foldrWithKey addPortMac) xs)
  where
   -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
   -- need to change it everywhere, includeing findX funcs.. [refactor]
@@ -235,7 +229,7 @@ searchPorts2 swPorts = do
   go = do
     portName <- asks (swName . switchData)
     ps <- asks telnetIn
-    res <- M.mapKeys (\p -> Port{portSpec = p, ..}) <$> findPortInfo2 ps
+    res <- M.mapKeys (\p -> Port{portSpec = p, ..}) <$> findPortInfo ps
     putResult res
     sendExit
 
@@ -245,14 +239,14 @@ searchPorts2 swPorts = do
 -- full result, including both port and IP. And if some part is missing, i
 -- should query it as well. [current]
 -- | Search mac on all switches.
-searchMacs2 ::
+searchMacs ::
   (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   [MacAddr] ->
   m ()
-searchMacs2 macs = do
+searchMacs macs = do
   Config{..} <- ask
-  f <- mergeMacs <$> runReaderT (runTill maybeMacs go) swInfo
-  modify f
+  xs <- runReaderT (runTill maybeMacs go) swInfo
+  modify (flip (M.foldrWithKey addMacPort) xs)
  where
   -- FIXME: Hardcoded vlan! [current]
   maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]
@@ -264,27 +258,13 @@ searchMacs2 macs = do
   go = do
     portName <- asks (swName . switchData)
     ms  <- asks telnetIn
-    M.map (\p -> (Port{portSpec = p, ..}, Up)) <$> (findMacInfo2 ms) >>= putResult
+    M.map (\p -> (Port{portSpec = p, ..}, Up)) <$> (findMacInfo ms) >>= putResult
     sendExit
 
--- | Call "nmap" on specified host for building 'MacIpMap' and 'IpMacMap'.
-nmapCache2 :: (MonadIO m, MonadError String m) => T.Text -> m (M.Map IP (S.Set MacAddr))
-nmapCache2 host = Sh.shelly (Sh.silently go) >>= liftEither
- where
-  go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
-  go = do
-    liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
-    xml <- do
-      --Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml 213.108.248.0/21")
-      Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
-    z <- liftIO . evaluate . force $ parseNmapXml2 xml
-    liftIO $ print z
-    --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
-    --void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
-    return z
-
-nmapCache3 :: (MonadIO m, MonadError String m) => [IP] -> T.Text -> m (M.Map IP (S.Set MacAddr))
-nmapCache3 ips0 host = Sh.shelly (Sh.silently go) >>= liftEither
+-- FIXME: If i'll switch to ip package i may call this with 'Either IP
+-- IPRange' or smth. But for now i may just use empty list..
+findIPInfo :: (MonadIO m, MonadError String m) => [IP] -> T.Text -> m (M.Map IP (S.Set MacAddr))
+findIPInfo ips0 host = Sh.shelly (Sh.silently go) >>= liftEither
  where
   go :: Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
   go = do
@@ -294,20 +274,19 @@ nmapCache3 ips0 host = Sh.shelly (Sh.silently go) >>= liftEither
     xml <- do
       Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml" ++ ips)
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
-    z <- liftIO . evaluate . force $ parseNmapXml2 xml
+    z <- liftIO . evaluate . force $ parseNmapXml xml
     liftIO $ print z
-    --z2 <- liftIO . evaluate . force $ parseNmapXml2 xml
     --void $ Sh.run "ssh" (host : T.words "rm ./nmap_arp_cache.xml")
     return z
 
-searchIPs2 ::
+searchIPs ::
   (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   [IP] ->
   m ()
-searchIPs2 ips = do
+searchIPs ips = do
   Config{..} <- ask
-  f <- mergeIP2 <$> nmapCache3 ips nmapHost
-  modify f
+  xs <- findIPInfo ips nmapHost
+  modify (flip (M.foldrWithKey addIPMac) xs)
 
 -- FIXME: Can i generalize following 'readCache' and 'updateArpCache'
 -- functions to just read _any_ yaml cache and update it upon some conditions?
@@ -325,7 +304,7 @@ queryLinuxArp2 = do
   t <- liftIO getCurrentTime
   if diffUTCTime t cacheTime > updateInterval
     then do
-      mergeIP <$> nmapCache2 nmapHost <*> get >>= put
+      mergeIP <$> findIPInfo [] nmapHost <*> get >>= put
       liftIO (writeFile timeFile (show t))
     else return ()
 

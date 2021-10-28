@@ -7,7 +7,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 module BH.IP.Arp (
-  parseNmapXml2
+  parseNmapXml
 ) where
 
 import Control.Monad.Except
@@ -117,8 +117,8 @@ xmlAddrP at addrP addr = do
     else return Nothing
 
 -- | Parse mac and IP addresses from nmap xml 'host' element.
-xmlHostAddressP2 :: MonadError String m => Element -> m (M.Map IP (S.Set MacAddr))
-xmlHostAddressP2 host = do
+xmlHostAddressP :: MonadError String m => Element -> m (M.Map IP (S.Set MacAddr))
+xmlHostAddressP host = do
   let addrs = findChildren (blank_name{qName = "address"}) host
   macs <- S.fromList . catMaybes <$> mapM (xmlAddrP "mac" macP) addrs
   ips  <- catMaybes <$> mapM (xmlAddrP "ipv4" ipP) addrs
@@ -139,8 +139,8 @@ xmlHostStatusIs host rs =
           return (reason == rs)
         _ -> throwError $ "Several 'status' xml elements found in host: '" <> show host <> "'"
 
-parseNmapXml2 :: MonadError String m => T.Text -> m (M.Map IP (S.Set MacAddr))
-parseNmapXml2 t =
+parseNmapXml :: MonadError String m => T.Text -> m (M.Map IP (S.Set MacAddr))
+parseNmapXml t =
   let xml = blank_element{elContent = parseXML t}
       hosts =
         findChildren (blank_name{qName = "nmaprun"}) xml
@@ -151,7 +151,7 @@ parseNmapXml2 t =
   go z host = do
     b <- host `xmlHostStatusIs` "arp-response"
     if b
-      then M.unionWith (<>) z <$> xmlHostAddressP2 host
+      then M.unionWith (<>) z <$> xmlHostAddressP host
       else return z
 
 -- Read and initialize mac/IP cache.

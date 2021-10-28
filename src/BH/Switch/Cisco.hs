@@ -9,10 +9,10 @@ module BH.Switch.Cisco (
   macTableP,
   switchConfigP,
   portStateP,
-  findPortMacs2,
+  findPortMacs,
   findPortState,
-  findPortInfo2,
-  findMacInfo2,
+  findPortInfo,
+  findMacInfo,
 ) where
 
 import Control.Applicative
@@ -117,9 +117,8 @@ portStateP PortNum{..} = do
     | otherwise = fail $ "Unrecognized port state: '" <> show t <> "'"
 
 -- | Find all mac addresses visible on port.
--- FIXME: Parse directly to 'M.Map MacAddr (M.Map IP IPState)' .
-findPortMacs2 :: PortNum -> TelnetRunM TelnetParserResult a b (S.Set MacAddr)
-findPortMacs2 p =
+findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b (S.Set MacAddr)
+findPortMacs p =
   S.fromList . map elMac
     <$> sendAndParse pMacTableL
           macTableP
@@ -131,11 +130,11 @@ findPortState p =
           (portStateP p)
           (cmd $ "show interfaces " <> showCiscoPort p)
 
-findPortInfo2 :: [PortNum] -> TelnetRunM TelnetParserResult a b (M.Map PortNum (PortState, S.Set MacAddr))
-findPortInfo2 = foldr (\p mz -> M.insert p <$> go p <*> mz) (pure mempty)
+findPortInfo :: [PortNum] -> TelnetRunM TelnetParserResult a b (M.Map PortNum (PortState, S.Set MacAddr))
+findPortInfo = foldr (\p mz -> M.insert p <$> go p <*> mz) (pure mempty)
  where
   --go :: PortNum -> TelnetRunM TelnetParserResult a b (PortState, S.Set MacAddr)
-  go p = (,) <$> findPortState p <*> findPortMacs2 p
+  go p = (,) <$> findPortState p <*> findPortMacs p
 
 -- FIXME: The same mac may be used in different vlans. Should i handle this
 -- correctly? That means, i should have maps indexed by (MacAddr, Vlan)
@@ -146,8 +145,8 @@ findPortInfo2 = foldr (\p mz -> M.insert p <$> go p <*> mz) (pure mempty)
 -- And on single switch each mac may be only on _single_ port. Thus, i should
 -- return 'PortNum' here, not 'PortInfo'.
 
-findMacData2 :: MacAddr -> TelnetRunM TelnetParserResult a b (Maybe PortNum)
-findMacData2 mac = do
+findMacPort :: MacAddr -> TelnetRunM TelnetParserResult a b (Maybe PortNum)
+findMacPort mac = do
   SwData{..} <- asks switchData
   let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
   mt <- notTrunks
@@ -159,6 +158,6 @@ findMacData2 mac = do
     [x]   -> return . Just $ elPort x
     (_:_) -> error "Several ports for a single mac"
 
-findMacInfo2 :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortNum)
-findMacInfo2 = foldr (\m mz -> maybe id (M.insert m) <$> findMacData2 m <*> mz) (pure mempty)
+findMacInfo :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortNum)
+findMacInfo = foldr (\m mz -> maybe id (M.insert m) <$> findMacPort m <*> mz) (pure mempty)
 

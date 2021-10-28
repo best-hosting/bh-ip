@@ -207,7 +207,7 @@ workQueryPorts2 ts = do
         let m = M.lookup sn swInfo
          in (swDefaultPortSpeed <$> m, swDefaultPortSlot <$> m)
   swports <- mapM (liftEither . A.parseOnly (swPortP' getSwDefaults)) ts
-  readAll >>= execStateT (searchPorts2 swports) >>= writeAll
+  readAll >>= execStateT (searchPorts swports) >>= writeAll
   -- TODO: Use 'Config' parameter to store swport db filename.
 
 -- TODO: Query only cache, if requested. On the other hand, i probably may not
@@ -218,14 +218,14 @@ workQueryMacs2 ::
   [MacAddr] ->
   m ()
 workQueryMacs2 macs = do
-  readAll >>= execStateT (searchMacs2 macs) >>= writeAll
+  readAll >>= execStateT (searchMacs macs) >>= writeAll
 
 workQueryIPs2 ::
   (MonadReader Config m, MonadError String m, MonadIO m) =>
   [IP] ->
   m ()
 workQueryIPs2 ips = do
-  readAll >>= execStateT (searchIPs2 ips) >>= writeAll
+  readAll >>= execStateT (searchIPs ips) >>= writeAll
 
 main :: IO ()
 main = do
