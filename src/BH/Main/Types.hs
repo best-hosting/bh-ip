@@ -115,15 +115,6 @@ macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 macSwPortL :: LensC MacData (Maybe (SwPort, PortState))
 macSwPortL g z@MacData{macSwPort = x} = (\x' -> z{macSwPort = (Last x')}) <$> g (getLast x)
 
-instance Semigroup MacData where
-  x <> y = MacData
-            { macIPs    = macIPs y    <> macIPs x
-            , macSwPort = macSwPort x <> macSwPort y
-            }
-
-instance Monoid MacData where
-  mempty = MacData{macIPs = M.empty, macSwPort = Last Nothing}
-
 instance ToJSON MacData where
   toJSON MacData{..} =
     if macSwPort == Last Nothing
@@ -208,16 +199,6 @@ ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
 ipStateL :: LensC IPData (Maybe IPState)
 ipStateL = undefined
 
-instance Semigroup IPData where
-  x <> y = IPData
-            -- Map's 'Monoid' instance uses left-biased 'union'.
-            { ipMacPorts = ipMacPorts y <> ipMacPorts x
-            , ipState = ipState y
-            }
-
-instance Monoid IPData where
-  mempty = IPData {ipMacPorts = M.empty, ipState = Last Nothing}
-
 instance ToJSON IPData where
   toJSON IPData{..} = object
     [ "macPorts" .= ipMacPorts
@@ -262,15 +243,6 @@ instance FromJSON PortData where
     PortData
       <$> v .: "addrs"
       <*> v .: "state"
-
-instance Semigroup PortData where
-    x <> y = PortData
-              { portAddrs = M.unionWith (<>) (portAddrs x) (portAddrs y)
-              , portState = portState x <> portState y
-              }
-
-instance Monoid PortData where
-  mempty = PortData {portAddrs = M.empty, portState = Last Nothing}
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',

@@ -9,16 +9,9 @@ module BH.Switch.Cisco (
   macTableP,
   switchConfigP,
   portStateP,
-  findPortMacs,
   findPortMacs2,
   findPortState,
-  findPortData,
-  findPortInfo,
   findPortInfo2,
-  findMacPort,
-  findMacsPort,
-  findMacData,
-  findMacInfo,
   findMacInfo2,
 ) where
 
@@ -125,14 +118,6 @@ portStateP PortNum{..} = do
 
 -- | Find all mac addresses visible on port.
 -- FIXME: Parse directly to 'M.Map MacAddr (M.Map IP IPState)' .
-findPortMacs :: PortNum -> TelnetRunM TelnetParserResult a b MacInfo
-findPortMacs p = do
-  SwData{..} <- asks switchData
-  foldMap (toMacInfo swName)
-    <$> sendAndParse pMacTableL
-          macTableP
-          (cmd $ "show mac address-table interface " <> showCiscoPortShort p)
-
 findPortMacs2 :: PortNum -> TelnetRunM TelnetParserResult a b (S.Set MacAddr)
 findPortMacs2 p =
   S.fromList . map elMac
@@ -145,16 +130,6 @@ findPortState p =
   sendAndParse pResPortStateL
           (portStateP p)
           (cmd $ "show interfaces " <> showCiscoPort p)
-
--- | Find all mac addresses visible on port and return 'PortData'.
-findPortData :: PortNum -> TelnetRunM TelnetParserResult a b PortData
-findPortData p = do
-  portAddrs <- M.map macIPs <$> findPortMacs p
-  portState <- Last . Just <$> findPortState p
-  return PortData{..}
-
-findPortInfo :: [PortNum] -> TelnetRunM TelnetParserResult a b PortInfo
-findPortInfo = foldr (\p mz -> M.insert p <$> findPortData p <*> mz) (pure mempty)
 
 findPortInfo2 :: [PortNum] -> TelnetRunM TelnetParserResult a b (M.Map PortNum (PortState, S.Set MacAddr))
 findPortInfo2 = foldr (\p mz -> M.insert p <$> go p <*> mz) (pure mempty)
@@ -170,35 +145,6 @@ findPortInfo2 = foldr (\p mz -> M.insert p <$> go p <*> mz) (pure mempty)
 -- FIXME: During single run this function may be run only on _single_ switch.
 -- And on single switch each mac may be only on _single_ port. Thus, i should
 -- return 'PortNum' here, not 'PortInfo'.
-findMacPort :: MacAddr -> TelnetRunM TelnetParserResult a b PortInfo
-findMacPort mac = do
-  SwData{..} <- asks switchData
-  let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
-  mt <- notTrunks
-        <$> sendAndParse pMacTableL
-            macTableP
-            (cmd $ "show mac address-table address " <> showMacAddr mac)
-  case mt of
-    []    -> return mempty
-    (_:_) ->
-      let upPort portAddrs = PortData{portState = Last (Just Up), ..}
-      in  foldr
-            (\p mz -> M.insertWith (<>) p <$> (upPort . M.map macIPs <$> findPortMacs p) <*> mz)
-            (pure mempty)
-            (map elPort mt)
-
-findMacData :: MacAddr -> TelnetRunM TelnetParserResult a b (Maybe MacData)
-findMacData mac = do
-  SwData{..} <- asks switchData
-  let notTrunks = filter ((`notElem` swTrunkPorts) . elPort)
-  mt <- notTrunks
-        <$> sendAndParse pMacTableL
-            macTableP
-            (cmd $ "show mac address-table address " <> showMacAddr mac)
-  case mt of
-    []    -> return Nothing
-    [x]   -> return . Just $ toMacData swName x
-    (_:_) -> error "Several ports for a single mac"
 
 findMacData2 :: MacAddr -> TelnetRunM TelnetParserResult a b (Maybe PortNum)
 findMacData2 mac = do
@@ -212,12 +158,6 @@ findMacData2 mac = do
     []    -> return Nothing
     [x]   -> return . Just $ elPort x
     (_:_) -> error "Several ports for a single mac"
-
-findMacsPort :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortInfo)
-findMacsPort = foldr (\m mz -> M.insert m <$> findMacPort m <*> mz) (pure mempty)
-
-findMacInfo :: [MacAddr] -> TelnetRunM TelnetParserResult a b MacInfo
-findMacInfo = foldr (\m mz -> maybe id (M.insert m) <$> findMacData m <*> mz) (pure mempty)
 
 findMacInfo2 :: [MacAddr] -> TelnetRunM TelnetParserResult a b (M.Map MacAddr PortNum)
 findMacInfo2 = foldr (\m mz -> maybe id (M.insert m) <$> findMacData2 m <*> mz) (pure mempty)
