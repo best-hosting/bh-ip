@@ -10,8 +10,6 @@
 module BH.Main.Types (
   Config(..),
   MacInfo,
-  toMacInfo,
-  toMacData,
   MacData(..),
   macIPsL,
   macSwPortL,
@@ -44,13 +42,8 @@ import BH.IP
 import BH.Switch
 
 
-type MacIpMap = M.Map MacAddr (S.Set IP)
-type IpMacMap = M.Map IP MacAddr
-
 data Config = Config
-                { macIpMap :: MacIpMap
-                , ipMacMap :: IpMacMap
-                , swInfo :: SwInfo
+                { swInfo :: SwInfo
                 , runVlan :: Vlan
                 , cacheTime :: UTCTime
                 , updateInterval :: NominalDiffTime
@@ -66,15 +59,6 @@ type VlanInfo a = M.Map Vlan a
                     , vlanAddrs  :: S.Set a
                     }
   deriving(Eq, Show)
-
-instance Ord a => Semigroup (VlanData a) where
-  x <> y = VlanData
-            { vlanSwPort = vlanSwPort y
-            , vlanAddrs  =
-                if vlanSwPort x == vlanSwPort y
-                  then vlanAddrs x <> vlanAddrs y
-                  else                vlanAddrs y
-            }
 
 instance ToJSON a => ToJSON (VlanData a) where
   toJSON VlanData{..} =
@@ -127,16 +111,6 @@ instance FromJSON MacData where
       <$> v .:  "ips"
       <*> (Last <$> v .:? "port")
 
-toMacData :: SwName -> MacTableEl -> MacData
-toMacData portSw MacTableEl{..} =
-  MacData
-    { macIPs = M.empty
-    , macSwPort = Last (Just (SwPort{portSpec = elPort, ..}, Up))
-    }
-
-toMacInfo :: SwName -> MacTableEl -> MacInfo
-toMacInfo n x@(MacTableEl{..}) = M.singleton elMac (toMacData n x)
-
 -- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
 -- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
 -- because when nmap scans network, vlan is already known. Moreover, 'vlan'
@@ -158,17 +132,9 @@ data PortData = PortData
   { portState ..
   , portAddrs :: M.Map MacAddr (VlanInfo IP)
   }-}
--- FIXME: If i will store all ips and all macs in 'MacInfo' and 'IPInfo'
--- instead of separate 'MacIpMap' and 'IpMacMap', then conversion 'MacInfo' ->
--- 'SwPortInfo' and 'IPInfo' -> 'SwPortInfo' will be lossy (for some ports and
--- IPs i may not know ports (yet)). Thus, db verification should be done in
--- reverse direction only. [verify]
 -- FIXME: In fact, ports should also be grouped by vlan. Because the same
 -- mac/IP may have different ports in different vlans. Or the same. That's
 -- completely unrelated and it should be the same in 'xInfo' structure.
-
-{-macIPsL :: LensC MacData (S.Set IP)
-macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x-}
 
 -- TODO: Subnets and vlans for IPs.
 type IPInfo = M.Map IP IPData
@@ -215,11 +181,6 @@ type SwPortInfo = M.Map SwPort PortData
 type PortInfo = M.Map PortNum PortData
 
 -- TODO: Read port mode (access/trunk) to 'PortData'.
--- FIXME: Do not use 'MacInfo' inside 'PortData. Just 'MacAddr' will be
--- enough. Well, not really. Now in all DBs i may find all info: in 'MacInfo'
--- i may find both IP and 'SwPort', in 'IPInfo' i also may find both 'MacAddr'
--- and 'SwPort'. And this should remain. But i just need to remove duplication
--- of 'ports' from 'PortData'.
 data PortData = PortData
   { portAddrs :: M.Map MacAddr (M.Map IP IPState)
   -- FIXME: Make 'portState' into plain 'PortState', really.
