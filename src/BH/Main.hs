@@ -238,6 +238,10 @@ searchPorts swPorts = do
     putResult res
     sendExit
 
+-- TODO: Implement second update strategy: just save raw data (the one
+-- 'mergeX' funcs accept), apply merges there and rebuild entire db. Then
+-- compare the result. They should match..
+--
 -- TODO: I may use hash to determine changed db file. And then treat /that/
 -- file as source and generate others from it.
 -- FIXME: I should obtain full info. Here or not, but query over mac implies
