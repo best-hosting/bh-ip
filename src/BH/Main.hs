@@ -41,24 +41,22 @@ import BH.Telnet
 import BH.IP.Arp
 
 modPort' :: (forall a. ModPort a
-              => Port -- ^ FIXME: This should be selector. I.e. (Port, PortState) .
+              => Port
               -> a
               -> a) -- ^ modifies
-      -> Port -- ^ selects. FIXME: This should be complete reference, i.e. (Port, PortState)
-      -> PortState -- ^ selects
+      -> Port -- ^ selects.
       -> S.Set MacAddr -- ^ selects references
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort' k port st macs z@(ipInfo, macInfo, swPortInfo) =
-  let macPort = Just (port, st)
-      -- FIXME: Why i can't just add /any/ 'MacData' and then apply modify
+modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
+  let -- FIXME: Why i can't just add /any/ 'MacData' and then apply modify
       -- function on top of default value? Then i don't need 'PortState' in
       -- 'modPort' args at all [current]
-      macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) MacData{macIPs = M.empty, ..}) macInfo macs
+      macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) MacData{macIPs = M.empty, macPort = Nothing}) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       ipInfo' = M.foldrWithKey
         (\mac -> flip $ M.foldrWithKey
           (\ip _ z ->
-            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) macPort mac)) ip z
+            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) Nothing mac)) ip z
           )
         )
         ipInfo xs
@@ -72,12 +70,12 @@ modPort :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modPort k port z@(_, _, swPortInfo) =
   let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
-  in  modPort' k port Up allMacs z
+  in  modPort' k port allMacs z
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (portState, macs) z@(_, macInfo, swPortInfo) =
   let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
-  in  modPort' (addPort PortData{..}) port portState macs . modPort' (delPort remMacs) port portState remMacs $ z
+  in  modPort' (addPort PortData{..}) port macs . modPort' (delPort remMacs) port remMacs $ z
  where
   remMacs =
     let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)

@@ -93,5 +93,7 @@ isWords = anyP [isAlpha, A.isHorizontalSpace]
 
 -- | 'insert' /or/ 'adjust', but /not/ 'insertWith'.
 insertAdjust :: Ord a => (b -> b) -> b -> a -> M.Map a b -> M.Map a b
+-- FIXME: Try to build db with intentionally wrong 'insertAdjust', which
+-- inserts default /without/ modifying it by function 'f'.
 insertAdjust f def x = M.insertWith (const f) x (f def)
 
