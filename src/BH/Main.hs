@@ -50,6 +50,9 @@ modPort' :: (forall a. ModPort a
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modPort' k port st macs z@(ipInfo, macInfo, swPortInfo) =
   let macPort = Just (port, st)
+      -- FIXME: Why i can't just add /any/ 'MacData' and then apply modify
+      -- function on top of default value? Then i don't need 'PortState' in
+      -- 'modPort' args at all [current]
       macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) MacData{macIPs = M.empty, ..}) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       ipInfo' = M.foldrWithKey
