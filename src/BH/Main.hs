@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 module BH.Main (
   module BH.Main.Types,
@@ -51,6 +52,10 @@ modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
   let -- FIXME: Why i can't just add /any/ 'MacData' and then apply modify
       -- function on top of default value? Then i don't need 'PortState' in
       -- 'modPort' args at all [current]
+      -- FIXME: Revert 'Monoid' instance again. After all, it's better to have
+      -- 'mempty' defined somewhere, than using some raw values here. Also,
+      -- with lawfull 'Monoid' instance i can just user 'M.insertWith' instead
+      -- of 'insertAdjust', because (mempty <> x == x <> mempty == x).
       macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) MacData{macIPs = M.empty, macPort = Nothing}) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       ipInfo' = M.foldrWithKey
@@ -86,7 +91,7 @@ modMac' :: (forall a. ModMac a
               -> a
               -> a) -- ^ modifies
       -> MacAddr -- ^ selects
-      -> (S.Set IP, Maybe (Port, PortState)) -- ^ selects references
+      -> (S.Set IP, Maybe Port) -- ^ selects references
       -- FIXME: If current operation if addition and 'IPData' will contain IP
       -- in non-default (not 'Answering') state result the db become
       -- inconsistent, because here, when adding 'IP' to references i'll
@@ -98,7 +103,7 @@ modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
   let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macPort = Nothing})
                       $ M.lookup mac macInfo
       ips = if isJust mp then M.keysSet macIPs `S.union` ips0 else ips0
-      ipMacPorts = M.singleton mac mp
+      ipMacPorts = M.singleton mac ((, Up) <$> mp)
       -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not
       -- add these new 'IP's to 'MacData': this should be done in 'k'
       -- callback, because i just call 'k' for entire 'macInfo'.
@@ -109,12 +114,12 @@ modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
                 in  insertAdjust (modifyL ipMacPortsL (k mac)) IPData{..} ip)
         ipInfo
         ips
-      portState = fromMaybe Up (snd <$> mp)
+      portState = Up
       portAddrs = M.singleton mac macIPs
       swPortInfo' =
         maybe id
             (insertAdjust (modifyL portAddrsL (k mac)) PortData{..})
-            (fst <$> mp)
+            mp
           $ swPortInfo
   in  ( ipInfo'
       , k mac macInfo
@@ -130,21 +135,24 @@ modMac :: (forall a. ModMac a
 modMac k mac z@(_, macInfo, _) =
   -- FIXME: Default value hardcoded.
   let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macPort = Nothing}) (M.lookup mac macInfo)
-  in  modMac' k mac (M.keysSet macIPs, macPort) z
+  in  modMac' k mac (M.keysSet macIPs, fst <$> macPort) z
 
 addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-addMacPort mac p z@(_, macInfo, _) =
+addMacPort mac p@(port, st) z@(_, macInfo, _) =
   let MacData{..} = fromMaybe (MacData{macIPs = M.empty, macPort = Just p}) $ M.lookup mac macInfo
       remPort = do
         oldPort <- fst <$> macPort
-        if fst p /= oldPort
-          then macPort
+        if port /= oldPort
+          then Just oldPort
           else Nothing
-  in  modMac' (addMac MacData{macPort = Just p, ..}) mac (S.empty, Just p) . modMac' (delMac (S.empty, remPort)) mac (S.empty, remPort) $ z
+  in  modMac' (addMac MacData{macPort = Just p, ..}) mac (S.empty, Just (fst p)) . modMac' (delMac (S.empty, remPort)) mac (S.empty, remPort) $ z
 
 mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
 
+-- FIXME: I may define a typeclass, which abstrects over functions 'modPort',
+-- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
+-- 'PortInfo'.
 -- FIXME: I should take 'IPState' as argument.
 modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
       -> IP -- ^ selects
@@ -258,7 +266,6 @@ searchMacs macs = do
   xs <- runReaderT (runTill maybeMacs go) swInfo
   modify (flip (M.foldrWithKey addMacPort) xs)
  where
-  -- FIXME: Hardcoded vlan! [current]
   maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys res
                   in  case filter (`notElem` found) macs of
@@ -328,7 +335,4 @@ queryLinuxArp2 = do
       liftIO (writeFile timeFile (show t))
     else return ()-}
 
--- FIXME: Make a newtype wrapper around (IPInfo, MacIpMap, PortInfo) ?
--- And then add function for obtaining 'InfoKey' indexed map from a generic db
--- type [current]
 

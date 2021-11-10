@@ -199,12 +199,12 @@ instance FromJSON PortData where
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
 -- whatever. Every maps should be inside vlan. And vlan should be removed
--- early at start. [current]
+-- early at start.
 
 -- FIXME: In fact, in all queryX functions i need unique items. May be change
 -- type to 'S.Set' to force uniqueness? [current]
 -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
--- entire program run to single vlan? [current]
+-- entire program run to single vlan?
 
 class ModPort a where
   setPortState :: PortState -> Port -> a -> a
@@ -231,7 +231,7 @@ instance ModPort (Maybe (Port, PortState)) where
   addPort PortData{..} port _ = Just (port, portState)
 
 class ModMac a where
-  delMac :: (S.Set IP, Maybe (Port, PortState)) -> MacAddr -> a -> a
+  delMac :: (S.Set IP, Maybe Port) -> MacAddr -> a -> a
   addMac :: MacData -> MacAddr -> a -> a
 
 -- For 'PortData'.
