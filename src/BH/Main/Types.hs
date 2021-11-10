@@ -34,6 +34,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.Time
 import Text.Read
+import Data.Coerce
 
 import BH.Common
 import BH.IP
@@ -86,7 +87,7 @@ data MacData = MacData
   { macIPs    :: M.Map IP IPState
   -- FIXME: Do i really need Semigroup for MacData?
 -- FIXME: Do not use pairs, there're lists in yaml. Use 'PortRef' instead.
-  , macPort :: Maybe (Port, PortState)
+  , macPort :: First (Port, PortState)
 --, macVendor :: T.Text
   }
   deriving (Show)
@@ -95,11 +96,23 @@ macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
 macPortL :: LensC MacData (Maybe (Port, PortState))
-macPortL g z@MacData{macPort = x} = (\x' -> z{macPort = x'}) <$> g x
+macPortL g z@MacData{macPort = First x} = (\x' -> z{macPort = First x'}) <$> g x
+
+instance Semigroup MacData where
+  x <> y = MacData
+            { macIPs = macIPs x <> macIPs y
+            , macPort = macPort x <> macPort y
+            }
+
+instance Monoid MacData where
+  mempty = MacData
+            { macIPs = M.empty
+            , macPort = First Nothing
+            }
 
 instance ToJSON MacData where
   toJSON MacData{..} =
-    if macPort == Nothing
+    if macPort == First Nothing
       then object ["ips" .= macIPs]
       else object ["ips" .= macIPs, "port" .= macPort]
 
@@ -107,7 +120,7 @@ instance FromJSON MacData where
   parseJSON = withObject "MacData" $ \v ->
     MacData
       <$> v .:  "ips"
-      <*> (v .:? "port")
+      <*> (First <$> v .:? "port")
 
 -- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
 -- In fact, i may build 'MacInfo' with vlan and ips directly from nmap xml,
@@ -245,7 +258,7 @@ instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
 
 -- For 'IPData'.
 instance ModMac (M.Map MacAddr (Maybe (Port, PortState))) where
-  addMac d mac = M.insert mac (macPort d)
+  addMac d mac = coerce $ M.insert mac (macPort d)
   delMac _ = M.delete
 
 instance ModMac MacInfo where
