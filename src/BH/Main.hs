@@ -60,6 +60,15 @@ modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
       -- of 'insertAdjust', because (mempty <> x == x <> mempty == x).
       macInfo' = S.foldr (insertAdjust3 (modifyL macPortL (k port))) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
+      -- If element (e.g. ip here) does not exist in 'IPInfo' it should be
+      -- added as 'member' /without/ any regard to what 'portAddrs' contain.
+      -- I.e.  'portAddrs' may incorrectly contain an ip element missed from
+      -- 'IPInfo', and this element may have some 'IPState'. But 'portAddrs'
+      -- should /not/ be considered as trusted source for creating new
+      -- 'IPInfo' element: i should not create new 'IPInfo' element with the
+      -- 'IPState' taken from 'portAddrs', instead i should just use 'mempty'.
+      -- The reason is such state is already broken db, and elements should
+      -- not be created basing on references to them.
       ipInfo' = M.foldrWithKey
         (\mac -> flip $ M.foldrWithKey
           (\ip _ z ->
@@ -105,17 +114,12 @@ modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
   let MacData{..} = fromMaybe mempty $ M.lookup mac macInfo
       ips = if isJust mp then M.keysSet macIPs `S.union` ips0 else ips0
       -- FIXME: 'PortRef' Monoid.. [current]
-      ipMacPorts = M.singleton mac ((, Up) <$> coerce mp)
       -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not
       -- add these new 'IP's to 'MacData': this should be done in 'k'
       -- callback, because i just call 'k' for entire 'macInfo'.
       -- FIXME: Hardcoded default 'IPState' 'Answering'. [current]
       -- FIXME: Hardcoded default 'PortState' 'Up'. [current]
-      ipInfo' = foldr
-        (\ip -> let ipState = fromMaybe Answering (M.lookup ip macIPs)
-                in  insertAdjust (modifyL ipMacPortsL (k mac)) IPData{..} ip)
-        ipInfo
-        ips
+      ipInfo' = foldr (insertAdjust3 (modifyL ipMacPortsL (k mac))) ipInfo ips
       portState = Up
       portAddrs = M.singleton mac macIPs
       swPortInfo' =
@@ -158,6 +162,7 @@ mergeMacs = flip (M.foldrWithKey addMacPort)
 -- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
 -- 'PortInfo'.
 -- FIXME: I should take 'IPState' as argument.
+-- FIXME: Rename 'swPortInfo' to just 'portInfo'.
 modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
       -> IP -- ^ selects
       -> S.Set MacAddr -- ^ selects references
@@ -169,14 +174,11 @@ modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
       -- FIXME: References must be limited to existing references, if element
       -- exist. Or new references should be added for missing elements
       -- /correctly/ [current].
-      newIPs = M.singleton ip Answering
-      macInfo' = S.foldr
-        (insertAdjust (modifyL macIPsL (k ip)) mempty{macIPs = newIPs})
-        macInfo macs
+      macInfo' = S.foldr (insertAdjust3 (modifyL macIPsL (k ip))) macInfo macs
       xs = coerce . M.map (fmap fst . macPort) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       swPortInfo' = M.foldrWithKey
         (\mac mp z -> case mp of
-          Just port -> M.adjust (modifyL portAddrsL (insertAdjust (k ip) newIPs mac)) port z
+          Just port -> M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac)) port z
           Nothing   -> z
         )
         swPortInfo xs
@@ -196,7 +198,7 @@ modIP f ip z@(ipInfo, _, _) =
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
   let ipMacPorts = M.fromSet (\m -> coerce (M.lookup m macInfo) >>= macPort) macs
-      ipState = Answering
+      ipState = pure Answering
   in  modIP' (addIP IPData{..}) ip macs . modIP' (delIP remMacs) ip remMacs $ z
  where
   remMacs =

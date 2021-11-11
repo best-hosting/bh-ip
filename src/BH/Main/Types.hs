@@ -85,8 +85,12 @@ type MacInfo = M.Map MacAddr MacData
   deriving (Show)-}
 
 -- Single mac can't be on several ports.
+-- I need 'First IPState' in 'macIPsL' because 'ipState' in 'IPData' has that
+-- type and, therefore, if i'll have 'IPData' with 'Nothing' in 'ipState', i
+-- won't be able to add it to 'macIPs' (i.e. i won't be able to create a
+-- reference to a valid element of 'IPInfo').
 data MacData = MacData
-  { macIPs    :: M.Map IP IPState
+  { macIPs    :: M.Map IP (First IPState)
   -- FIXME: Do i really need Semigroup for MacData?
 -- FIXME: Do not use pairs, there're lists in yaml. Use 'PortRef' instead.
   , macPort :: First (Port, PortState)
@@ -94,7 +98,7 @@ data MacData = MacData
   }
   deriving (Show)
 
-macIPsL :: LensC MacData (M.Map IP IPState)
+macIPsL :: LensC MacData (M.Map IP (First IPState))
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
 macPortL :: LensC MacData (First (Port, PortState))
@@ -163,9 +167,11 @@ instance FromJSON IPState where
 
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
+-- I need 'First IPState' here to define 'Monoid' instance (without it,
+-- 'mempty' won't be left and right identity).
 data IPData = IPData
   { ipMacPorts :: M.Map MacAddr (First (Port, PortState))
-  , ipState :: IPState
+  , ipState :: First IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
@@ -180,7 +186,7 @@ instance Semigroup IPData where
               }
 
 instance Monoid IPData where
-  mempty = IPData {ipMacPorts = M.empty, ipState = Answering}
+  mempty = IPData {ipMacPorts = M.empty, ipState = First Nothing}
 
 instance ToJSON IPData where
   toJSON IPData{..} = object
@@ -198,7 +204,7 @@ type PortInfo = M.Map Port PortData
 
 -- TODO: Read port mode (access/trunk) to 'PortData'.
 data PortData = PortData
-  { portAddrs :: M.Map MacAddr (M.Map IP IPState)
+  { portAddrs :: M.Map MacAddr (M.Map IP (First IPState))
   , portState :: PortState
   --, portMode :: PortMode
   }
@@ -213,7 +219,7 @@ instance Semigroup PortData where
 instance Monoid PortData where
     mempty = PortData {portAddrs = M.empty, portState = Up}
 
-portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP IPState))
+portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP (First IPState)))
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
 
 instance ToJSON PortData where
@@ -268,7 +274,7 @@ class ModMac a where
   addMac :: MacData -> MacAddr -> a -> a
 
 -- For 'PortData'.
-instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
+instance ModMac (M.Map MacAddr (M.Map IP (First IPState))) where
   addMac d mac = M.insert mac (macIPs d)
   delMac (ips, _) mac portAddrs = fromMaybe portAddrs $ do
     m <- M.lookup mac portAddrs
@@ -296,7 +302,7 @@ class ModIP a where
   addIP :: IPData -> IP -> a -> a
 
 instance ModIP IPInfo where
-  setIPState s = M.adjust (\d -> d{ipState = s})
+  setIPState s = M.adjust (\d -> d{ipState = pure s})
   delIP macs ip ipInfo = fromMaybe ipInfo $ do
     IPData{..} <- M.lookup ip ipInfo
     let f | macs /= M.keysSet ipMacPorts =
@@ -306,8 +312,8 @@ instance ModIP IPInfo where
     return (f ip ipInfo)
   addIP d ip = M.insert ip d
 
-instance ModIP (M.Map IP IPState) where
-  setIPState s = M.adjust (const s)
+instance ModIP (M.Map IP (First IPState)) where
+  setIPState s = M.adjust (const (pure s))
   delIP _ = M.delete
   addIP d ip = M.insert ip (ipState d)
 
