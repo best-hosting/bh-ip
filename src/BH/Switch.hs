@@ -98,7 +98,7 @@ instance FromJSON SwData where
       <*> v .: "defaultPortSlot"
       <*> v .:? "trunkPorts" .!= []
 
--- FIXME: Rename 'portSpec' to 'portNum' ?
+-- FIXME: Rename 'portSpec' to 'portNum' ? And 'portName' to 'portSw'...
 data Port = Port {portName :: SwName, portSpec :: PortNum}
   deriving (Eq, Ord, Show)
 

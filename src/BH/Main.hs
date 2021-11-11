@@ -58,12 +58,12 @@ modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
       -- 'mempty' defined somewhere, than using some raw values here. Also,
       -- with lawfull 'Monoid' instance i can just user 'M.insertWith' instead
       -- of 'insertAdjust', because (mempty <> x == x <> mempty == x).
-      macInfo' = S.foldr (insertAdjust (modifyL macPortL (k port)) mempty) macInfo macs
+      macInfo' = S.foldr (insertAdjust3 (modifyL macPortL (k port))) macInfo macs
       xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       ipInfo' = M.foldrWithKey
         (\mac -> flip $ M.foldrWithKey
           (\ip _ z ->
-            M.adjust (modifyL ipMacPortsL (insertAdjust (k port) Nothing mac)) ip z
+            M.adjust (modifyL ipMacPortsL (insertAdjust3 (k port) mac)) ip z
           )
         )
         ipInfo xs
@@ -104,7 +104,8 @@ modMac' k mac (ips0, mp) z@(ipInfo, macInfo, swPortInfo) =
   -- FIXME: Default value hardcoded.
   let MacData{..} = fromMaybe mempty $ M.lookup mac macInfo
       ips = if isJust mp then M.keysSet macIPs `S.union` ips0 else ips0
-      ipMacPorts = M.singleton mac ((, Up) <$> mp)
+      -- FIXME: 'PortRef' Monoid.. [current]
+      ipMacPorts = M.singleton mac ((, Up) <$> coerce mp)
       -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not
       -- add these new 'IP's to 'MacData': this should be done in 'k'
       -- callback, because i just call 'k' for entire 'macInfo'.
@@ -194,7 +195,7 @@ modIP f ip z@(ipInfo, _, _) =
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
-  let ipMacPorts = M.fromSet (\m -> M.lookup m macInfo >>= coerce . macPort) macs
+  let ipMacPorts = M.fromSet (\m -> coerce (M.lookup m macInfo) >>= macPort) macs
       ipState = Answering
   in  modIP' (addIP IPData{..}) ip macs . modIP' (delIP remMacs) ip remMacs $ z
  where

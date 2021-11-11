@@ -76,11 +76,13 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
 -- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
 
-data PortRef = PortRef
+-- FIXME: Use type PortRef = First (Port, PortState) instead of type. Really,
+-- i don't need separate type. [current]
+{-data PortRef = PortRef
                 { refPort  :: Port
                 , refState :: PortState
                 }
-  deriving (Show)
+  deriving (Show)-}
 
 -- Single mac can't be on several ports.
 data MacData = MacData
@@ -95,8 +97,8 @@ data MacData = MacData
 macIPsL :: LensC MacData (M.Map IP IPState)
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
-macPortL :: LensC MacData (Maybe (Port, PortState))
-macPortL g z@MacData{macPort = First x} = (\x' -> z{macPort = First x'}) <$> g x
+macPortL :: LensC MacData (First (Port, PortState))
+macPortL g z@MacData{macPort = x} = (\x' -> z{macPort = x'}) <$> g x
 
 instance Semigroup MacData where
   x <> y = MacData
@@ -162,14 +164,23 @@ instance FromJSON IPState where
 -- Single IP can have several macs (though, this is broken network) and, thus,
 -- can be on several ports.
 data IPData = IPData
-  { ipMacPorts :: M.Map MacAddr (Maybe (Port, PortState))
+  { ipMacPorts :: M.Map MacAddr (First (Port, PortState))
   , ipState :: IPState
   --, ipSubnet :: T.Text
   }
  deriving (Show)
 
-ipMacPortsL :: LensC IPData (M.Map MacAddr (Maybe (Port, PortState)))
+ipMacPortsL :: LensC IPData (M.Map MacAddr (First (Port, PortState)))
 ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
+
+instance Semigroup IPData where
+    x <> y = IPData
+              { ipMacPorts = ipMacPorts x <> ipMacPorts y
+              , ipState = ipState x
+              }
+
+instance Monoid IPData where
+  mempty = IPData {ipMacPorts = M.empty, ipState = Answering}
 
 instance ToJSON IPData where
   toJSON IPData{..} = object
@@ -192,6 +203,15 @@ data PortData = PortData
   --, portMode :: PortMode
   }
   deriving (Show)
+
+instance Semigroup PortData where
+    x <> y = PortData
+            { portAddrs = portAddrs x <> portAddrs y
+            , portState = portState x
+            }
+
+instance Monoid PortData where
+    mempty = PortData {portAddrs = M.empty, portState = Up}
 
 portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP IPState))
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
@@ -238,10 +258,10 @@ instance ModPort PortInfo where
 -- PortState)) instead, because i send selection (S.Set MacAddr) in any case..
 -- That's depends on does 'MacAddr -- Nothing' has sense or not. And it seems
 -- it does.
-instance ModPort (Maybe (Port, PortState)) where
-  setPortState s _ mx = maybe mx (\(p, _) -> Just (p, s)) mx
-  delPort _ _ _ = Nothing
-  addPort PortData{..} port _ = Just (port, portState)
+instance ModPort (First (Port, PortState)) where
+  setPortState s _ mx = (\(p, _) -> (p, s)) <$> mx
+  delPort _ _ _ = First Nothing
+  addPort PortData{..} port _ = First . Just $ (port, portState)
 
 class ModMac a where
   delMac :: (S.Set IP, Maybe Port) -> MacAddr -> a -> a
@@ -257,15 +277,15 @@ instance ModMac (M.Map MacAddr (M.Map IP IPState)) where
     return (f mac portAddrs)
 
 -- For 'IPData'.
-instance ModMac (M.Map MacAddr (Maybe (Port, PortState))) where
-  addMac d mac = coerce $ M.insert mac (macPort d)
+instance ModMac (M.Map MacAddr (First (Port, PortState))) where
+  addMac d mac = M.insert mac (macPort d)
   delMac _ = M.delete
 
 instance ModMac MacInfo where
   addMac = flip M.insert
   delMac (ips, mp) mac macInfo = fromMaybe macInfo $ do
     MacData{..} <- M.lookup mac macInfo
-    let g = if isJust mp then setL macPortL Nothing else id
+    let g = if isJust mp then setL macPortL mempty else id
         f | ips == M.keysSet macIPs && isJust mp = M.delete
           | otherwise = M.adjust (\z -> foldr (\ip -> modifyL macIPsL (M.delete ip)) (g z) ips)
     return (f mac macInfo)
