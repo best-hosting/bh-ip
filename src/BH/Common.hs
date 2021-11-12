@@ -107,4 +107,4 @@ insertAdjust2 f def x = M.insertWith (const f) x def
 
 -- FIXME: Rename to smth like 'adjust'' ?
 insertAdjust3 :: (Ord a, Monoid b) => (b -> b) -> a -> M.Map a b -> M.Map a b
-insertAdjust3 f x = M.insertWith (\y -> f . (y <>)) x mempty
+insertAdjust3 f x = M.insertWith (\y -> f . (y <>)) x (f mempty)
