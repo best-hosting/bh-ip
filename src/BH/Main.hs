@@ -56,7 +56,7 @@ addPortMac port (st, macs) z@(_, macInfo, swPortInfo) =
 
 addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addMacPort mac port z@(_, macInfo, _) =
-  let d = setL macPortL newMacPorts . fromMaybe mempty $ M.lookup mac macInfo
+  let d = setL macPortsL newMacPorts . fromMaybe mempty $ M.lookup mac macInfo
   in  modMac' (addMac d) mac (S.empty, S.singleton (fst port))
         . modMac' (delMac (S.empty, remPorts)) mac (S.empty, remPorts)
         $ z
@@ -67,14 +67,14 @@ addMacPort mac port z@(_, macInfo, _) =
   remPorts :: S.Set Port
   remPorts =
     let f x y = if x /= y then Just x else Nothing
-    in  M.keysSet $ M.differenceWith f macPort newMacPorts
+    in  M.keysSet $ M.differenceWith f macPorts newMacPorts
 
 mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
-  let ipMacPorts = M.fromSet (\m -> maybe M.empty macPort (M.lookup m macInfo)) macs
+  let ipMacPorts = M.fromSet (\m -> maybe M.empty macPorts (M.lookup m macInfo)) macs
       ipState = pure Answering
   in  modIP' (addIP IPData{..}) ip macs . modIP' (delIP remMacs) ip remMacs $ z
  where

@@ -12,7 +12,7 @@ module BH.Main.Types (
   MacInfo,
   MacData(..),
   macIPsL,
-  macPortL,
+  macPortsL,
   IPInfo,
   IPData(..),
   ipMacPortsL,
@@ -77,8 +77,6 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
       <$> v .:? "port"
       <*> v .:  "addrs"-}
 
--- TODO: Humans works with IPs, not with mac addresses. So, it's more natural
--- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
 
 -- I need 'First IPState' (instead of just plain 'IPState') in 'macIPs'
@@ -88,8 +86,7 @@ type MacInfo = M.Map MacAddr MacData
 -- 'IPInfo').
 data MacData = MacData
   { macIPs    :: M.Map IP (First IPState)
--- FIXME: Rename 'macPort' to 'macPorts'.
-  , macPort :: M.Map Port (First PortState)
+  , macPorts :: M.Map Port (First PortState)
 --, macVendor :: T.Text
   }
   deriving (Show)
@@ -97,29 +94,28 @@ data MacData = MacData
 macIPsL :: LensC MacData (M.Map IP (First IPState))
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
 
-macPortL :: LensC MacData (M.Map Port (First PortState))
-macPortL g z@MacData{macPort = x} = (\x' -> z{macPort = x'}) <$> g x
+macPortsL :: LensC MacData (M.Map Port (First PortState))
+macPortsL g z@MacData{macPorts = x} = (\x' -> z{macPorts = x'}) <$> g x
 
 instance Semigroup MacData where
   x <> y = MacData
             { macIPs = macIPs x <> macIPs y
-            , macPort = macPort x <> macPort y
+            , macPorts = macPorts x <> macPorts y
             }
 
 instance Monoid MacData where
   mempty = MacData
             { macIPs  = M.empty
-            , macPort = M.empty
+            , macPorts = M.empty
             }
 
 instance ToJSON MacData where
-  toJSON MacData{..} = object ["ips" .= macIPs, "port" .= macPort]
+  toJSON MacData{..} = object ["ips" .= macIPs, "port" .= macPorts]
 
--- FIXME: Make both fields optional.
 instance FromJSON MacData where
   parseJSON = withObject "MacData" $ \v ->
     MacData
-      <$> v .:  "ips"
+      <$> (fromMaybe M.empty <$> v .:?  "ips")
       <*> (fromMaybe M.empty <$> v .:? "port")
 
 -- FIXME: Replace 'MacIpMap' and 'IpMacMap' this with 'MacInfo' and 'IPInfo'.
@@ -191,8 +187,8 @@ instance ToJSON IPData where
 instance FromJSON IPData where
   parseJSON = withObject "IPData" $ \v ->
     IPData
-      <$> v .: "macPorts"
-      <*> v .: "state"
+      <$> (fromMaybe M.empty <$> v .:? "macPorts")
+      <*> (First <$> v .:? "state")
 
 type PortInfo = M.Map Port PortData
 
@@ -226,8 +222,8 @@ instance ToJSON PortData where
 instance FromJSON PortData where
   parseJSON = withObject "PortData" $ \v ->
     PortData
-      <$> v .: "addrs"
-      <*> v .: "state"
+      <$> (fromMaybe M.empty <$> v .:? "addrs")
+      <*> (First <$> v .:? "state")
 
 -- TODO: Query Mac using nmap/ip neigh, if not found.[nmap][arp]
 -- FIXME: vlan should be the topmost level. Not inside 'MacInfo', 'IPInfo',
@@ -269,7 +265,7 @@ modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
       -> S.Set MacAddr -- ^ selects references
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
-  let xs = M.map (M.keysSet . macPort) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
+  let xs = M.map (M.keysSet . macPorts) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       swPortInfo' = M.foldrWithKey
         (\mac -> flip $ foldr (M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac))))
         swPortInfo xs
@@ -332,7 +328,7 @@ modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
         (\mac -> flip $ foldr (M.adjust (modifyL ipMacPortsL (insertAdjust3 (k port) mac))))
         ipInfo xs
   in  ( ipInfo'
-      , S.foldr (insertAdjust3 (modifyL macPortL (k port))) macInfo macs
+      , S.foldr (insertAdjust3 (modifyL macPortsL (k port))) macInfo macs
       , k port swPortInfo
       )
 
@@ -354,7 +350,7 @@ instance ModMac (M.Map MacAddr (M.Map IP (First IPState))) where
 
 -- For 'IPData'.
 instance ModMac (M.Map MacAddr (M.Map Port (First PortState))) where
-  addMac d mac = M.insert mac (macPort d)
+  addMac d mac = M.insert mac (macPorts d)
   delMac _ = M.delete
 
 instance ModMac MacInfo where
@@ -363,7 +359,7 @@ instance ModMac MacInfo where
    where
     go :: MacData -> MacData
     go = modifyL macIPsL (\z -> foldr M.delete z ips)
-          . modifyL macPortL (\z -> foldr M.delete z ports)
+          . modifyL macPortsL (\z -> foldr M.delete z ports)
 
 modMac' :: (forall a. ModMac a
               => MacAddr
@@ -389,5 +385,5 @@ modMac :: (forall a. ModMac a
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 modMac k mac z@(_, macInfo, _) =
   let MacData{..} = fromMaybe mempty (M.lookup mac macInfo)
-  in  modMac' k mac (M.keysSet macIPs, M.keysSet macPort) z
+  in  modMac' k mac (M.keysSet macIPs, M.keysSet macPorts) z
 
