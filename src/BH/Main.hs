@@ -44,51 +44,6 @@ import BH.Cache
 import BH.Telnet
 import BH.IP.Arp
 
-modPort' :: (forall a. ModPort a
-              => Port
-              -> a
-              -> a) -- ^ modifies
-      -> Port -- ^ selects.
-      -> S.Set MacAddr -- ^ selects references
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
-  let -- FIXME: Why i can't just add /any/ 'MacData' and then apply modify
-      -- function on top of default value? Then i don't need 'PortState' in
-      -- 'modPort' args at all [current]
-      -- FIXME: Revert 'Monoid' instance again. After all, it's better to have
-      -- 'mempty' defined somewhere, than using some raw values here. Also,
-      -- with lawfull 'Monoid' instance i can just user 'M.insertWith' instead
-      -- of 'insertAdjust', because (mempty <> x == x <> mempty == x).
-      macInfo' = S.foldr (insertAdjust3 (modifyL macPortL (k port))) macInfo macs
-      xs = M.map macIPs . M.filterWithKey (const . (`S.member` macs)) $ macInfo
-      -- If element (e.g. ip here) does not exist in 'IPInfo' it should be
-      -- added as 'member' /without/ any regard to what 'portAddrs' contain.
-      -- I.e.  'portAddrs' may incorrectly contain an ip element missed from
-      -- 'IPInfo', and this element may have some 'IPState'. But 'portAddrs'
-      -- should /not/ be considered as trusted source for creating new
-      -- 'IPInfo' element: i should not create new 'IPInfo' element with the
-      -- 'IPState' taken from 'portAddrs', instead i should just use 'mempty'.
-      -- The reason is such state is already broken db, and elements should
-      -- not be created basing on references to them.
-      ipInfo' = M.foldrWithKey
-        (\mac -> flip $ M.foldrWithKey
-          (\ip _ z ->
-            M.adjust (modifyL ipMacPortsL (insertAdjust3 (k port) mac)) ip z
-          )
-        )
-        ipInfo xs
-  in  ( ipInfo'
-      , macInfo'
-      , k port swPortInfo
-      )
-
-modPort :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
-      -> Port -- ^ selects
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort k port z@(_, _, swPortInfo) =
-  let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
-  in  modPort' k port allMacs z
-
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (st, macs) z@(_, macInfo, swPortInfo) =
   let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
@@ -98,45 +53,6 @@ addPortMac port (st, macs) z@(_, macInfo, swPortInfo) =
   remMacs =
     let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
     in  oldMacs `S.difference` macs
-
-modMac' :: (forall a. ModMac a
-              => MacAddr
-              -> a
-              -> a) -- ^ modifies
-      -> MacAddr -- ^ selects
-      -> (S.Set IP, S.Set Port) -- ^ selects references
-      -- FIXME: If current operation if addition and 'IPData' will contain IP
-      -- in non-default (not 'Answering') state result the db become
-      -- inconsistent, because here, when adding 'IP' to references i'll
-      -- _assume_, that state is 'Answering'. Thus, i should provide _all_
-      -- info required for constructing references. [current]
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modMac' k mac (ips, ports) z@(ipInfo, macInfo, swPortInfo) =
-  -- FIXME: Default value hardcoded.
-  let MacData{..} = fromMaybe mempty $ M.lookup mac macInfo
-      -- FIXME: 'PortRef' Monoid.. [current]
-      -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not
-      -- add these new 'IP's to 'MacData': this should be done in 'k'
-      -- callback, because i just call 'k' for entire 'macInfo'.
-      -- FIXME: Hardcoded default 'IPState' 'Answering'. [current]
-      -- FIXME: Hardcoded default 'PortState' 'Up'. [current]
-      ipInfo' = foldr (insertAdjust3 (modifyL ipMacPortsL (k mac))) ipInfo ips
-      swPortInfo' = foldr (insertAdjust3 (modifyL portAddrsL (k mac))) swPortInfo ports
-  in  ( ipInfo'
-      , k mac macInfo
-      , swPortInfo'
-      )
-
-modMac :: (forall a. ModMac a
-              => MacAddr
-              -> a
-              -> a) -- ^ modifies
-      -> MacAddr -- ^ selects
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modMac k mac z@(_, macInfo, _) =
-  -- FIXME: Default value hardcoded.
-  let MacData{..} = fromMaybe mempty (M.lookup mac macInfo)
-  in  modMac' k mac (M.keysSet macIPs, M.keysSet macPort) z
 
 addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addMacPort mac port z@(_, macInfo, _) =
@@ -155,41 +71,6 @@ addMacPort mac port z@(_, macInfo, _) =
 
 mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
-
--- FIXME: I may define a typeclass, which abstrects over functions 'modPort',
--- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
--- 'PortInfo'.
--- FIXME: I should take 'IPState' as argument.
--- FIXME: Rename 'swPortInfo' to just 'portInfo'.
-modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
-      -> IP -- ^ selects
-      -> S.Set MacAddr -- ^ selects references
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
-  let -- FIXME: Wrong! Values should be taken from current 'IPData', and if not found,
-      -- should default to 'Answering' and 'Nothing'. But only if not found!
-      -- [current]
-      -- FIXME: References must be limited to existing references, if element
-      -- exist. Or new references should be added for missing elements
-      -- /correctly/ [current].
-      macInfo' = S.foldr (insertAdjust3 (modifyL macIPsL (k ip))) macInfo macs
-      xs :: M.Map MacAddr (S.Set Port)
-      xs = M.map (M.keysSet . macPort) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
-      swPortInfo' = M.foldrWithKey
-        (\mac -> flip $ foldr (M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac))))
-        swPortInfo xs
-  in  ( k ip ipInfo
-      , macInfo'
-      , swPortInfo'
-      )
-
--- | Selects IP with all macs.
-modIP :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
-      -> IP -- ^ selects
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modIP f ip z@(ipInfo, _, _) =
-  let allMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
-  in  modIP' f ip allMacs z
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =

@@ -20,9 +20,15 @@ module BH.Main.Types (
   PortInfo,
   PortData(..),
   portAddrsL,
-  ModPort(..),
-  ModMac(..),
   ModIP(..),
+  modIP',
+  modIP,
+  ModPort(..),
+  modPort',
+  modPort,
+  ModMac(..),
+  modMac',
+  modMac,
 )
 where
 
@@ -75,23 +81,13 @@ instance (Ord a, FromJSON a) => FromJSON (VlanData a) where
 -- to have IP-mac relation, than mac-[IP] .
 type MacInfo = M.Map MacAddr MacData
 
--- FIXME: Use type PortRef = First (Port, PortState) instead of type. Really,
--- i don't need separate type. [current]
-{-data PortRef = PortRef
-                { refPort  :: Port
-                , refState :: PortState
-                }
-  deriving (Show)-}
-
--- Single mac can't be on several ports.
--- I need 'First IPState' in 'macIPsL' because 'ipState' in 'IPData' has that
--- type and, therefore, if i'll have 'IPData' with 'Nothing' in 'ipState', i
--- won't be able to add it to 'macIPs' (i.e. i won't be able to create a
--- reference to a valid element of 'IPInfo').
+-- I need 'First IPState' (instead of just plain 'IPState') in 'macIPs'
+-- because 'ipState' in 'IPData' has that type and, therefore, if i'll have
+-- 'IPData' with 'ipState = Nothing', i won't be able to add it to 'macIPs'
+-- (i.e. i won't be able to create a reference to a valid element of
+-- 'IPInfo').
 data MacData = MacData
   { macIPs    :: M.Map IP (First IPState)
-  -- FIXME: Do i really need Semigroup for MacData?
--- FIXME: Do not use pairs, there're lists in yaml. Use 'PortRef' instead.
 -- FIXME: Rename 'macPort' to 'macPorts'.
   , macPort :: M.Map Port (First PortState)
 --, macVendor :: T.Text
@@ -243,6 +239,53 @@ instance FromJSON PortData where
 -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
 -- entire program run to single vlan?
 
+class ModIP a where
+  setIPState :: IPState -> IP -> a -> a
+  delIP :: S.Set MacAddr -> IP -> a -> a
+  addIP :: IPData -> IP -> a -> a
+
+instance ModIP IPInfo where
+  setIPState s = M.adjust (\d -> d{ipState = pure s})
+  delIP macs ip ipInfo = fromMaybe ipInfo $ do
+    IPData{..} <- M.lookup ip ipInfo
+    let f | macs /= M.keysSet ipMacPorts =
+              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
+              M.adjust (modifyL ipMacPortsL (\x -> foldr M.delete x macs))
+          | otherwise = M.delete
+    return (f ip ipInfo)
+  addIP d ip = M.insert ip d
+
+instance ModIP (M.Map IP (First IPState)) where
+  setIPState s = M.adjust (const (pure s))
+  delIP _ = M.delete
+  addIP d ip = M.insert ip (ipState d)
+
+-- FIXME: I may define a typeclass, which abstrects over functions 'modPort',
+-- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
+-- 'PortInfo'.
+-- FIXME: Rename 'swPortInfo' to just 'portInfo'.
+modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
+      -> IP -- ^ selects
+      -> S.Set MacAddr -- ^ selects references
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
+  let xs = M.map (M.keysSet . macPort) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
+      swPortInfo' = M.foldrWithKey
+        (\mac -> flip $ foldr (M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac))))
+        swPortInfo xs
+  in  ( k ip ipInfo
+      , S.foldr (insertAdjust3 (modifyL macIPsL (k ip))) macInfo macs
+      , swPortInfo'
+      )
+
+-- | Selects IP with all macs.
+modIP :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
+      -> IP -- ^ selects
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modIP f ip z@(ipInfo, _, _) =
+  let allMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
+  in  modIP' f ip allMacs z
+
 class ModPort a where
   setPortState :: PortState -> Port -> a -> a
   delPort :: S.Set MacAddr -> Port -> a -> a
@@ -267,6 +310,39 @@ instance ModPort (M.Map Port (First PortState)) where
   delPort _ = M.delete
   addPort d port = M.insert port (portState d)
 
+modPort' :: (forall a. ModPort a
+              => Port
+              -> a
+              -> a) -- ^ modifies
+      -> Port -- ^ selects.
+      -> S.Set MacAddr -- ^ selects references
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
+  let xs = M.map (M.keysSet . macIPs) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
+      -- If element (e.g. ip here) does not exist in 'IPInfo' it should be
+      -- added as 'member' /without/ any regard to what 'portAddrs' contain.
+      -- I.e.  'portAddrs' may incorrectly contain an ip element missed from
+      -- 'IPInfo', and this element may have some 'IPState'. But 'portAddrs'
+      -- should /not/ be considered as trusted source for creating new
+      -- 'IPInfo' element and i should not create new 'IPInfo' element with
+      -- the 'IPState' taken from 'portAddrs', instead i should just use
+      -- 'mempty'.  The reason is such state is already broken db, and
+      -- elements should not be created basing on references to them.
+      ipInfo' = M.foldrWithKey
+        (\mac -> flip $ foldr (M.adjust (modifyL ipMacPortsL (insertAdjust3 (k port) mac))))
+        ipInfo xs
+  in  ( ipInfo'
+      , S.foldr (insertAdjust3 (modifyL macPortL (k port))) macInfo macs
+      , k port swPortInfo
+      )
+
+modPort :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
+      -> Port -- ^ selects
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modPort k port z@(_, _, swPortInfo) =
+  let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
+  in  modPort' k port allMacs z
+
 class ModMac a where
   delMac :: (S.Set IP, S.Set Port) -> MacAddr -> a -> a
   addMac :: MacData -> MacAddr -> a -> a
@@ -289,24 +365,29 @@ instance ModMac MacInfo where
     go = modifyL macIPsL (\z -> foldr M.delete z ips)
           . modifyL macPortL (\z -> foldr M.delete z ports)
 
-class ModIP a where
-  setIPState :: IPState -> IP -> a -> a
-  delIP :: S.Set MacAddr -> IP -> a -> a
-  addIP :: IPData -> IP -> a -> a
+modMac' :: (forall a. ModMac a
+              => MacAddr
+              -> a
+              -> a) -- ^ modifies
+      -> MacAddr -- ^ selects
+      -> (S.Set IP, S.Set Port) -- ^ selects references
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modMac' k mac (ips, ports) z@(ipInfo, macInfo, swPortInfo) =
+  -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not add
+  -- these new 'IP's to 'MacData': this should be done in 'k' callback,
+  -- because i just call 'k' for entire 'macInfo'.
+  ( foldr (insertAdjust3 (modifyL ipMacPortsL (k mac))) ipInfo ips
+  , k mac macInfo
+  , foldr (insertAdjust3 (modifyL portAddrsL  (k mac))) swPortInfo ports
+  )
 
-instance ModIP IPInfo where
-  setIPState s = M.adjust (\d -> d{ipState = pure s})
-  delIP macs ip ipInfo = fromMaybe ipInfo $ do
-    IPData{..} <- M.lookup ip ipInfo
-    let f | macs /= M.keysSet ipMacPorts =
-              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
-              M.adjust (modifyL ipMacPortsL (\x -> foldr M.delete x macs))
-          | otherwise = M.delete
-    return (f ip ipInfo)
-  addIP d ip = M.insert ip d
-
-instance ModIP (M.Map IP (First IPState)) where
-  setIPState s = M.adjust (const (pure s))
-  delIP _ = M.delete
-  addIP d ip = M.insert ip (ipState d)
+modMac :: (forall a. ModMac a
+              => MacAddr
+              -> a
+              -> a) -- ^ modifies
+      -> MacAddr -- ^ selects
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modMac k mac z@(_, macInfo, _) =
+  let MacData{..} = fromMaybe mempty (M.lookup mac macInfo)
+  in  modMac' k mac (M.keysSet macIPs, M.keysSet macPort) z
 
