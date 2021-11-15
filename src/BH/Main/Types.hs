@@ -235,53 +235,6 @@ instance FromJSON PortData where
 -- FIXME: sw port depends on vlan i'm working on. So...? Should i restrict
 -- entire program run to single vlan?
 
-class ModIP a where
-  setIPState :: IPState -> IP -> a -> a
-  delIP :: S.Set MacAddr -> IP -> a -> a
-  addIP :: IPData -> IP -> a -> a
-
-instance ModIP IPInfo where
-  setIPState s = M.adjust (\d -> d{ipState = pure s})
-  delIP macs ip ipInfo = fromMaybe ipInfo $ do
-    IPData{..} <- M.lookup ip ipInfo
-    let f | macs /= M.keysSet ipMacPorts =
-              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
-              M.adjust (modifyL ipMacPortsL (\x -> foldr M.delete x macs))
-          | otherwise = M.delete
-    return (f ip ipInfo)
-  addIP d ip = M.insert ip d
-
-instance ModIP (M.Map IP (First IPState)) where
-  setIPState s = M.adjust (const (pure s))
-  delIP _ = M.delete
-  addIP d ip = M.insert ip (ipState d)
-
--- FIXME: I may define a typeclass, which abstrects over functions 'modPort',
--- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
--- 'PortInfo'.
--- FIXME: Rename 'portInfo' to just 'portInfo'.
-modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
-      -> IP -- ^ selects
-      -> S.Set MacAddr -- ^ selects references
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modIP' k ip macs z@(ipInfo, macInfo, portInfo) =
-  let xs = M.map (M.keysSet . macPorts) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
-      portInfo' = M.foldrWithKey
-        (\mac -> flip $ foldr (M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac))))
-        portInfo xs
-  in  ( k ip ipInfo
-      , S.foldr (insertAdjust3 (modifyL macIPsL (k ip))) macInfo macs
-      , portInfo'
-      )
-
--- | Selects IP with all macs.
-modIP :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
-      -> IP -- ^ selects
-      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modIP f ip z@(ipInfo, _, _) =
-  let allMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
-  in  modIP' f ip allMacs z
-
 class ModPort a where
   setPortState :: PortState -> Port -> a -> a
   delPort :: S.Set MacAddr -> Port -> a -> a
@@ -334,6 +287,53 @@ modPort :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
 modPort k port z@(_, _, portInfo) =
   let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port portInfo)
   in  modPort' k port allMacs z
+
+class ModIP a where
+  setIPState :: IPState -> IP -> a -> a
+  delIP :: S.Set MacAddr -> IP -> a -> a
+  addIP :: IPData -> IP -> a -> a
+
+instance ModIP IPInfo where
+  setIPState s = M.adjust (\d -> d{ipState = pure s})
+  delIP macs ip ipInfo = fromMaybe ipInfo $ do
+    IPData{..} <- M.lookup ip ipInfo
+    let f | macs /= M.keysSet ipMacPorts =
+              --M.adjust (modifyL ipMacPortsL (M.filterWithKey (\k _ -> k `S.notMember` macs)))
+              M.adjust (modifyL ipMacPortsL (\x -> foldr M.delete x macs))
+          | otherwise = M.delete
+    return (f ip ipInfo)
+  addIP d ip = M.insert ip d
+
+instance ModIP (M.Map IP (First IPState)) where
+  setIPState s = M.adjust (const (pure s))
+  delIP _ = M.delete
+  addIP d ip = M.insert ip (ipState d)
+
+-- FIXME: I may define a typeclass, which abstrects over functions 'modPort',
+-- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
+-- 'PortInfo'.
+-- FIXME: Rename 'portInfo' to just 'portInfo'.
+modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
+      -> IP -- ^ selects
+      -> S.Set MacAddr -- ^ selects references
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modIP' k ip macs z@(ipInfo, macInfo, portInfo) =
+  let xs = M.map (M.keysSet . macPorts) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
+      portInfo' = M.foldrWithKey
+        (\mac -> flip $ foldr (M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac))))
+        portInfo xs
+  in  ( k ip ipInfo
+      , S.foldr (insertAdjust3 (modifyL macIPsL (k ip))) macInfo macs
+      , portInfo'
+      )
+
+-- | Selects IP with all macs.
+modIP :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
+      -> IP -- ^ selects
+      -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+modIP f ip z@(ipInfo, _, _) =
+  let allMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
+  in  modIP' f ip allMacs z
 
 class ModMac a where
   delMac :: (S.Set IP, S.Set Port) -> MacAddr -> a -> a

@@ -46,31 +46,13 @@ import BH.IP.Arp
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (st, macs) z@(_, macInfo, portInfo) =
-  let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
+  let portAddrs = M.fromSet (\m -> maybe M.empty macIPs (M.lookup m macInfo)) macs
       portState = pure st
   in  modPort' (addPort PortData{..}) port macs . modPort' (delPort remMacs) port remMacs $ z
  where
   remMacs =
-    let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port portInfo)
+    let oldMacs = maybe S.empty (M.keysSet . portAddrs) $ M.lookup port portInfo
     in  oldMacs `S.difference` macs
-
-addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-addMacPort mac port z@(_, macInfo, _) =
-  let d = setL macPortsL newMacPorts . fromMaybe mempty $ M.lookup mac macInfo
-  in  modMac' (addMac d) mac (S.empty, S.singleton (fst port))
-        . modMac' (delMac (S.empty, remPorts)) mac (S.empty, remPorts)
-        $ z
- where
-  MacData{..} = fromMaybe mempty $ M.lookup mac macInfo
-  newMacPorts :: M.Map Port (First PortState)
-  newMacPorts = M.fromList . map (second pure) $ [port]
-  remPorts :: S.Set Port
-  remPorts =
-    let f x y = if x /= y then Just x else Nothing
-    in  M.keysSet $ M.differenceWith f macPorts newMacPorts
-
-mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-mergeMacs = flip (M.foldrWithKey addMacPort)
 
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
@@ -79,7 +61,7 @@ addIPMac ip macs z@(ipInfo, macInfo, _) =
   in  modIP' (addIP IPData{..}) ip macs . modIP' (delIP remMacs) ip remMacs $ z
  where
   remMacs =
-    let oldMacs = fromMaybe S.empty (M.keysSet . ipMacPorts <$> M.lookup ip ipInfo)
+    let oldMacs = maybe S.empty (M.keysSet . ipMacPorts) $ M.lookup ip ipInfo
     in  oldMacs `S.difference` macs
 
 -- FIXME: Split removal of missed IPs into separate function. This should be
@@ -88,6 +70,32 @@ mergeIP :: M.Map IP (S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, M
 mergeIP xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
   in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
+
+addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+addMacPort mac (port, st) z@(_, macInfo, _) =
+  let d = setL macPortsL newMacPorts . fromMaybe mempty $ M.lookup mac macInfo
+  in  modMac' (addMac d) mac (S.empty, S.singleton port)
+        . modMac' (delMac (S.empty, remPorts)) mac (S.empty, remPorts)
+        $ z
+ where
+  newMacPorts :: M.Map Port (First PortState)
+  newMacPorts = M.singleton port (pure st)
+  -- FIXME: Do i really need to remove port, if just 'PortState' has changed?
+  -- Wouldn't it be enough to leave it as is and 'PortState' will be updated
+  -- later correctl? [current]
+  remPorts :: S.Set Port
+  remPorts =
+    let f x y = if x /= y then Just x else Nothing
+        oldMacPorts = maybe M.empty macPorts $ M.lookup mac macInfo
+    in  M.keysSet $ M.difference oldMacPorts newMacPorts
+{-  remPorts :: S.Set Port
+  remPorts =
+    let f x y = if x /= y then Just x else Nothing
+        oldMacPorts = maybe M.empty macPorts $ M.lookup mac macInfo
+    in  M.keysSet $ M.differenceWith f oldMacPorts newMacPorts-}
+
+mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+mergeMacs = flip (M.foldrWithKey addMacPort)
 
 -- FIXME: This function should remove IPs, whose all macs are 'Unreachable'
 -- and whose do not have any port defined.
