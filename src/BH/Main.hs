@@ -45,13 +45,13 @@ import BH.Telnet
 import BH.IP.Arp
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-addPortMac port (st, macs) z@(_, macInfo, swPortInfo) =
+addPortMac port (st, macs) z@(_, macInfo, portInfo) =
   let portAddrs = M.fromSet (\m -> fromMaybe M.empty (macIPs <$> M.lookup m macInfo)) macs
       portState = pure st
   in  modPort' (addPort PortData{..}) port macs . modPort' (delPort remMacs) port remMacs $ z
  where
   remMacs =
-    let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
+    let oldMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port portInfo)
     in  oldMacs `S.difference` macs
 
 addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)

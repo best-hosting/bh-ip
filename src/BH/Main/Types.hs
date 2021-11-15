@@ -259,19 +259,19 @@ instance ModIP (M.Map IP (First IPState)) where
 -- FIXME: I may define a typeclass, which abstrects over functions 'modPort',
 -- 'modMac', 'modIP' for each respective type - 'IPInfo', 'MacInfo',
 -- 'PortInfo'.
--- FIXME: Rename 'swPortInfo' to just 'portInfo'.
+-- FIXME: Rename 'portInfo' to just 'portInfo'.
 modIP' :: (forall a. ModIP a => IP -> a -> a) -- ^ modifies
       -> IP -- ^ selects
       -> S.Set MacAddr -- ^ selects references
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modIP' k ip macs z@(ipInfo, macInfo, swPortInfo) =
+modIP' k ip macs z@(ipInfo, macInfo, portInfo) =
   let xs = M.map (M.keysSet . macPorts) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
-      swPortInfo' = M.foldrWithKey
+      portInfo' = M.foldrWithKey
         (\mac -> flip $ foldr (M.adjust (modifyL portAddrsL (insertAdjust3 (k ip) mac))))
-        swPortInfo xs
+        portInfo xs
   in  ( k ip ipInfo
       , S.foldr (insertAdjust3 (modifyL macIPsL (k ip))) macInfo macs
-      , swPortInfo'
+      , portInfo'
       )
 
 -- | Selects IP with all macs.
@@ -289,18 +289,14 @@ class ModPort a where
 
 instance ModPort PortInfo where
   setPortState s = M.adjust (\d -> d{portState = pure s})
-  delPort macs port swPortInfo = fromMaybe swPortInfo $ do
-    PortData{..} <- M.lookup port swPortInfo
+  delPort macs port portInfo = fromMaybe portInfo $ do
+    PortData{..} <- M.lookup port portInfo
     let f | S.size macs /= S.size (M.keysSet portAddrs) =
               M.adjust (modifyL portAddrsL (\z -> foldr M.delete z macs))
           | otherwise = M.delete
-    return (f port swPortInfo)
+    return (f port portInfo)
   addPort pd p = M.insert p pd
 
--- FIXME: Or i may write instance for 'M.Map MacAddr (Maybe (Port,
--- PortState)) instead, because i send selection (S.Set MacAddr) in any case..
--- That's depends on does 'MacAddr -- Nothing' has sense or not. And it seems
--- it does.
 instance ModPort (M.Map Port (First PortState)) where
   setPortState s = M.adjust (const (pure s))
   delPort _ = M.delete
@@ -313,7 +309,7 @@ modPort' :: (forall a. ModPort a
       -> Port -- ^ selects.
       -> S.Set MacAddr -- ^ selects references
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
+modPort' k port macs z@(ipInfo, macInfo, portInfo) =
   let xs = M.map (M.keysSet . macIPs) . M.filterWithKey (const . (`S.member` macs)) $ macInfo
       -- If element (e.g. ip here) does not exist in 'IPInfo' it should be
       -- added as 'member' /without/ any regard to what 'portAddrs' contain.
@@ -329,14 +325,14 @@ modPort' k port macs z@(ipInfo, macInfo, swPortInfo) =
         ipInfo xs
   in  ( ipInfo'
       , S.foldr (insertAdjust3 (modifyL macPortsL (k port))) macInfo macs
-      , k port swPortInfo
+      , k port portInfo
       )
 
 modPort :: (forall a. ModPort a => Port -> a -> a) -- ^ modifies
       -> Port -- ^ selects
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modPort k port z@(_, _, swPortInfo) =
-  let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port swPortInfo)
+modPort k port z@(_, _, portInfo) =
+  let allMacs = fromMaybe S.empty (M.keysSet . portAddrs <$> M.lookup port portInfo)
   in  modPort' k port allMacs z
 
 class ModMac a where
@@ -368,13 +364,13 @@ modMac' :: (forall a. ModMac a
       -> MacAddr -- ^ selects
       -> (S.Set IP, S.Set Port) -- ^ selects references
       -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-modMac' k mac (ips, ports) z@(ipInfo, macInfo, swPortInfo) =
+modMac' k mac (ips, ports) z@(ipInfo, macInfo, portInfo) =
   -- I may bind 'MacAddr' to new 'IP'-s here (not yet bound). But i'll not add
   -- these new 'IP's to 'MacData': this should be done in 'k' callback,
   -- because i just call 'k' for entire 'macInfo'.
   ( foldr (insertAdjust3 (modifyL ipMacPortsL (k mac))) ipInfo ips
   , k mac macInfo
-  , foldr (insertAdjust3 (modifyL portAddrsL  (k mac))) swPortInfo ports
+  , foldr (insertAdjust3 (modifyL portAddrsL  (k mac))) portInfo ports
   )
 
 modMac :: (forall a. ModMac a
