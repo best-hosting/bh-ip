@@ -48,6 +48,7 @@ addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) 
 addPortMac port (st, macs) z@(_, macInfo, portInfo) =
   let portAddrs = M.fromSet (\m -> maybe M.empty macIPs (M.lookup m macInfo)) macs
       portState = pure st
+  -- FIXME: Do /not/ delete macs, if new port state is 'Disabled'.  [current]
   in  modPort' (addPort PortData{..}) port macs . modPort' (delPort remMacs) port remMacs $ z
  where
   remMacs =
@@ -121,6 +122,10 @@ searchPorts swPorts = do
   liftIO $ print "Adding ports:"
   liftIO $ print xs
   modify (flip (M.foldrWithKey addPortMac) xs)
+  -- FIXME: Call 'searchMacs' from here for all macs on ports, which new state
+  -- is 'Disabled' or 'NotConnect'. [current]
+  -- FIXME: Search for all IPs, to ensure, that new macs have up to date info
+  -- [current]
  where
   -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
   -- need to change it everywhere, includeing findX funcs.. [refactor]
@@ -155,9 +160,11 @@ searchMacs macs = do
   xs <- runReaderT (runTill maybeMacs go) swInfo
   liftIO $ print "Adding macs:"
   liftIO $ print xs
-  -- FIXME: If mac was not found, but /is/ present in db, i should remove it!
-  -- [current]
   modify (flip (M.foldrWithKey addMacPort) xs)
+  -- FIXME: If mac was not found, but /is/ present in db, i should remove it,
+  -- unless it's port state is 'Disabled' [current]
+  -- FIXME: Search for all IPs, to ensure, that new macs have up to date info
+  -- [current]
  where
   maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys res
@@ -207,6 +214,13 @@ searchIPs ips = do
   liftIO $ print "Adding ips:"
   liftIO $ print xs
   modify (flip (M.foldrWithKey addIPMac) xs)
+  -- FIXME: First, search for all macs of all IPs (both found and not found)
+  -- to update port info. [current]
+  -- FIXME: Then for all not found IPs set state to 'Unreachable'.
+  -- If port state of 'Unreachable' IP is 'Up', unbind it from mac.
+  -- If port state is 'Disabled', leave it as is.
+  -- If port is undefined, remove it from db.
+  -- [current]
 
 {-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
