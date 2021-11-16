@@ -118,6 +118,8 @@ searchPorts ::
 searchPorts swPorts = do
   Config{..} <- ask
   xs <- runReaderT (runOn onPorts swNames go) swInfo
+  liftIO $ print "Adding ports:"
+  liftIO $ print xs
   modify (flip (M.foldrWithKey addPortMac) xs)
  where
   -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
@@ -151,7 +153,7 @@ searchMacs ::
 searchMacs macs = do
   Config{..} <- ask
   xs <- runReaderT (runTill maybeMacs go) swInfo
-  liftIO $ print "Adding macs"
+  liftIO $ print "Adding macs:"
   liftIO $ print xs
   modify (flip (M.foldrWithKey addMacPort) xs)
  where
@@ -177,9 +179,10 @@ findIPInfo xs host = Sh.shelly (Sh.silently (go (nmapArgs xs))) >>= liftEither
   nmapArgs (Right ips) = map (T.pack . showIP) ips
   go :: [T.Text] -> Sh.Sh (Either String (M.Map IP (S.Set MacAddr)))
   go argv = do
-    liftIO $ putStrLn "Updating arp cache using `nmap` 2..."
+    let cmd = host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml" ++ argv
+    liftIO $ putStrLn $ "Updating arp cache using `nmap` with.. " ++ T.unpack (T.unwords cmd)
     xml <- do
-      Sh.run_ "ssh" (host : T.words "nmap -sn -PR -oX nmap_arp_cache.xml" ++ argv)
+      Sh.run_ "ssh" cmd
       Sh.run "ssh" (host : T.words "cat ./nmap_arp_cache.xml")
     z <- liftIO . evaluate . force $ parseNmapXml xml
     liftIO $ print z
@@ -192,17 +195,16 @@ searchIPs ::
   m ()
 searchIPs ips = do
   Config{..} <- ask
-  case ips of
+  xs <- case ips of
     [] -> do
       t <- liftIO getCurrentTime
       if diffUTCTime t cacheTime > updateInterval
-        then do
-          xs <- findIPInfo (Left ["213.108.248.0/21"]) nmapHost
-          modify (flip (M.foldrWithKey addIPMac) xs)
-        else return ()
-    _ ->  do
-      xs <- findIPInfo (Left ["213.108.248.0/21"]) nmapHost
-      modify (flip (M.foldrWithKey addIPMac) xs)
+        then findIPInfo (Left ["213.108.248.0/21"]) nmapHost
+        else return M.empty
+    _ -> findIPInfo (Right ips) nmapHost
+  liftIO $ print "Adding ips:"
+  liftIO $ print xs
+  modify (flip (M.foldrWithKey addIPMac) xs)
 
 -- FIXME: Do not query all IPs at once. I don't need this, really. I may just
 -- nmap single IP in question and do all the other stuff with it. [current]
