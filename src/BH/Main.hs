@@ -155,6 +155,8 @@ searchMacs macs = do
   xs <- runReaderT (runTill maybeMacs go) swInfo
   liftIO $ print "Adding macs:"
   liftIO $ print xs
+  -- FIXME: If mac was not found, but /is/ present in db, i should remove it!
+  -- [current]
   modify (flip (M.foldrWithKey addMacPort) xs)
  where
   maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]
@@ -206,14 +208,6 @@ searchIPs ips = do
   liftIO $ print xs
   modify (flip (M.foldrWithKey addIPMac) xs)
 
--- FIXME: Do not query all IPs at once. I don't need this, really. I may just
--- nmap single IP in question and do all the other stuff with it. [current]
--- FIXME: Host should be obtained from 'Config'.
--- FIXME: I may replace this function with just quering all relevant IPs/macs
--- at each run. Though, when doing search by mac/port i can't be sure, that
--- no new IPs are used there. Thus.. i still need to query all IPs, which may
--- be time-consuming. So, cache update time (used here) may be still relevant.
--- [current]
 {-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   m ()
