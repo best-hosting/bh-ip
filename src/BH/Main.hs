@@ -73,26 +73,22 @@ mergeIP xs z@(ipInfo, _, _) =
 
 addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addMacPort mac (port, st) z@(_, macInfo, _) =
+  -- In this function, unlike 'modPort'' and 'modIP'', i have two kinds of
+  -- probably new information: new mac-port relation /and/ new 'PortState'.
+  -- And, because 'modMac'' can't update 'PortState' in 'PortData', i should
+  -- explicitly update port state using 'modPort''.
   let d = setL macPortsL newMacPorts . fromMaybe mempty $ M.lookup mac macInfo
   in  modMac' (addMac d) mac (S.empty, S.singleton port)
+        . modPort (setPortState st) port
         . modMac' (delMac (S.empty, remPorts)) mac (S.empty, remPorts)
         $ z
  where
   newMacPorts :: M.Map Port (First PortState)
   newMacPorts = M.singleton port (pure st)
-  -- FIXME: Do i really need to remove port, if just 'PortState' has changed?
-  -- Wouldn't it be enough to leave it as is and 'PortState' will be updated
-  -- later correctl? [current]
   remPorts :: S.Set Port
   remPorts =
-    let f x y = if x /= y then Just x else Nothing
-        oldMacPorts = maybe M.empty macPorts $ M.lookup mac macInfo
+    let oldMacPorts = maybe M.empty macPorts $ M.lookup mac macInfo
     in  M.keysSet $ M.difference oldMacPorts newMacPorts
-{-  remPorts :: S.Set Port
-  remPorts =
-    let f x y = if x /= y then Just x else Nothing
-        oldMacPorts = maybe M.empty macPorts $ M.lookup mac macInfo
-    in  M.keysSet $ M.differenceWith f oldMacPorts newMacPorts-}
 
 mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
@@ -155,6 +151,8 @@ searchMacs ::
 searchMacs macs = do
   Config{..} <- ask
   xs <- runReaderT (runTill maybeMacs go) swInfo
+  liftIO $ print "Adding macs"
+  liftIO $ print xs
   modify (flip (M.foldrWithKey addMacPort) xs)
  where
   maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]

@@ -176,7 +176,7 @@ instance Semigroup IPData where
               }
 
 instance Monoid IPData where
-  mempty = IPData {ipMacPorts = M.empty, ipState = First Nothing}
+  mempty = IPData {ipMacPorts = M.empty, ipState = mempty}
 
 instance ToJSON IPData where
   toJSON IPData{..} = object
@@ -207,7 +207,7 @@ instance Semigroup PortData where
             }
 
 instance Monoid PortData where
-    mempty = PortData {portAddrs = M.empty, portState = pure Up}
+    mempty = PortData {portAddrs = M.empty, portState = mempty}
 
 portAddrsL :: LensC PortData (M.Map MacAddr (M.Map IP (First IPState)))
 portAddrsL g z@PortData{portAddrs = x} = (\x' -> z{portAddrs = x'}) <$> g x
