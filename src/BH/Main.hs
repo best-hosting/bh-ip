@@ -79,26 +79,28 @@ mergeIP xs z@(ipInfo, _, _) =
   let remIPs = M.keysSet ipInfo `S.difference` M.keysSet xs
   in  flip (M.foldrWithKey addIPMac) xs . flip (foldr (modIP (setIPState Unreachable))) remIPs $ z
 
-addMacPort :: MacAddr -> (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-addMacPort mac (port, st) z@(_, macInfo, _) =
+-- | Add mac address on certain port. Port state is always 'Up', because
+-- otherwise how can i know mac address on that port?
+addMacPort :: MacAddr -> Port -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+addMacPort mac port z@(_, macInfo, _) =
   -- In this function, unlike 'modPort'' and 'modIP'', i have two kinds of
   -- probably new information: new mac-port relation /and/ new 'PortState'.
   -- And, because 'modMac'' can't update 'PortState' in 'PortData', i should
   -- explicitly update port state using 'modPort''.
-  let d = setL macPortsL newMacPorts . fromMaybe mempty $ M.lookup mac macInfo
-  in  modMac' (addMac d) mac (S.empty, S.singleton port)
-        . modPort (setPortState st) port
-        . modMac' (delMac (S.empty, remPorts)) mac (S.empty, remPorts)
-        $ z
+  modMac' (addMac d) mac (S.empty, S.singleton port)
+    . modPort (setPortState Up) port
+    . modMac' (delMac (S.empty, remPorts)) mac (S.empty, remPorts)
+    $ z
  where
-  newMacPorts :: M.Map Port (First PortState)
-  newMacPorts = M.singleton port (pure st)
+  d :: MacData
+  d = let macPorts = M.singleton port (pure Up)
+      in  setL macPortsL macPorts . fromMaybe mempty $ M.lookup mac macInfo
   remPorts :: S.Set Port
   remPorts =
-    let oldMacPorts = maybe M.empty macPorts $ M.lookup mac macInfo
-    in  M.keysSet $ M.difference oldMacPorts newMacPorts
+    let oldMacPorts = M.keysSet . maybe M.empty macPorts $ M.lookup mac macInfo
+    in  S.filter (/= port) oldMacPorts
 
-mergeMacs :: M.Map MacAddr (Port, PortState) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
+mergeMacs :: M.Map MacAddr Port -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 mergeMacs = flip (M.foldrWithKey addMacPort)
 
 -- FIXME: This function should remove IPs, whose all macs are 'Unreachable'
@@ -173,16 +175,16 @@ searchMacs macs = do
   -- FIXME: Search for all IPs, to ensure, that new macs have up to date info
   -- [current]
  where
-  maybeMacs :: M.Map MacAddr (Port, PortState) -> Maybe [MacAddr]
+  maybeMacs :: M.Map MacAddr Port -> Maybe [MacAddr]
   maybeMacs res = let found = M.keys res
                   in  case filter (`notElem` found) macs of
                         [] -> Nothing
                         xs -> Just xs
-  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr (Port, PortState)) ()
+  go :: TelnetRunM TelnetParserResult [MacAddr] (M.Map MacAddr Port) ()
   go = do
     portName <- asks (swName . switchData)
     ms  <- asks telnetIn
-    M.map (\p -> (Port{portSpec = p, ..}, Up)) <$> (findMacInfo ms) >>= putResult
+    M.map (\portSpec -> Port{..}) <$> findMacInfo ms >>= putResult
     sendExit
 
 -- FIXME: If i'll switch to ip package i may call this with 'Either IP
