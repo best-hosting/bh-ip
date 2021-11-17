@@ -89,7 +89,7 @@ data MacData = MacData
   , macPorts :: M.Map Port (First PortState)
 --, macVendor :: T.Text
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 macIPsL :: LensC MacData (M.Map IP (First IPState))
 macIPsL g z@MacData{macIPs = x} = (\x' -> z{macIPs = x'}) <$> g x
@@ -147,7 +147,7 @@ data PortData = PortData
 type IPInfo = M.Map IP IPData
 
 data IPState = Unreachable | Answering
- deriving (Show, Read)
+ deriving (Eq, Show, Read)
 
 instance ToJSON IPState where
   toJSON = toJSON . show

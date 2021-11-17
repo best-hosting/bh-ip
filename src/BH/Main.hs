@@ -167,12 +167,22 @@ searchMacs ::
   m ()
 searchMacs macs = do
   Config{..} <- ask
-  xs <- runReaderT (runTill maybeMacs go) swInfo
+  found <- runReaderT (runTill maybeMacs go) swInfo
   liftIO $ print "Adding macs:"
-  liftIO $ print xs
-  modify (flip (M.foldrWithKey addMacPort) xs)
+  liftIO $ print found
+  (_, macInfo, _) <- get
+  forM_ macs $ \mac -> do
+    case mac `M.lookup` found of
+      Just port -> modify (addMacPort mac port)
+      -- Following is the same `modify(M.filter (== mempty) macInfo)`
+      Nothing   -> do
+        let f d | d == mempty = modMac (delMac (S.empty, S.empty)) mac
+                | otherwise   = id
+        maybe (return ()) (modify . f) $ M.lookup mac macInfo
   -- FIXME: If mac was not found, but /is/ present in db, i should remove it,
-  -- unless it's port state is 'Disabled' [current]
+  -- unless it's port state is 'Disabled'. A: Check it, macs with port state
+  -- 'Disabled' should have non-empty 'macPorts', but others missed macs will
+  -- have empty 'macPorts'. [current]
   -- FIXME: Search for all IPs, to ensure, that new macs have up to date info
   -- [current]
  where
@@ -187,6 +197,28 @@ searchMacs macs = do
     ms  <- asks telnetIn
     M.map (\portSpec -> Port{..}) <$> findMacInfo ms >>= putResult
     sendExit
+
+{-searchMacsRec :: 
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
+  [MacAddr] -> m ()
+searchMacsRec macs = do
+  (_, macInfo, _) <- get
+  case mac `M.lookup` found of
+    Just port -> do
+      modify (addMacPort mac port)
+      --searchIPsNoRec all
+    Nothing   -> do
+      d@MacData{..} <- M.lookup mac macInfo
+      searchIPsNoRec macIPs
+      searchPortsNoRec macPorts
+      if d == mempty
+        then modify (modMac delMac mac)
+        else return ()
+      _ 
+      _ 
+  if mac `M.member` found
+    then modify (flip (M.foldrWithKey addMacPort) xs)
+    else M.lookup mac macInfo-}
 
 -- FIXME: If i'll switch to ip package i may call this with 'Either IP
 -- IPRange' or smth. But for now i may just use empty list..
