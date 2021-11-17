@@ -46,7 +46,8 @@ import BH.IP.Arp
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (st, macs) z@(_, macInfo, portInfo)
-  | st == Disabled  = modPort' (addPort d) port macs z
+  | st == Disabled && macs == S.empty = modPort (setPortState Disabled) port z
+  | st == Disabled  = error "State disabled and mac not emtpy? Nihuya sebe, i takoe vozmojno?"
   | otherwise       = modPort' (addPort d) port macs
                       . modPort' (delPort remMacs) port remMacs
                       $ z
