@@ -45,16 +45,23 @@ import BH.Telnet
 import BH.IP.Arp
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
-addPortMac port (st, macs) z@(_, macInfo, portInfo) =
-  let portAddrs = M.fromSet (\m -> maybe M.empty macIPs (M.lookup m macInfo)) macs
-      portState = pure st
-  -- FIXME: Do /not/ delete macs, if new port state is 'Disabled'.  [current]
-  in  modPort' (addPort PortData{..}) port macs . modPort' (delPort remMacs) port remMacs $ z
+addPortMac port (st, macs) z@(_, macInfo, portInfo)
+  | st == Disabled  = modPort' (addPort d) port macs z
+  | otherwise       = modPort' (addPort d) port macs
+                      . modPort' (delPort remMacs) port remMacs
+                      $ z
  where
+  d :: PortData
+  d = let portAddrs = M.fromSet (\m -> maybe M.empty macIPs (M.lookup m macInfo)) macs
+          portState = pure st
+      in  PortData{..}
+  remMacs :: S.Set MacAddr
   remMacs =
     let oldMacs = maybe S.empty (M.keysSet . portAddrs) $ M.lookup port portInfo
     in  oldMacs `S.difference` macs
 
+-- | Add 'IP' and its set of mac addresses. 'IPState' is always 'Answering',
+-- because otherwise, how can i know IP macs?
 addIPMac :: IP -> S.Set MacAddr -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addIPMac ip macs z@(ipInfo, macInfo, _) =
   let ipMacPorts = M.fromSet (\m -> maybe M.empty macPorts (M.lookup m macInfo)) macs
