@@ -46,6 +46,9 @@ import BH.IP.Arp
 
 addPortMac :: Port -> (PortState, S.Set MacAddr) -> (IPInfo, MacInfo, PortInfo) -> (IPInfo, MacInfo, PortInfo)
 addPortMac port (st, macs) z@(_, macInfo, portInfo)
+  -- FIXME: Hardcoded non-trivial logic: state 'Disabled' is in fact
+  -- /requires/ empty macs, but this are neither enforced, nor visible from
+  -- outside.
   | st == Disabled && macs == S.empty = modPort (setPortState Disabled) port z
   | st == Disabled  = error "State disabled and mac not emtpy? Nihuya sebe, i takoe vozmojno?"
   | otherwise       = modPort' (addPort d) port macs
@@ -126,12 +129,18 @@ readSwInfo file = toSwInfo <$> readYaml file
 searchPorts ::
   (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   [Port] -> m ()
-searchPorts swPorts = do
+searchPorts ports = do
   Config{..} <- ask
-  xs <- runReaderT (runOn onPorts swNames go) swInfo
+  found <- runReaderT (runOn onPorts swNames go) swInfo
   liftIO $ print "Adding ports:"
-  liftIO $ print xs
-  modify (flip (M.foldrWithKey addPortMac) xs)
+  liftIO $ print found
+  (_, _, portInfo) <- get
+  forM_ ports $ \port ->
+    case port `M.lookup` found of
+      Just (st, macs) -> modify $ addPortMac port (st, macs)
+      Nothing         -> modify . fromMaybe id $ do
+        PortData{..} <- M.lookup port portInfo
+        return (modPort (delPort (M.keysSet portAddrs)) port)
   -- FIXME: Call 'searchMacs' from here for all macs on ports, which new state
   -- is 'Disabled' or 'NotConnect'. [current]
   -- FIXME: Search for all IPs, to ensure, that new macs have up to date info
@@ -140,9 +149,9 @@ searchPorts swPorts = do
   -- FIXME: Change input to (S.Set PortNum). But for this to have any sense, i
   -- need to change it everywhere, includeing findX funcs.. [refactor]
   onPorts :: SwName -> [PortNum]
-  onPorts sn = nub . map portSpec . filter ((== sn) . portName) $ swPorts
+  onPorts sn = nub . map portSpec . filter ((== sn) . portName) $ ports
   swNames :: [SwName]
-  swNames = nub . map portName $ swPorts
+  swNames = nub . map portName $ ports
   go :: TelnetRunM TelnetParserResult [PortNum] (M.Map Port (PortState, S.Set MacAddr)) ()
   go = do
     portName <- asks (swName . switchData)
@@ -151,12 +160,45 @@ searchPorts swPorts = do
     putResult res
     sendExit
 
+type Db = (IPInfo, MacInfo, PortInfo)
+
+-- TODO: Can i generalize and merge 'ModX' classes with this one? In fact,
+-- this class claims, that i can perform some operations with certain key on
+-- particular type 'Db'. With lookup that's pretty simple, but to perform
+-- addition or delete, i need to be sure, that all subcomponents of 'Db' type
+-- implement some other class ('ModMac' for 'MacAddr' key, 'ModIP' for 'IP'
+-- key etc). But for that, i need, to
+-- 1. Make generic class 'Mod', which may be parametrized by key (e.g. 'Mod
+--    IP' or 'Mod MacAddr').
+-- 2. Make instances of this class for 'Db' type subcomponents instead of some
+--    /part/ of internal structure (e.g. 'Mod IP PortInfo' instead of 'ModIP
+--    (M.Map IP (First IPState))' now). Will this work at all?
+-- 3. Parametrize 'Db' components using type family.
+class (Eq (DbData a), Monoid (DbData a)) => DbKey a where
+  type DbData a
+  dbLookup :: a -> Db -> Maybe (DbData a)
+
+instance DbKey MacAddr where
+  type DbData MacAddr = MacData
+  dbLookup k (_, macInfo, _) = M.lookup k macInfo
+
+instance DbKey IP where
+  type DbData IP = IPData
+  dbLookup k (ipInfo, _, _) = M.lookup k ipInfo
+
+instance DbKey Port where
+  type DbData Port = PortData
+  dbLookup k (_, _, portInfo) = M.lookup k portInfo
+
+runIfEmpty :: DbKey k => (k -> Db -> Db) -> k -> Db -> Db
+runIfEmpty f k m = fromMaybe m $ do
+  d <- dbLookup k m
+  if d == mempty then return (f k m) else return m
+
 -- TODO: Implement second update strategy: just save raw data (the one
 -- 'mergeX' funcs accept), apply merges there and rebuild entire db. Then
 -- compare the result. They should match..
 --
--- TODO: I may use hash to determine changed db file. And then treat /that/
--- file as source and generate others from it.
 -- FIXME: I should obtain full info. Here or not, but query over mac implies
 -- full result, including both port and IP. And if some part is missing, i
 -- should query it as well. [current]
@@ -171,14 +213,15 @@ searchMacs macs = do
   liftIO $ print "Adding macs:"
   liftIO $ print found
   (_, macInfo, _) <- get
-  forM_ macs $ \mac -> do
+  forM_ macs $ \mac ->
     case mac `M.lookup` found of
-      Just port -> modify (addMacPort mac port)
+      Just port -> modify $ addMacPort mac port
       -- Following is the same `modify(M.filter (== mempty) macInfo)`
-      Nothing   -> do
-        let f d | d == mempty = modMac (delMac (S.empty, S.empty)) mac
-                | otherwise   = id
-        maybe (return ()) (modify . f) $ M.lookup mac macInfo
+      Nothing   -> modify . fromMaybe id $ do -- modify $ runIfEmpty (modMac (delMac (S.empty, S.empty))) mac
+        d <- M.lookup mac macInfo
+        if d == mempty
+          then return (modMac (delMac mempty) mac)
+          else return id
   -- FIXME: If mac was not found, but /is/ present in db, i should remove it,
   -- unless it's port state is 'Disabled'. A: Check it, macs with port state
   -- 'Disabled' should have non-empty 'macPorts', but others missed macs will
@@ -246,7 +289,7 @@ searchIPs ::
   m ()
 searchIPs ips = do
   Config{..} <- ask
-  xs <- case ips of
+  found <- case ips of
     [] -> do
       t <- liftIO getCurrentTime
       if diffUTCTime t cacheTime > updateInterval
@@ -254,8 +297,11 @@ searchIPs ips = do
         else return M.empty
     _ -> findIPInfo (Right ips) nmapHost
   liftIO $ print "Adding ips:"
-  liftIO $ print xs
-  modify (flip (M.foldrWithKey addIPMac) xs)
+  liftIO $ print found
+  forM_ ips $ \ip ->
+    case ip `M.lookup` found of
+      Just macs -> modify $ addIPMac ip macs
+      Nothing   -> modify (modIP (setIPState Unreachable) ip)
   -- FIXME: First, search for all macs of all IPs (both found and not found)
   -- to update port info. [current]
   -- FIXME: Then for all not found IPs set state to 'Unreachable'.

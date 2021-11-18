@@ -164,7 +164,7 @@ data IPData = IPData
   , ipState :: First IPState
   --, ipSubnet :: T.Text
   }
- deriving (Show)
+ deriving (Eq, Show)
 
 ipMacPortsL :: LensC IPData (M.Map MacAddr (M.Map Port (First PortState)))
 ipMacPortsL g z@IPData{ipMacPorts = x} = (\x' -> z{ipMacPorts = x'}) <$> g x
@@ -198,7 +198,7 @@ data PortData = PortData
   , portState :: First PortState
   --, portMode :: PortMode
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 instance Semigroup PortData where
     x <> y = PortData
