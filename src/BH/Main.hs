@@ -310,6 +310,14 @@ searchIPs ips = do
   -- If port is undefined, remove it from db.
   -- [current]
 
+searchIPsRec ::
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
+  [IP] ->
+  m ()
+searchIPsRec ips = do
+  searchIPs ips
+  (ipInfo, _, _) <- get
+
 {-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
   m ()
