@@ -242,6 +242,9 @@ class ModPort a where
 
 instance ModPort PortInfo where
   setPortState s = M.adjust (\d -> d{portState = pure s})
+  -- FIXME: Does it make sense, to delete port from specific macs only? I may
+  -- just add a port with edited mac set, effectively deleting it from other
+  -- macs, can i? [current]
   delPort macs port portInfo = fromMaybe portInfo $ do
     PortData{..} <- M.lookup port portInfo
     let f | S.size macs /= S.size (M.keysSet portAddrs) =
@@ -351,11 +354,20 @@ instance ModMac (M.Map MacAddr (M.Map Port (First PortState))) where
 
 instance ModMac MacInfo where
   addMac = flip M.insert
+  -- FIXME: This 'delMac'instance will never delete mac address completely.
+  -- Which may be right or wrong, but at least it's inconsistent with 'delIP'
+  -- and 'delPort' [current]
   delMac (ips, ports) mac macInfo = M.adjust go mac macInfo
    where
     go :: MacData -> MacData
     go = modifyL macIPsL (\z -> foldr M.delete z ips)
           . modifyL macPortsL (\z -> foldr M.delete z ports)
+
+[r1, ... , rN]
+
+k r1 [r2.. rN]
+k r2 [r1.. rN]
+k rN [r1.. rN-1]
 
 modMac' :: (forall a. ModMac a
               => MacAddr

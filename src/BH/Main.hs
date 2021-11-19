@@ -317,6 +317,16 @@ searchIPsRec ::
 searchIPsRec ips = do
   searchIPs ips
   (ipInfo, _, _) <- get
+  let macs = foldr (\ip z -> maybe z ((z <>) . M.keysSet . ipMacPorts) (M.lookup ip ipInfo)) S.empty ips
+  searchMacs macs
+  return ()
+
+searchMacsRec ::
+  (MonadReader Config m, MonadError String m, MonadIO m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
+  [MacAddr] ->
+  m ()
+searchMacsRec = do
+  searchMacs macs
 
 {-queryLinuxArp2 ::
   (MonadIO m, MonadError String m, MonadReader Config m, MonadState (IPInfo, MacInfo, PortInfo) m) =>
