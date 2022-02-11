@@ -128,34 +128,49 @@ instance Collection (M.Map Port PortData) where
 updateMac :: Maybe MacAddr -> GenRef -> MacMap -> MacMap
 updateMac m r mm = foldr (\x z -> update x r z) mm (buildRef m mm)
 
-updateByMac :: (MacAddr, Maybe Port) -> MacMap -> MacMap
-updateByMac (mac, mport) mm =
+updateMacsByMac :: (MacAddr, Maybe Port) -> MacMap -> MacMap
+updateMacsByMac (mac, mport) mm =
     let [ref0] = buildRef (Just mac) mm
         ref1 = GenRef {refMac = Just mac, refPort = mport}
     in  update ref0 ref1 mm
 
-updateByPort :: (Port, [MacAddr]) -> PortMap -> PortMap
-updateByPort (port, newMacs) pm0 =
-    let refs0 = buildRef (Just port) pm0
+updatePortsByMac :: (MacAddr, Maybe Port) -> MacMap -> PortMap -> PortMap
+updatePortsByMac (_, Nothing) _ pm = pm
+updatePortsByMac (mac, Just port) mm pm =
+    let oldMacs = mapMaybe refMac $ buildRef (Just port) pm
+    in  updatePortsByPort (port, mac : oldMacs) mm pm
+
+updatePortsByPort :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
+updatePortsByPort (newPort, newMacs) mm pm0 =
+    let refs0 = buildRef (Just newPort) pm0
         oldMacs = mapMaybe refMac refs0
-    in  refsAdd oldMacs . refsRemove oldMacs $ pm0
+    in  refsAdd oldMacs . refsRemoveOld oldMacs $ pm0
   where
+    refsRemoveNew :: MacAddr -> PortMap -> PortMap
+    refsRemoveNew mac pm = flip (maybe pm) (macPort <$> M.lookup mac mm) $ \oldPort ->
+        if oldPort /= newPort
+          then update GenRef{refMac = Just mac, refPort = Just oldPort}
+                      GenRef{refMac = Nothing , refPort = Just oldPort}
+                      pm
+          else pm
     refsAdd :: [MacAddr] -> PortMap -> PortMap
     refsAdd oldMacs pm = foldr
         (\mac pz ->
             if mac `notElem` oldMacs
-              then update ref0 GenRef{refMac = Just mac, refPort = Just port} pz
+              then update ref0 GenRef{refMac = Just mac, refPort = Just newPort}
+                    . refsRemoveNew mac
+                    $ pz
               else pz
         ) pm newMacs
-      where ref0 = GenRef{refMac = Nothing, refPort = Just port}
-    refsRemove :: [MacAddr] -> PortMap -> PortMap
-    refsRemove oldMacs pm = foldr
+      where ref0 = GenRef{refMac = Nothing, refPort = Just newPort}
+    refsRemoveOld :: [MacAddr] -> PortMap -> PortMap
+    refsRemoveOld oldMacs pm = foldr
         (\mac pz ->
             if mac `notElem` newMacs
-              then update GenRef{refMac = Just mac, refPort = Just port} ref1 pz
+              then update GenRef{refMac = Just mac, refPort = Just newPort} ref1 pz
               else pz
         ) pm oldMacs
-      where ref1 = GenRef {refMac = Nothing, refPort = Just port}
+      where ref1 = GenRef {refMac = Nothing, refPort = Just newPort}
 
 showMap :: (J.ToJSONKey a, ToJSON b) => M.Map a b -> IO ()
 showMap mm = B.putStr (encode mm)
