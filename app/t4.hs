@@ -128,6 +128,12 @@ instance Collection (M.Map Port PortData) where
 updateMac :: Maybe MacAddr -> GenRef -> MacMap -> MacMap
 updateMac m r mm = foldr (\x z -> update x r z) mm (buildRef m mm)
 
+updateByMac :: (MacAddr, Maybe Port) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateByMac k (mm, pm) =
+    let pm' = updatePortsByMac k mm pm
+        mm' = updateMacsByMac k mm
+    in  (mm', pm')
+
 updateMacsByMac :: (MacAddr, Maybe Port) -> MacMap -> MacMap
 updateMacsByMac (mac, mport) mm =
     let [ref0] = buildRef (Just mac) mm
@@ -139,6 +145,12 @@ updatePortsByMac (_, Nothing) _ pm = pm
 updatePortsByMac (mac, Just port) mm pm =
     let oldMacs = mapMaybe refMac $ buildRef (Just port) pm
     in  updatePortsByPort (port, mac : oldMacs) mm pm
+
+updateByPort :: (Port, [MacAddr]) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateByPort k (mm, pm) =
+    let pm' = updatePortsByPort k mm pm
+        mm' = updateMacsByPort k mm
+    in  (mm', pm')
 
 updatePortsByPort :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
 updatePortsByPort (newPort, newMacs) mm pm0 =
@@ -172,6 +184,13 @@ updatePortsByPort (newPort, newMacs) mm pm0 =
         ) pm oldMacs
       where ref1 = GenRef {refMac = Nothing, refPort = Just newPort}
 
+updateMacsByPort :: (Port, [MacAddr]) -> MacMap -> MacMap
+updateMacsByPort (port, macs) mm =
+    foldr (\mac mz -> updateMacsByMac (mac, Just port) mz) mm macs
+
 showMap :: (J.ToJSONKey a, ToJSON b) => M.Map a b -> IO ()
 showMap mm = B.putStr (encode mm)
+
+showAll :: (MacMap, PortMap) -> IO ()
+showAll (mm, pm) = showMap mm >> showMap pm
 
