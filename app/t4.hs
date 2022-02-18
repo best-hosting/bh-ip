@@ -194,15 +194,20 @@ insertMacRef r@(MacPortRef (Just x) mp) = M.insertWith (<>) x (setMacRef r)
 macUpdateRef :: MacPortRef -> MacPortRef -> MacMap -> MacMap
 macUpdateRef (MacPortRef mx _) (MacPortRef Nothing _) mm =
     fromMaybe mm $ M.delete <$> mx <*> pure mm
-macUpdateRef (MacPortRef Nothing _) r@(MacPortRef (Just x) mp) mm =
+macUpdateRef (MacPortRef Nothing _) r@(MacPortRef (Just x) newPort) mm =
     --M.insert x (mempty{macPort = maybe mempty (First . Just) mp}) mm
+    M.insert x (mempty{macPort = setPort newPort}) mm
     --M.insertWith (<>) x (setMacRef r) mm
-    insertMacRef r mm
-macUpdateRef (MacPortRef (Just x) _) r@(MacPortRef (Just y) mp) mm
+    --insertMacRef r mm
+macUpdateRef (MacPortRef (Just x) oldPort) r@(MacPortRef (Just y) newPort) mm
   | x == y  =
     --M.insertWith (<>) x (setMacRef r) mm
-    insertMacRef r mm
+    --insertMacRef r mm
+    M.insertWith (\_ old -> old{macPort = setPort newPort}) x mempty mm
   | otherwise   = error "Impossible"
+
+setPort   Nothing  = First Nothing
+setPort p@(Just _) = First p
 
 -- extract ?
 macBuildRef :: Maybe MacAddr -> MacMap -> MacPortRef
@@ -228,12 +233,18 @@ portUpdateRef (MacPortRef _ Nothing) r@(MacPortRef mm (Just x)) pm =
     M.insert x (setPortRef [r]) pm
 portUpdateRef (MacPortRef mo (Just x)) r@(MacPortRef mm (Just y)) pm
   | x == y =
-        let addMac Nothing macs  = maybe macs (\m -> filter (/= m) macs) mo
-            addMac (Just m) macs = m : macs
         --in  M.insertWith (\new old -> PortData{portName = portName old, portMacs = addMac mm (portMacs old)}) x (PortData {portMacs = [], portName = ""}) pm
         --in  M.insertWith (\new old -> PortData{portName = portName old, portMacs = addMac mm (portMacs old)}) x mempty pm
-        in  M.insertWith (\new old -> new{portMacs = pure $ addMac mm (fromMaybe [] $ getFirst (portMacs old))} <> old) x mempty pm
+    M.insertWith (\new old -> new{portMacs = pure $ addMac mo mm (fromMaybe [] $ getFirst (portMacs old))} <> old) x mempty pm
   | otherwise = error "Impossible"
+
+-- This function may be the most generic 'update' function, which should be
+-- instantiated according to some type-class instances.
+addMac :: (Eq a) => Maybe a -> Maybe a -> [a] -> [a]
+addMac Nothing    Nothing macs  = macs
+addMac (Just old) Nothing macs  = filter (/= old) macs
+addMac Nothing    (Just m) macs = m : macs
+addMac (Just old) (Just new) macs = addMac Nothing (Just new) . addMac (Just old) Nothing $ macs
 
 portBuildRef :: Maybe Port -> PortMap -> [MacPortRef]
 portBuildRef Nothing _ = []
