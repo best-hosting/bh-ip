@@ -3,6 +3,9 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 import qualified Data.Map as M
 import Data.Maybe
@@ -12,8 +15,9 @@ import qualified Data.Text as T
 import qualified Data.ByteString as B
 import qualified Data.Aeson.Types as J
 import qualified Data.Aeson.Encoding as JE
+import Data.List
 
---import BH.Common
+import BH.Common
 
 main :: IO ()
 main = showMap testA
@@ -82,6 +86,9 @@ data PortData = PortData
                   , portState :: First PortState
                   }
   deriving (Show)
+
+portMacsL :: LensC PortData (First [MacAddr])
+portMacsL g z@PortData{portMacs = x} = (\x' -> z{portMacs = x'}) <$> g x
 
 instance Semigroup PortData where
     x <> y = PortData
@@ -246,6 +253,49 @@ addMac (Just old) Nothing macs  = filter (/= old) macs
 addMac Nothing    (Just m) macs = m : macs
 addMac (Just old) (Just new) macs = addMac Nothing (Just new) . addMac (Just old) Nothing $ macs
 
+class MyCollection a where
+    type MyKey a
+    type MyElem a
+    myDelete :: MyKey a -> a -> a
+    myInsert :: MyKey a -> MyElem a -> a -> a
+    myUpdate :: (MyElem a -> MyElem a -> MyElem a) -> MyKey a -> MyElem a -> a -> a
+
+instance Ord a => MyCollection (M.Map a b) where
+    type MyKey (M.Map a b) = a
+    type MyElem (M.Map a b) = b
+    myDelete = M.delete
+    myInsert = M.insert
+    myUpdate = M.insertWith
+
+instance Eq a => MyCollection [a] where
+    type MyKey [a] = a
+    type MyElem [a] = a
+    myDelete x = filter (/= x)
+    myInsert x _ = (x :)
+    myUpdate _ = myInsert
+
+updateMyList :: Eq a => Maybe a -> Maybe a -> [a] -> [a]
+updateMyList Nothing Nothing ce = ce
+updateMyList (Just old) Nothing ce = myDelete old ce
+updateMyList Nothing (Just new) ce = myInsert new undefined ce
+updateMyList (Just old) (Just new) ce = myInsert new undefined . myDelete old $ ce
+
+alterList :: forall a. Eq a => (Maybe a -> Maybe a) -> a -> [a] -> [a]
+alterList f x xs = let mx = find (== x) xs in  g mx (f mx) xs
+  where
+    g :: Maybe a -> Maybe a -> [a] -> [a]
+    g Nothing  Nothing  = id
+    g _        Nothing  = filter (/= x)
+    g Nothing  (Just y) = (y :)
+    g (Just x) (Just y) = map (\w -> if w == x then y else w)
+
+updateMyCol :: (MyCollection a, Monoid (MyElem a)) => (MyElem a -> MyElem a -> MyElem a) -> Maybe (MyKey a) -> Maybe (MyKey a) -> a -> a
+--updateMyCol :: (MyCollection a, Monoid (MyElem a)) => Maybe (MyKey a) -> Maybe (MyKey a) -> a -> a
+updateMyCol _ Nothing Nothing ce = ce
+updateMyCol _ (Just old) Nothing ce = myDelete old ce
+updateMyCol _ Nothing (Just new) ce = myInsert new mempty ce
+updateMyCol f (Just old) (Just new) ce = myUpdate (<>) new mempty ce
+
 portBuildRef :: Maybe Port -> PortMap -> [MacPortRef]
 portBuildRef Nothing _ = []
 portBuildRef (Just p) pm =
@@ -317,6 +367,52 @@ updatePortsByPort (newPort, newMacs) mm pm0 =
         ) pm oldMacs
       where ref1 = MacPortRef {refMac = Nothing, refPort = Just newPort}
 
+updatePortsByPort2 :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
+updatePortsByPort2 (newPort, newMacs) mm pm0 =
+    let refs0 = buildRef (Just newPort) pm0
+        oldMacs = mapMaybe refMac refs0
+    in  refsAdd oldMacs . refsRemoveOld oldMacs $ pm0
+  where
+{-    refsRemoveNew mac pm = flip (maybe pm) (M.lookup mac mm >>= getFirst . macPort) $ \oldPort ->
+        if oldPort /= newPort
+          then update MacPortRef{refMac = Just mac, refPort = Just oldPort}
+                      MacPortRef{refMac = Nothing , refPort = Just oldPort}
+                      pm
+          else pm-}
+    deleteMac :: MacAddr -> Maybe PortData -> Maybe PortData
+{-    deleteMac mac Nothing = Nothing
+    deleteMac mac (Just pd@PortData{..}) =
+        Just pd{portMacs = alterList (const Nothing) mac <$> portMacs}-}
+    deleteMac mac = fmap $ modifyL portMacsL (alterList (const Nothing) mac <$>)
+
+    addMac :: MacAddr -> Maybe PortData -> Maybe PortData
+    --addMac mac Nothing = Just mempty{portMacs = pure [mac]}
+{-    addMac mac Nothing = Just mempty{portMacs = pure $ alterList (const (Just mac)) mac []}
+    addMac mac (Just pd@PortData{..}) = Just pd{portMacs = alterList (const (Just mac)) mac <$> portMacs}-}
+    addMac mac = fmap $ modifyL portMacsL (alterList (const (Just mac)) mac <$>)
+
+    refsRemoveNew :: MacAddr -> PortMap -> PortMap
+    refsRemoveNew mac pm =
+        let f oldPort   | oldPort /= newPort = M.alter (deleteMac mac) oldPort
+                        | otherwise          = id
+        in  fromMaybe pm $ f <$> (M.lookup mac mm >>= getFirst . macPort) <*> pure pm
+
+    refsAdd :: [MacAddr] -> PortMap -> PortMap
+    refsAdd oldMacs pm = foldr
+        (\mac pz ->
+            if mac `notElem` oldMacs
+              then M.alter (addMac mac) newPort . refsRemoveNew mac $ pz
+              else pz
+        ) pm newMacs
+      where ref0 = MacPortRef{refMac = Nothing, refPort = Just newPort}
+
+    refsRemoveOld :: [MacAddr] -> PortMap -> PortMap
+    refsRemoveOld oldMacs pm =
+      foldr
+        (\mac -> if mac `notElem` newMacs then M.alter (deleteMac mac) newPort else id)
+        pm
+        oldMacs
+
 updateMacsByPort :: (Port, [MacAddr]) -> MacMap -> MacMap
 updateMacsByPort (port, macs) mm =
     foldr (\mac mz -> updateMacsByMac (mac, Just port) mz) mm macs
@@ -326,4 +422,7 @@ showMap mm = B.putStr (encode mm)
 
 showAll :: (MacMap, PortMap) -> IO ()
 showAll (mm, pm) = showMap mm >> showMap pm
+
+fff :: MacAddr -> [MacAddr] -> [MacAddr]
+fff mac = alterList (const (Just mac)) mac
 
