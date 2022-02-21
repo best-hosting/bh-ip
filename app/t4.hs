@@ -62,6 +62,9 @@ data MacData = MacData
                 }
   deriving (Show)
 
+macPortL :: LensC MacData (First Port)
+macPortL g z@MacData{macPort = x} = (\x' -> z{macPort = x'}) <$> g x
+
 instance Semigroup MacData where
     x <> y = MacData
                 { macPort   = macPort x <> macPort y
@@ -323,6 +326,9 @@ updateMacsByMac (mac, mport) mm =
         ref1 = MacPortRef {refMac = Just mac, refPort = mport}
     in  update ref0 ref1 mm
 
+updateMacsByMac2 :: (MacAddr, Maybe Port) -> MacMap -> MacMap
+updateMacsByMac2 (mac, mport) = M.alter (modifyL macPortL (const (First mport)) <$>) mac
+
 updatePortsByMac :: (MacAddr, Maybe Port) -> MacMap -> PortMap -> PortMap
 updatePortsByMac (_, Nothing) _ pm = pm
 updatePortsByMac (mac, Just port) mm pm =
@@ -369,26 +375,13 @@ updatePortsByPort (newPort, newMacs) mm pm0 =
 
 updatePortsByPort2 :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
 updatePortsByPort2 (newPort, newMacs) mm pm0 =
-    let refs0 = buildRef (Just newPort) pm0
-        oldMacs = mapMaybe refMac refs0
+    let oldMacs = fromMaybe [] (M.lookup newPort pm0 >>= getFirst . portMacs)
     in  refsAdd oldMacs . refsRemoveOld oldMacs $ pm0
   where
-{-    refsRemoveNew mac pm = flip (maybe pm) (M.lookup mac mm >>= getFirst . macPort) $ \oldPort ->
-        if oldPort /= newPort
-          then update MacPortRef{refMac = Just mac, refPort = Just oldPort}
-                      MacPortRef{refMac = Nothing , refPort = Just oldPort}
-                      pm
-          else pm-}
     deleteMac :: MacAddr -> Maybe PortData -> Maybe PortData
-{-    deleteMac mac Nothing = Nothing
-    deleteMac mac (Just pd@PortData{..}) =
-        Just pd{portMacs = alterList (const Nothing) mac <$> portMacs}-}
     deleteMac mac = fmap $ modifyL portMacsL (alterList (const Nothing) mac <$>)
 
     addMac :: MacAddr -> Maybe PortData -> Maybe PortData
-    --addMac mac Nothing = Just mempty{portMacs = pure [mac]}
-{-    addMac mac Nothing = Just mempty{portMacs = pure $ alterList (const (Just mac)) mac []}
-    addMac mac (Just pd@PortData{..}) = Just pd{portMacs = alterList (const (Just mac)) mac <$> portMacs}-}
     addMac mac = fmap $ modifyL portMacsL (alterList (const (Just mac)) mac <$>)
 
     refsRemoveNew :: MacAddr -> PortMap -> PortMap
@@ -399,12 +392,11 @@ updatePortsByPort2 (newPort, newMacs) mm pm0 =
 
     refsAdd :: [MacAddr] -> PortMap -> PortMap
     refsAdd oldMacs pm = foldr
-        (\mac pz ->
+        (\mac ->
             if mac `notElem` oldMacs
-              then M.alter (addMac mac) newPort . refsRemoveNew mac $ pz
-              else pz
+              then M.alter (addMac mac) newPort . refsRemoveNew mac
+              else id
         ) pm newMacs
-      where ref0 = MacPortRef{refMac = Nothing, refPort = Just newPort}
 
     refsRemoveOld :: [MacAddr] -> PortMap -> PortMap
     refsRemoveOld oldMacs pm =
@@ -412,6 +404,65 @@ updatePortsByPort2 (newPort, newMacs) mm pm0 =
         (\mac -> if mac `notElem` newMacs then M.alter (deleteMac mac) newPort else id)
         pm
         oldMacs
+
+updatePortsByPort3 :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
+updatePortsByPort3 (newPort, newMacs) mm pm0 =
+    let oldMacs = fromMaybe [] (M.lookup newPort pm0 >>= getFirst . portMacs)
+    in  foldr (.) id (refsAdd oldMacs ++ refsRemoveOld oldMacs) $ pm0
+  where
+    deleteMac :: MacAddr -> Maybe PortData -> Maybe PortData
+    deleteMac mac = fmap $ modifyL portMacsL (alterList (const Nothing) mac <$>)
+
+    addMac :: MacAddr -> Maybe PortData -> Maybe PortData
+    addMac mac = fmap $ modifyL portMacsL (alterList (const (Just mac)) mac <$>)
+
+    refsRemoveNew :: MacAddr -> PortMap -> PortMap
+    refsRemoveNew mac pm =
+        let f oldPort   | oldPort /= newPort = M.alter (deleteMac mac) oldPort
+                        | otherwise          = id
+        in  fromMaybe pm $ f <$> (M.lookup mac mm >>= getFirst . macPort) <*> pure pm
+
+    refsAdd :: [MacAddr] -> [PortMap -> PortMap]
+    refsAdd oldMacs = map
+        (\mac ->
+            if mac `notElem` oldMacs
+              then M.alter (addMac mac) newPort . refsRemoveNew mac
+              else id
+        ) newMacs
+
+    refsRemoveOld :: [MacAddr] -> [PortMap -> PortMap]
+    refsRemoveOld oldMacs =
+      map
+        (\mac -> if mac `notElem` newMacs then M.alter (deleteMac mac) newPort else id)
+        oldMacs
+
+updatePortsByPort4 :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
+updatePortsByPort4 (newPort, newMacs) mm pm0 =
+    let oldMacs = fromMaybe [] (M.lookup newPort pm0 >>= getFirst . portMacs)
+        hs = (refsAdd2 oldMacs <$> newMacs) ++ (refsRemoveOld2 <$> oldMacs)
+    in  foldr (.) id hs pm0
+  where
+    deleteMac :: MacAddr -> Maybe PortData -> Maybe PortData
+    deleteMac mac = fmap $ modifyL portMacsL (alterList (const Nothing) mac <$>)
+
+    addMac :: MacAddr -> Maybe PortData -> Maybe PortData
+    addMac mac = fmap $ modifyL portMacsL (alterList (const (Just mac)) mac <$>)
+
+    refsRemoveNew :: MacAddr -> PortMap -> PortMap
+    refsRemoveNew mac pm =
+        let f oldPort   | oldPort /= newPort = M.alter (deleteMac mac) oldPort
+                        | otherwise          = id
+        in  fromMaybe pm $ f <$> (M.lookup mac mm >>= getFirst . macPort) <*> pure pm
+
+    refsAdd2 :: [MacAddr] -> MacAddr -> PortMap -> PortMap
+    refsAdd2 oldMacs mac
+      | mac `notElem` oldMacs = M.alter (addMac mac) newPort . refsRemoveNew mac
+      | otherwise             = id
+
+    refsRemoveOld2 :: MacAddr -> PortMap -> PortMap
+    refsRemoveOld2 mac
+      | mac `notElem` newMacs = M.alter (deleteMac mac) newPort
+      | otherwise             = id
 
 updateMacsByPort :: (Port, [MacAddr]) -> MacMap -> MacMap
 updateMacsByPort (port, macs) mm =
