@@ -206,18 +206,34 @@ macUpdateRef (MacPortRef mx _) (MacPortRef Nothing _) mm =
     fromMaybe mm $ M.delete <$> mx <*> pure mm
 macUpdateRef (MacPortRef Nothing _) r@(MacPortRef (Just x) newPort) mm =
     --M.insert x (mempty{macPort = maybe mempty (First . Just) mp}) mm
-    M.insert x (mempty{macPort = setPort newPort}) mm
+    --M.insert x (mempty{macPort = First newPort}) mm
     --M.insertWith (<>) x (setMacRef r) mm
     --insertMacRef r mm
-macUpdateRef (MacPortRef (Just x) oldPort) r@(MacPortRef (Just y) newPort) mm
-  | x == y  =
+    M.insertWith
+        (\_ old ->
+            old{macPort = First . setPort newPort $ getFirst (macPort old)})
+        x mempty mm
+macUpdateRef (MacPortRef (Just x) oldPort) r@(MacPortRef (Just y) Nothing) mm =
+    M.insertWith
+        (\_ old ->
+            old{macPort = First . setPort Nothing $ getFirst (macPort old)})
+        x mempty mm
+macUpdateRef (MacPortRef (Just x) oldPort) r@(MacPortRef (Just y) (Just newPort)) mm =
     --M.insertWith (<>) x (setMacRef r) mm
     --insertMacRef r mm
-    M.insertWith (\_ old -> old{macPort = setPort newPort}) x mempty mm
-  | otherwise   = error "Impossible"
+    M.insertWith
+        (\_ old ->
+            old{macPort = First . setPort (Just newPort) $ getFirst (macPort old)})
+        y mempty
+    . M.insertWith
+        (\_ old ->
+            old{macPort = First . setPort Nothing $ getFirst (macPort old)})
+        x mempty
+    $ mm
 
-setPort   Nothing  = First Nothing
-setPort p@(Just _) = First p
+setPort :: Maybe Port -> Maybe Port -> Maybe Port
+setPort Nothing = const Nothing
+setPort (Just new) = const (Just new)
 
 -- extract ?
 macBuildRef :: Maybe MacAddr -> MacMap -> MacPortRef
@@ -239,14 +255,35 @@ setPortRef refs = PortData {portMacs = pure $ mapMaybe refMac refs}
 portUpdateRef :: MacPortRef -> MacPortRef -> PortMap -> PortMap
 portUpdateRef (MacPortRef _ mx) (MacPortRef _ Nothing) pm =
     fromMaybe pm $ M.delete <$> mx <*> pure pm
-portUpdateRef (MacPortRef _ Nothing) r@(MacPortRef mm (Just x)) pm =
-    M.insert x (setPortRef [r]) pm
-portUpdateRef (MacPortRef mo (Just x)) r@(MacPortRef mm (Just y)) pm
-  | x == y =
-        --in  M.insertWith (\new old -> PortData{portName = portName old, portMacs = addMac mm (portMacs old)}) x (PortData {portMacs = [], portName = ""}) pm
-        --in  M.insertWith (\new old -> PortData{portName = portName old, portMacs = addMac mm (portMacs old)}) x mempty pm
-    M.insertWith (\new old -> new{portMacs = pure $ addMac mo mm (fromMaybe [] $ getFirst (portMacs old))} <> old) x mempty pm
-  | otherwise = error "Impossible"
+portUpdateRef (MacPortRef mo Nothing) (MacPortRef mm (Just x)) pm =
+    --M.insert x (mempty{portMacs = pure (maybeToList mm)}) pm
+    M.insertWith
+        (\_ old -> old{portMacs = pure $ addMac mo mm (fromMaybe [] $ getFirst (portMacs old))})
+        x mempty pm
+portUpdateRef (MacPortRef mo (Just x)) r@(MacPortRef Nothing (Just y)) pm =
+    M.insertWith
+        (\_ old -> old{portMacs = pure $ addMac mo Nothing (fromMaybe [] $ getFirst (portMacs old))})
+        x mempty pm
+portUpdateRef (MacPortRef mo (Just x)) r@(MacPortRef (Just newMac) (Just y)) pm =
+    M.insertWith
+        (\_ old ->
+            old{portMacs = pure
+                    . addMac Nothing (Just newMac)
+                    $ (fromMaybe [] $ getFirst (portMacs old))})
+        y mempty
+    . M.insertWith
+        (\_ old ->
+            old{portMacs = pure
+                    -- If trust consistency of references, i should not delete
+                    -- new mac on old port, because i that was /not/
+                    -- explicitly requested.
+                    -- . addMac (Just newMac) Nothing
+                    . addMac mo Nothing
+                    $ (fromMaybe [] $ getFirst (portMacs old))
+                })
+        x mempty
+    $ pm
+
 
 -- This function may be the most generic 'update' function, which should be
 -- instantiated according to some type-class instances.
@@ -463,6 +500,16 @@ updatePortsByPort4 (newPort, newMacs) mm pm0 =
     refsRemoveOld2 mac
       | mac `notElem` newMacs = M.alter (deleteMac mac) newPort
       | otherwise             = id
+
+updatePortsByPort5 :: (Port, [MacAddr]) -> MacMap -> PortMap -> PortMap
+updatePortsByPort5 (newPort, newMacs) mm pm0 =
+    let refs = map (\mac ->
+                      ( MacPortRef {refMac = Just mac, refPort = M.lookup mac mm >>= getFirst . macPort}
+                      , MacPortRef {refMac = Just mac, refPort = Just newPort}
+                      )
+                   )
+                   newMacs
+    in  foldr (\(x, y) z -> portUpdateRef x y z) pm0 refs
 
 updateMacsByPort :: (Port, [MacAddr]) -> MacMap -> MacMap
 updateMacsByPort (port, macs) mm =
