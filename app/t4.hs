@@ -372,6 +372,18 @@ updateMacsByMac3 (mac, mport) mm0 =
         MacPortRef{refMac = Just mac, refPort = mport}
         mm0
 
+updateMacsByMac4 :: (MacAddr, Maybe Port) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateMacsByMac4 (mac, mport) (mm0, pm0) =
+    ( macUpdateRef
+        MacPortRef{refMac = const mac <$> M.lookup mac mm0, refPort = M.lookup mac mm0 >>= getFirst . macPort}
+        MacPortRef{refMac = Just mac, refPort = mport}
+        mm0
+    , portUpdateRef
+        MacPortRef{refMac = const mac <$> M.lookup mac mm0, refPort = M.lookup mac mm0 >>= getFirst . macPort}
+        MacPortRef{refMac = Just mac, refPort = mport}
+        pm0
+    )
+
 updatePortsByMac :: (MacAddr, Maybe Port) -> MacMap -> PortMap -> PortMap
 updatePortsByMac (_, Nothing) _ pm = pm
 updatePortsByMac (mac, Just port) mm pm =
@@ -520,6 +532,7 @@ updatePortsByPort5 (newPort, newMacs) mm pm0 =
           ( MacPortRef{refMac = Nothing, refPort = const newPort <$> M.lookup newPort pm0}
           , MacPortRef{refMac = Nothing, refPort = Just newPort}
           )
+
         refsDelete =
           map (\mac ->
                   ( MacPortRef {refMac = Just mac, refPort = const newPort <$> M.lookup newPort pm0}
@@ -536,6 +549,77 @@ updatePortsByPort5 (newPort, newMacs) mm pm0 =
                    (newMacs \\ oldMacs)
 
     in  foldr (\(x, y) z -> portUpdateRef x y z) pm1 (refsAdd ++ refsDelete)
+
+f :: (MacPortRef, MacPortRef) -> (MacMap, PortMap) -> (MacMap, PortMap)
+f ref (mm, pm) =
+    ( uncurry macUpdateRef ref mm
+    , uncurry portUpdateRef ref pm
+    )
+
+updatePortsByPort6 :: (Port, [MacAddr]) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updatePortsByPort6 (newPort, newMacs) (mm0, pm0) =
+    let oldMacs = fromMaybe [] $ M.lookup newPort pm0 >>= getFirst . portMacs
+
+        refsAddPort =
+          ( MacPortRef{refMac = Nothing, refPort = const newPort <$> M.lookup newPort pm0}
+          , MacPortRef{refMac = Nothing, refPort = Just newPort}
+          )
+
+        refsDelete =
+          map (\mac ->
+                  ( MacPortRef {refMac = Just mac, refPort = const newPort <$> M.lookup newPort pm0}
+                  , MacPortRef {refMac = Just mac, refPort = Nothing}
+                  )
+              )
+              (oldMacs \\ newMacs)
+
+        refsAdd = foldr (\mac z ->
+                      ( MacPortRef {refMac = const mac <$> M.lookup mac mm0, refPort = M.lookup mac mm0 >>= getFirst . macPort}
+                      , MacPortRef {refMac = Just mac, refPort = Just newPort}
+                      ) : z
+                   )
+                   [refsAddPort]
+                   (newMacs \\ oldMacs)
+
+    in  foldr (\ref z -> f ref z) (mm0, pm0) (refsAdd ++ refsDelete)
+
+updatePortsByPort7 :: (Port, [MacAddr]) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updatePortsByPort7 (newPort, newMacs) (mm0, pm0) =
+    let oldMacs = fromMaybe [] $ M.lookup newPort pm0 >>= getFirst . portMacs
+
+        refAddPort =
+          ( MacPortRef{refMac = Nothing, refPort = const newPort <$> M.lookup newPort pm0}
+          , MacPortRef{refMac = Nothing, refPort = Just newPort}
+          )
+
+        (mm1, pm1) =
+          foldr
+            (\mac (mm, pm) ->
+              ( uncurry macUpdateRef
+                  ( MacPortRef {refMac = Just mac, refPort = const newPort <$> M.lookup newPort pm0}
+                  , MacPortRef {refMac = Just mac, refPort = Nothing}
+                  )
+                  mm
+              , uncurry portUpdateRef
+                  ( MacPortRef {refMac = Just mac, refPort = const newPort <$> M.lookup newPort pm0}
+                  , MacPortRef {refMac = Nothing, refPort = Just newPort}
+                  )
+                  pm
+              )
+            )
+            (mm0, pm0)
+            (oldMacs \\ newMacs)
+
+        refsAdd = map (\mac ->
+                      ( MacPortRef {refMac = const mac <$> M.lookup mac mm0, refPort = M.lookup mac mm0 >>= getFirst . macPort}
+                      , MacPortRef {refMac = Just mac, refPort = Just newPort}
+                      )
+                   )
+                   (newMacs \\ oldMacs)
+
+    in  foldr (\ref z -> f ref z) (f refAddPort (mm1, pm1)) refsAdd
+
+
 
 updateMacsByPort :: (Port, [MacAddr]) -> MacMap -> MacMap
 updateMacsByPort (port, macs) mm =
