@@ -252,6 +252,9 @@ setPortRef refs = PortData {portMacs = pure $ mapMaybe refMac refs}
 
 --insertPortRef :: MacPortRef 
 portUpdateRef :: MacPortRef -> MacPortRef -> PortMap -> PortMap
+-- M.delete may be wrong choice here, because 'delete' does not "break
+-- binding", it completely deletes element. This may be not what i really
+-- want.
 portUpdateRef (MacPortRef _ mx) (MacPortRef _ Nothing) pm =
     fromMaybe pm $ M.delete <$> mx <*> pure pm
 portUpdateRef (MacPortRef mo Nothing) (MacPortRef mm (Just x)) pm =
@@ -382,6 +385,27 @@ updateMacsByMac4 (mac, mport) (mm0, pm0) =
         MacPortRef{refMac = const mac <$> M.lookup mac mm0, refPort = M.lookup mac mm0 >>= getFirst . macPort}
         MacPortRef{refMac = Just mac, refPort = mport}
         pm0
+    )
+
+updateMacsByMac5 :: (MacAddr, Maybe Port) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateMacsByMac5 (mac, newPort) (mm0, pm0) =
+    -- If mac is unbound from port, i should not delete port from PortMap
+    -- entirely (after all, it may contain other macs). Thus, slightly
+    -- modified ref.
+    let oldPort = M.lookup mac mm0 >>= getFirst . macPort
+        pm1 = portUpdateRef
+                MacPortRef{refMac = const mac <$> M.lookup mac mm0, refPort = oldPort}
+                MacPortRef{refMac = if newPort /= oldPort then Nothing else Just mac, refPort = oldPort}
+                pm0
+    in 
+    ( macUpdateRef
+        MacPortRef{refMac = const mac <$> M.lookup mac mm0, refPort = M.lookup mac mm0 >>= getFirst . macPort}
+        MacPortRef{refMac = Just mac, refPort = newPort}
+        mm0
+    , portUpdateRef
+        MacPortRef{refMac = const mac <$> M.lookup mac mm0, refPort = newPort}
+        MacPortRef{refMac = Just mac, refPort = newPort}
+        pm1
     )
 
 updatePortsByMac :: (MacAddr, Maybe Port) -> MacMap -> PortMap -> PortMap
@@ -550,8 +574,8 @@ updatePortsByPort5 (newPort, newMacs) mm pm0 =
 
     in  foldr (\(x, y) z -> portUpdateRef x y z) pm1 (refsAdd ++ refsDelete)
 
-f :: (MacPortRef, MacPortRef) -> (MacMap, PortMap) -> (MacMap, PortMap)
-f ref (mm, pm) =
+updateRef :: (MacPortRef, MacPortRef) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateRef ref (mm, pm) =
     ( uncurry macUpdateRef ref mm
     , uncurry portUpdateRef ref pm
     )
@@ -581,7 +605,7 @@ updatePortsByPort6 (newPort, newMacs) (mm0, pm0) =
                    [refsAddPort]
                    (newMacs \\ oldMacs)
 
-    in  foldr (\ref z -> f ref z) (mm0, pm0) (refsAdd ++ refsDelete)
+    in  foldr (\ref z -> updateRef ref z) (mm0, pm0) (refsAdd ++ refsDelete)
 
 updatePortsByPort7 :: (Port, [MacAddr]) -> (MacMap, PortMap) -> (MacMap, PortMap)
 updatePortsByPort7 (newPort, newMacs) (mm0, pm0) =
@@ -592,6 +616,9 @@ updatePortsByPort7 (newPort, newMacs) (mm0, pm0) =
           , MacPortRef{refMac = Nothing, refPort = Just newPort}
           )
 
+        -- For macs, which are no longer present, remove mac-port binding,
+        -- but do /not/ delete mac and port itself. Thus, i need to use slightly
+        -- different refs for MacMap and PortMap.
         (mm1, pm1) =
           foldr
             (\mac (mm, pm) ->
@@ -617,7 +644,7 @@ updatePortsByPort7 (newPort, newMacs) (mm0, pm0) =
                    )
                    (newMacs \\ oldMacs)
 
-    in  foldr (\ref z -> f ref z) (f refAddPort (mm1, pm1)) refsAdd
+    in  foldr updateRef (updateRef refAddPort (mm1, pm1)) refsAdd
 
 
 
