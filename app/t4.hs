@@ -127,22 +127,22 @@ instance ToJSON PortData where
               ]
 
 data PortData2 = PortData2
-                  { portMacs2 :: First [MacAddr]
-                  , portServers2 :: First [String]
+                  { unknownMacs2 :: First [MacAddr]
+                  , portServers2 :: First [M.Map String [MacAddr]]
                   , portState2 :: First PortState
                   }
   deriving (Show)
 
 instance Semigroup PortData2 where
     x <> y = PortData2
-                { portMacs2 = portMacs2 x <> portMacs2 y
+                { unknownMacs2 = unknownMacs2 x <> unknownMacs2 y
                 , portServers2 = portServers2 x <> portServers2 y
                 , portState2 = portState2 x <> portState2 y
                 }
 
 instance Monoid PortData2 where
     mempty = PortData2
-                { portMacs2 = mempty
+                { unknownMacs2 = mempty
                 , portServers2 = mempty
                 , portState2 = mempty
                 }
@@ -150,7 +150,7 @@ instance Monoid PortData2 where
 instance ToJSON PortData2 where
     toJSON PortData2 {..} =
         object . mapMaybe id $
-              [ ("macs" .=) <$> getFirst portMacs2
+              [ ("macs" .=) <$> getFirst unknownMacs2
               , ("name" .=) <$> getFirst portServers2
               , ("state" .=) <$> getFirst portState2
               ]
@@ -232,11 +232,11 @@ testA2 = M.fromList
       )
     ]
 
-testB2 :: PortMap2
+{-testB2 :: PortMap2
 testB2 = M.fromList
     [ ( Port "sw/1"
       , PortData2
-        { portMacs2 = pure
+        { unknownMacs2 = pure
             [ MacAddr "1:1:1"
             , MacAddr "1:1:2"
             , MacAddr "2:2:2"
@@ -250,19 +250,19 @@ testB2 = M.fromList
       )
     , ( Port "sw/2"
       , PortData2
-        { portMacs2 = pure [MacAddr "3:3:3"]
+        { unknownMacs2 = pure [MacAddr "3:3:3"]
         , portServers2 = pure ["bh3"]
         , portState2 = pure Up
         }
       )
     , ( Port "sw/3"
       , PortData2
-        { portMacs2 = pure []
+        { unknownMacs2 = pure []
         , portServers2 = pure []
         , portState2 = pure Up
         }
       )
-    ]
+    ]-}
 
 
 
@@ -377,13 +377,13 @@ portUpdateRef3 (NameRef oldMac oldPort oldName) (NameRef newMac newPort newName)
       maybe id (\p ->
           M.insertWith
             (\_ old ->
-                old{ portMacs2 = maybe (portMacs2 old) pure
-                        $ (:) <$> newMac <*> getFirst (portMacs2 old)
+                old{ unknownMacs2 = maybe (unknownMacs2 old) pure
+                        $ (:) <$> newMac <*> getFirst (unknownMacs2 old)
                    , portServers2 = maybe (portServers2 old) pure
                         $ (:) <$> newName <*> getFirst (portServers2 old)
                    })
           p mempty
-              { portMacs2 = First $ (: []) <$> newMac
+              { unknownMacs2 = First $ (: []) <$> newMac
               , portServers2 = First $ (: []) <$> newName
               }
         )
@@ -391,11 +391,11 @@ portUpdateRef3 (NameRef oldMac oldPort oldName) (NameRef newMac newPort newName)
     . maybe id (\p ->
         M.adjust
           (\d ->
-              d{portMacs2 = maybe (portMacs2 d) pure
+              d{unknownMacs2 = maybe (unknownMacs2 d) pure
                       -- If i trust consistency of references, i should not
                       -- delete new mac on old port, because that was /not/
                       -- explicitly requested.
-                    $ getFirst (portMacs2 d) >>= filterM (\x -> (x /=) <$> oldMac)
+                    $ getFirst (unknownMacs2 d) >>= filterM (\x -> (x /=) <$> oldMac)
                , portServers2 = maybe (portServers2 d) pure
                     $ getFirst (portServers2 d) >>= filterM (\x -> (x /=) <$> oldName)
                }
@@ -425,11 +425,11 @@ updateRef2 ref (mm, pm) =
     , uncurry portUpdateRef2 ref pm
     )
 
-updateRef3 :: (NameRef, NameRef) -> (MacMap, PortMap2) -> (MacMap, PortMap2)
+{-updateRef3 :: (NameRef, NameRef) -> (MacMap, PortMap2) -> (MacMap, PortMap2)
 updateRef3 ref (mm, pm) =
     ( uncurry macUpdateRef2 ref mm
     , uncurry portUpdateRef3 ref pm
-    )
+    )-}
 
 {-updateMacPort :: (MacAddr, Maybe Port) -> (MacMap, PortMap) -> (MacMap, PortMap)
 updateMacPort (mac, newPort) (mm0, pm0) =
@@ -653,9 +653,9 @@ updateMacPort2 (mac, newPort) (mm0, pm0) =
 
 
 
-updatePortName2 :: (Port, String) -> (MacMap, PortMap2) -> (MacMap, PortMap2)
+{-updatePortName2 :: (Port, String) -> (MacMap, PortMap2) -> (MacMap, PortMap2)
 updatePortName2 (port, newName) (mm0, pm0) =
-    let oldMacs = fromMaybe [] $ M.lookup port pm0 >>= getFirst . portMacs2
+    let oldMacs = fromMaybe [] $ M.lookup port pm0 >>= getFirst . unknownMacs2
         (mm1, pm1) =
           foldr
             (\mac (mm, pm) ->
@@ -689,32 +689,4 @@ updatePortName2 (port, newName) (mm0, pm0) =
                 }
             )
     in updateRef3 refChangeName (mm1, pm1)
-
-updateMacName2 :: (MacAddr, String) -> (MacMap, PortMap2) -> (MacMap, PortMap2)
-updateMacName2 (mac, newName) (mm0, pm0) =
-    let oldName = M.lookup mac mm0 >>= getFirst . macServer
-        oldPort = M.lookup mac mm0 >>= getFirst . macPort
-        refSplit =  ( NameRef
-                        { nrMac  = Just mac
-                        , nrPort = oldPort
-                        , nrName = oldName
-                        }
-                    , NameRef
-                        { nrMac  = Nothing
-                        , nrPort = oldPort
-                        , nrName = oldName
-                        }
-                    )
-        refChangeName = ( NameRef
-                            { nrMac = Just mac
-                            , nrPort = Nothing
-                            , nrName = oldName
-                            }
-                        , NameRef
-                            { nrMac = Just mac
-                            , nrPort = Nothing
-                            , nrName = Just newName
-                            }
-                        )
-    in  updateRef2 refChangeName . updateRef2 refSplit $ (mm0, pm0)
-
+-}
