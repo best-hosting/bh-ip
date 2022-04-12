@@ -231,6 +231,10 @@ portUpdateRef (MacPortRef oldMac oldPort) (MacPortRef newMac newPort) pm =
       oldPort
     $ pm
 
+-- FIXME: Should i check 'Just'/Nothing for non-list fields and check equality
+-- before deleting, like i do for 'addMac'? Or just delete non-list fields
+-- without any checks?
+--
 -- This is effectively (setL new . setL mempty) for all fields. Maybe a class
 -- parametrizing /lenses/ over data type may allow to merge all these into one
 -- function.
@@ -369,7 +373,7 @@ updatePortName (port, newName) (mm0, pm0) =
             )
             (mm0, pm0)
             oldMacs
-        refAddName =
+        refChangeName =
             ( NameRef
                 { nrMac = Nothing
                 , nrPort = Just port
@@ -381,9 +385,120 @@ updatePortName (port, newName) (mm0, pm0) =
                 , nrName = Just newName
                 }
             )
-    in updateRef2 refAddName (mm1, pm1)
+    in updateRef2 refChangeName (mm1, pm1)
 
-{-updateMacName :: (MacAddr, String) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateMacName :: (MacAddr, String) -> (MacMap, PortMap) -> (MacMap, PortMap)
 updateMacName (mac, newName) (mm0, pm0) =
-    let ...-}
+    let oldName = M.lookup mac mm0 >>= getFirst . macServer
+        oldPort = M.lookup mac mm0 >>= getFirst . macPort
+        refSplit =  ( NameRef
+                        { nrMac  = Just mac
+                        , nrPort = oldPort
+                        , nrName = oldName
+                        }
+                    , NameRef
+                        { nrMac  = Nothing
+                        , nrPort = oldPort
+                        , nrName = oldName
+                        }
+                    )
+        refChangeName = ( NameRef
+                            { nrMac = Just mac
+                            , nrPort = Nothing
+                            , nrName = oldName
+                            }
+                        , NameRef
+                            { nrMac = Just mac
+                            , nrPort = Nothing
+                            , nrName = Just newName
+                            }
+                        )
+    in  updateRef2 refChangeName . updateRef2 refSplit $ (mm0, pm0)
+
+updatePortMacs2 :: (Port, [MacAddr]) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updatePortMacs2 (port, newMacs) (mm0, pm0) =
+    let oldMacs = fromMaybe [] $ M.lookup port pm0 >>= getFirst . portMacs
+        oldName = M.lookup port pm0 >>= getFirst . portName
+
+        -- For adding port i don't even need to check whether it's already
+        -- there or not, just assume, it's not there.
+        refAddPort =
+          ( NameRef {nrMac = Nothing, nrPort = Nothing, nrName = Nothing}
+          , NameRef {nrMac = Nothing, nrPort = Just port, nrName = oldName}
+          )
+
+        -- For macs, which are no longer present, remove mac-port binding,
+        -- but do /not/ delete mac and port itself. Thus, i need to use slightly
+        -- different refs for MacMap and PortMap.
+        -- FIXME: Do i need this now? 'portUpdateRef' does not delete any
+        -- keys.
+        -- If there's no port yet, 'oldMacs' will be empty. So i may safely
+        -- assume, that if 'foldr' run, port was already there.
+        -- These 'NameRef'-s will delete both port and name from mac. Well, i
+        -- assume, that the one update holds correct info, and if mac looses
+        -- port, than name will remain with port.
+        (mm1, pm1) =
+          foldr
+            (\mac (mm, pm) ->
+              let refSplit =
+                    ( NameRef {nrMac = Just mac, nrPort = Just port, nrName = oldName}
+                    , NameRef {nrMac = Nothing, nrPort = Just port, nrName = oldName}
+                    )
+              in  updateRef2 refSplit (mm, pm)
+            )
+            (mm0, pm0)
+            (oldMacs \\ newMacs)
+
+        refsAdd =
+          foldr
+            (\mac z ->
+                let oldPort = M.lookup mac mm0 >>= getFirst . macPort
+                    refSplit =
+                      ( NameRef
+                          { nrMac = const mac <$> M.lookup mac mm0
+                          , nrPort = oldPort
+                          , nrName = oldName
+                          }
+                      , NameRef
+                          { nrMac = Nothing
+                          , nrPort = oldPort
+                          , nrName = oldName
+                          }
+                      )
+                    refAdd =
+                      ( NameRef
+                          { nrMac = const mac <$> M.lookup mac mm0
+                          , nrPort = Nothing
+                          , nrName = Nothing
+                          }
+                      , NameRef
+                          { nrMac  = Just mac
+                          , nrPort = Just port
+                          , nrName = oldName
+                          }
+                      )
+                in  refAdd : refSplit : z
+             )
+             [refAddPort]
+             (newMacs \\ oldMacs)
+
+    in  foldr updateRef2 (mm1, pm1) refsAdd
+
+updateMacPort2 :: (MacAddr, Maybe Port) -> (MacMap, PortMap) -> (MacMap, PortMap)
+updateMacPort2 (mac, newPort) (mm0, pm0) =
+    let oldName = M.lookup mac mm0 >>= getFirst . macServer
+        oldPort = M.lookup mac mm0 >>= getFirst . macPort
+        refChange =
+          ( NameRef
+              { nrMac = Just mac
+              , nrPort = oldPort
+              , nrName = oldName
+              }
+          , NameRef
+              { nrMac = Just mac
+              , nrPort = newPort
+              , nrName = oldName
+              }
+          )
+    in  updateRef2 refChange (mm0, pm0)
 
